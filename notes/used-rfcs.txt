@@ -1,0 +1,33 @@
+CalDAV itself is specified most recently as [RFC4791](https://tools.ietf.org/html/rfc4791)
+
+Updates for CalDAV are in:
+RFC 5689: WebDAV MKCOL extension (superseeds MKCALENDAR)
+RFC 6683: Scheduling Extensions for CalDAV
+RFC 6764: Locating Calendar Services (using DNS entries)
+RFC 7809: Time Zones by Reference
+RFC 7953: Calendar Availability (extends iCalendar)
+
+CalDAV uses other specifications:
+*iCalendar* as data format
+ RFC 5545: current core object specification
+ RFC 5546: Transport-independent Interoperaibility Protocol iTIP
+ RFC 6868: Parameter value encoding
+ RFC 7529: Non-Gregorian recurrence rules
+ RFC 7953: Calendar Availability (extends iCalendar)
+ RFC 7986: New properties for iCalendar
+- WebDAV for managing resources and their properties via HTTP
+ RFC 4918: current main WebDAV specification
+ RFC 3744: access control for WebDAV
+
+Requirements (Section 2, RFC4791) for a CalDAV Server
+
+o  MUST support iCalendar [RFC2445] as a media type for the calendar object resource format;
+o  MUST support WebDAV Class 1 [RFC2518] (note that [rfc2518bis] describes clarifications to [RFC2518] that aid interoperability);
+o  MUST support WebDAV ACL [RFC3744] with the additional privilege defined in Section 6.1 of this document;
+o  MUST support transport over TLS [RFC2246] as defined in [RFC2818] (note that [RFC2246] has been obsoleted by [RFC4346]);
+o  MUST support ETags [RFC2616] with additional requirements specified in Section 5.3.4 of this document;
+o  MUST support all calendaring reports defined in Section 7 of this document; and
+o  MUST advertise support on all calendar collections and calendar object resources for the calendaring reports in the DAV:supported-report-set property, as defined in Versioning Extensions to WebDAV [RFC3253].
+
+In addition, a server:
+o  SHOULD support the MKCALENDAR method defined in Section 5.3.1 of this document.
