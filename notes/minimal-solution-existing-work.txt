@@ -1,0 +1,17 @@
+Minimale phase: 
+
+Was gibt es schon?
+- webserver, wir nehmen webmachine (REST) & cohttp (HTTP sever)
+- fuer async nehmen wir lwt
+- kalenderbibliothek: opam calendar paket (veraltet) - wikipedia iCal format, glical
+- caldav, scheduling extension (rfcs 6638 4791)
+- intern alles utc
+- persistente daten im testserver?
+- unit tests - alcotest
+- mit client live testen (thunderbird, android, ios)
+- automatisierter test mit live server?
+- xmlem de/encoder (fuer webdav)
+
+- ptime fuer die minimale phase
+
+
