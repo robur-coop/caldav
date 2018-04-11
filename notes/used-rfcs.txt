@@ -18,6 +18,7 @@ CalDAV uses other specifications:
 - WebDAV for managing resources and their properties via HTTP
  RFC 4918: current main WebDAV specification
  RFC 3744: access control for WebDAV
+ RFC 6578: Collection Synchronization for WebDAV
 
 Requirements (Section 2, RFC4791) for a CalDAV Server
 
