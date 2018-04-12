@@ -92,6 +92,52 @@ let is_well_formed_xml ic =
     Printf.printf "XML threw exception: %s\n" (Printexc.to_string e) ;
     false
 
+let read_propfind body =
+  let i = Xmlm.make_input (`String (0, body)) in
+  try
+    let rec read_list i d acc =
+      assert (d <= 2); (* flat lists only *)
+      match Xmlm.input i with
+      | `El_start ((uri, name), attributes) -> read_list i (d + 1) (name :: acc)
+      | `El_end -> if d = 1 then (i, acc) else read_list i (d - 1) acc
+      | _ -> assert false
+    in
+    let rec traverse i d =
+      match Xmlm.input i with
+      | `El_start ((uri, "propname"), attributes) -> `Propname :: traverse i (d + 1)
+      | `El_start ((uri, "allprop"), attributes) -> `All_prop :: traverse i (d + 1)
+      | `El_start ((uri, "prop"), attributes) -> 
+            let i, props = read_list i 1 [] in
+            `Props props :: traverse i d
+      | `El_start ((uri, "include"), attributes) -> 
+            let i, props = read_list i 1 [] in
+            `Includes props :: traverse i d
+      | `El_start ((uri, s), _) -> assert false
+      | `El_end -> if d = 1 then [] else traverse i (d - 1)
+      | `Data d -> assert false (*no whitespace between tags*)
+      | `Dtd _ -> assert false
+    in
+    let rec read_xml i depth =
+      match Xmlm.input i with
+      | `El_start ((uri, "propfind"), attributes) -> traverse i 1
+      | `El_start _ -> assert false
+      | `El_end -> if depth = 1 then [] else read_xml i (depth - 1)
+      | `Data _ -> assert false
+      | `Dtd _ -> assert false
+    in
+    ignore (Xmlm.input i); (* `Dtd *)
+    let res = read_xml i 0 in
+    Some res
+  with e ->
+    Printf.printf "XML threw exception: %s\n" (Printexc.to_string e) ;
+    None
+
+let prop_to_string = function
+ | `Propname -> "Propname"
+ | `All_prop -> "All prop"
+ | `Props xs -> "Props " ^ String.concat "," xs
+ | `Includes xs -> "Includes " ^ String.concat "," xs
+
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
 class item fs = object(self)
@@ -136,52 +182,18 @@ class item fs = object(self)
     ] rd
 
   method process_property rd =
-    (* TODO refactor *)
     let process_property_leaf url body = 
-      let i = Xmlm.make_input (`String (0, body)) in
-      try
-        let rec read_list i d acc =
-          assert (d <= 2); (* flat lists only *)
-          match Xmlm.input i with
-          | `El_start ((uri, name), attributes) -> read_list i (d + 1) (name :: acc)
-          | `El_end -> if d = 1 then (i, acc) else read_list i (d - 1) acc
-          | _ -> assert false
-        in
-        let rec traverse i d =
-          match Xmlm.input i with
-          | `El_start ((uri, "propname"), attributes) -> `Propname :: traverse i (d + 1)
-          | `El_start ((uri, "allprop"), attributes) -> `All_prop :: traverse i (d + 1)
-          | `El_start ((uri, "prop"), attributes) -> 
-                let i, props = read_list i 1 [] in
-                `Props props :: traverse i d
-          | `El_start ((uri, "include"), attributes) -> 
-                let i, props = read_list i 1 [] in
-                `Includes props :: traverse i d
-          | `El_start ((uri, s), _) -> assert false
-          | `El_end -> if d = 1 then [] else traverse i (d - 1)
-          | `Data d -> assert false (*no whitespace between tags*)
-          | `Dtd _ -> assert false
-        in
-        let rec read_xml i depth =
-          match Xmlm.input i with
-          | `El_start ((uri, "propfind"), attributes) -> traverse i 1
-          | `El_start _ -> assert false
-          | `El_end -> if depth = 1 then [] else read_xml i (depth - 1)
-          | `Data _ -> assert false
-          | `Dtd _ -> assert false
-        in
-        ignore (Xmlm.input i); (* `Dtd *)
-        let res = read_xml i 0 in
-        Some res
-      with e ->
-        Printf.printf "XML threw exception: %s\n" (Printexc.to_string e) ;
-        None
-    in
-    let prop_to_string = function
-     | `Propname -> "Propname"
-     | `All_prop -> "All prop"
-     | `Props xs -> "Props " ^ String.concat "," xs
-     | `Includes xs -> "Includes " ^ String.concat "," xs
+      Printf.printf "url %s\n" url;
+      match read_propfind body with
+       | None -> `Property_not_found
+       | Some props -> 
+           Printf.printf "Props %s\n" @@ String.concat "," @@ List.map prop_to_string props;
+           match props with
+            | [`Propname] -> `Ok (*TODO*)
+            | [`All_prop] -> `Ok
+            | [`Props ps] -> `Ok
+            | [`All_prop ; `Includes is] -> `Ok
+            | _ -> assert false
     in
 
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
@@ -191,12 +203,8 @@ class item fs = object(self)
     Fs.stat fs url >>= function
     | Error _ -> assert false
     | Ok stat when stat.directory -> assert false
-    | Ok _ -> match process_property_leaf url body with
-       | None -> assert false
-       | Some props -> 
-    Printf.printf "url %s\n" url;
-    Printf.printf "Props %s\n" @@ String.concat "," @@ List.map prop_to_string props;
-    Wm.continue res rd
+    | Ok _ -> let res = process_property_leaf url body in
+              Wm.continue res rd
 
   method delete_resource rd =
     Fs.destroy fs (string_of_int (self#id rd)) >>= fun res ->
