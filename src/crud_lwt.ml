@@ -75,6 +75,23 @@ class items fs = object(self)
     Wm.continue true rd
 end
 
+let is_well_formed_xml ic =
+  let i = Xmlm.make_input (`String (0, ic)) in
+  try
+    let rec pull i depth =
+      match Xmlm.input i with
+      | `El_start _ -> pull i (depth + 1)
+      | `El_end -> if depth = 1 then () else pull i (depth - 1)
+      | `Data _ -> pull i depth
+      | `Dtd _ -> assert false
+    in
+    ignore (Xmlm.input i); (* `Dtd *)
+    pull i 0;
+    Xmlm.eoi i
+  with e ->
+    Printf.printf "XML threw exception: %s\n" (Printexc.to_string e) ;
+    false
+
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
 class item fs = object(self)
@@ -119,28 +136,66 @@ class item fs = object(self)
     ] rd
 
   method process_property rd =
-    let is_well_formed_xml ic =
-      let buf = Buffer.create 100 in
-      let i = Xmlm.make_input (`String (0, ic)) in
-      let o = Xmlm.make_output (`Buffer buf) in
+    (* TODO refactor *)
+    let process_property_leaf url body = 
+      let i = Xmlm.make_input (`String (0, body)) in
       try
-        let rec pull i o depth =
-          Xmlm.output o (Xmlm.peek i);
+        let rec read_list i d acc =
+          assert (d <= 2); (* flat lists only *)
           match Xmlm.input i with
-          | `El_start _ -> pull i o (depth + 1)
-          | `El_end -> if depth = 1 then () else pull i o (depth - 1)
-          | `Data _ -> pull i o depth
+          | `El_start ((uri, name), attributes) -> read_list i (d + 1) (name :: acc)
+          | `El_end -> if d = 1 then (i, acc) else read_list i (d - 1) acc
+          | _ -> assert false
+        in
+        let rec traverse i d =
+          match Xmlm.input i with
+          | `El_start ((uri, "propname"), attributes) -> `Propname :: traverse i (d + 1)
+          | `El_start ((uri, "allprop"), attributes) -> `All_prop :: traverse i (d + 1)
+          | `El_start ((uri, "prop"), attributes) -> 
+                let i, props = read_list i 1 [] in
+                `Props props :: traverse i d
+          | `El_start ((uri, "include"), attributes) -> 
+                let i, props = read_list i 1 [] in
+                `Includes props :: traverse i d
+          | `El_start ((uri, s), _) -> assert false
+          | `El_end -> if d = 1 then [] else traverse i (d - 1)
+          | `Data d -> assert false (*no whitespace between tags*)
           | `Dtd _ -> assert false
         in
-        Xmlm.output o (Xmlm.input i); (* `Dtd *)
-        pull i o 0;
-        Xmlm.eoi i
+        let rec read_xml i depth =
+          match Xmlm.input i with
+          | `El_start ((uri, "propfind"), attributes) -> traverse i 1
+          | `El_start _ -> assert false
+          | `El_end -> if depth = 1 then [] else read_xml i (depth - 1)
+          | `Data _ -> assert false
+          | `Dtd _ -> assert false
+        in
+        ignore (Xmlm.input i); (* `Dtd *)
+        let res = read_xml i 0 in
+        Some res
       with e ->
         Printf.printf "XML threw exception: %s\n" (Printexc.to_string e) ;
-        false
+        None
     in
+    let prop_to_string = function
+     | `Propname -> "Propname"
+     | `All_prop -> "All prop"
+     | `Props xs -> "Props " ^ String.concat "," xs
+     | `Includes xs -> "Includes " ^ String.concat "," xs
+    in
+
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
-    let res = is_well_formed_xml body in
+    let res = if is_well_formed_xml body then `Ok else `Property_not_found in
+    (* single resource vs collection? *)
+    let url = string_of_int (self#id rd) in 
+    Fs.stat fs url >>= function
+    | Error _ -> assert false
+    | Ok stat when stat.directory -> assert false
+    | Ok _ -> match process_property_leaf url body with
+       | None -> assert false
+       | Some props -> 
+    Printf.printf "url %s\n" url;
+    Printf.printf "Props %s\n" @@ String.concat "," @@ List.map prop_to_string props;
     Wm.continue res rd
 
   method delete_resource rd =
