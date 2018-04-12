@@ -37,4 +37,6 @@ testone "DELETE http://localhost:8080/item/1"
 curl -f -s -X PUT -H 'Content-Type: application/json' -d '{"name":"modified item"}' http://localhost:8080/item/1
 check_exit "PUT -H 'Content-Type: application/json' -d '{\"name\":\"modified item\"}' http://localhost:8080/item/1"
 
+testone "PROPFIND -H 'Content-type: application/xml; charset=\"utf-8\"' -d '<?xml version=\"1.0\" encoding=\"utf-8\" ?><propfind xmlns=\"DAV:\"><propname/></propfind>' http://localhost:8080/item/1"
+
 cleanup
