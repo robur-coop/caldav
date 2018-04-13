@@ -152,15 +152,15 @@ class item fs = object(self)
     let process_property_leaf url body =
       Printf.printf "url %s\n" url;
       match Webdav.read_propfind body with
-       | None -> Lwt.return `Property_not_found
-       | Some `Propname -> Lwt.return `Ok (*TODO*)
+       | None -> Lwt.return (`Property_not_found, `Empty)
+       | Some `Propname -> Lwt.return (`Ok, `Empty) (*TODO*)
        | Some (`All_prop includes) ->
          begin
            get_properties fs url >>= function
-           | Error _ -> Lwt.return `Property_not_found
+           | Error _ -> Lwt.return (`Property_not_found, `Empty)
            | Ok data ->
              match string_to_tyxml Cstruct.(to_string @@ concat data) with
-             | None -> Lwt.return `Property_not_found
+             | None -> Lwt.return (`Property_not_found, `Empty)
              | Some xml ->
                let body =
                  let open Tyxml.Xml in
@@ -171,10 +171,9 @@ class item fs = object(self)
                          node "propstat" [ xml ] ] ]
                in
                let str = Format.asprintf "%a" (Tyxml.Xml.pp ()) body in
-               Printf.printf "output %s\n" str ;
-               assert false
+               Lwt.return (`Multistatus, `String str)
          end
-       | Some (`Props ps) -> Lwt.return `Ok
+       | Some (`Props ps) -> Lwt.return (`Ok, `Empty)
     in
 
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
@@ -183,8 +182,8 @@ class item fs = object(self)
     Fs.stat fs url >>= function
     | Error _ -> assert false
     | Ok stat when stat.directory -> assert false
-    | Ok _ -> process_property_leaf url body >>= fun res ->
-              Wm.continue res rd
+    | Ok _ -> process_property_leaf url body >>= fun (res, resp_body) ->
+              Wm.continue res { rd with Wm.Rd.resp_body }
 
   method delete_resource rd =
     Fs.destroy fs (string_of_int (self#id rd)) >>= fun res ->
