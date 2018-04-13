@@ -75,68 +75,35 @@ class items fs = object(self)
     Wm.continue true rd
 end
 
-let is_well_formed_xml ic =
-  let i = Xmlm.make_input (`String (0, ic)) in
-  try
-    let rec pull i depth =
-      match Xmlm.input i with
-      | `El_start _ -> pull i (depth + 1)
-      | `El_end -> if depth = 1 then () else pull i (depth - 1)
-      | `Data _ -> pull i depth
-      | `Dtd _ -> assert false
-    in
-    ignore (Xmlm.input i); (* `Dtd *)
-    pull i 0;
-    Xmlm.eoi i
-  with e ->
-    Printf.printf "XML threw exception: %s\n" (Printexc.to_string e) ;
-    false
+let file_to_propertyfile filename =
+  filename ^ ".prop.xml"
 
-let read_propfind body =
-  let i = Xmlm.make_input (`String (0, body)) in
-  try
-    let rec read_list i d acc =
-      assert (d <= 2); (* flat lists only *)
-      match Xmlm.input i with
-      | `El_start ((uri, name), attributes) -> read_list i (d + 1) (name :: acc)
-      | `El_end -> if d = 1 then (i, acc) else read_list i (d - 1) acc
-      | _ -> assert false
-    in
-    let rec traverse i d =
-      match Xmlm.input i with
-      | `El_start ((uri, "propname"), attributes) -> `Propname :: traverse i (d + 1)
-      | `El_start ((uri, "allprop"), attributes) -> `All_prop :: traverse i (d + 1)
-      | `El_start ((uri, "prop"), attributes) -> 
-            let i, props = read_list i 1 [] in
-            `Props props :: traverse i d
-      | `El_start ((uri, "include"), attributes) -> 
-            let i, props = read_list i 1 [] in
-            `Includes props :: traverse i d
-      | `El_start ((uri, s), _) -> assert false
-      | `El_end -> if d = 1 then [] else traverse i (d - 1)
-      | `Data d -> assert false (*no whitespace between tags*)
-      | `Dtd _ -> assert false
-    in
-    let rec read_xml i depth =
-      match Xmlm.input i with
-      | `El_start ((uri, "propfind"), attributes) -> traverse i 1
-      | `El_start _ -> assert false
-      | `El_end -> if depth = 1 then [] else read_xml i (depth - 1)
-      | `Data _ -> assert false
-      | `Dtd _ -> assert false
-    in
-    ignore (Xmlm.input i); (* `Dtd *)
-    let res = read_xml i 0 in
-    Some res
-  with e ->
-    Printf.printf "XML threw exception: %s\n" (Printexc.to_string e) ;
-    None
+let get_properties fs filename =
+  let propfile = file_to_propertyfile filename in
+  Fs.size fs propfile >>= function
+  | Error e -> Lwt.return (Error e)
+  | Ok size -> Fs.read fs propfile 0 (Int64.to_int size)
 
-let prop_to_string = function
- | `Propname -> "Propname"
- | `All_prop -> "All prop"
- | `Props xs -> "Props " ^ String.concat "," xs
- | `Includes xs -> "Includes " ^ String.concat "," xs
+let string_to_tyxml str =
+  let attrib_to_tyxml name value =
+    Tyxml.Xml.string_attrib name (Tyxml_xml.W.return value)
+  in
+  let data str = Tyxml.Xml.pcdata (Tyxml_xml.W.return str)
+  and el ((ns, name), attrs) children =
+    let a =
+      let namespace = match ns with
+        | "" -> []
+        | ns -> [ attrib_to_tyxml "xmlns" ns ]
+      in
+      namespace @ List.map (fun ((_, name), value) -> attrib_to_tyxml name value) attrs
+    in
+    Tyxml.Xml.node ~a name (Tyxml_xml.W.return children)
+  in
+  try
+    let input = Xmlm.make_input (`String (0, str)) in
+    ignore (Xmlm.input input) ; (* ignore DTD *)
+    Some (Xmlm.input_tree ~el ~data input)
+  with _ -> None
 
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
@@ -182,28 +149,41 @@ class item fs = object(self)
     ] rd
 
   method process_property rd =
-    let process_property_leaf url body = 
+    let process_property_leaf url body =
       Printf.printf "url %s\n" url;
-      match read_propfind body with
-       | None -> `Property_not_found
-       | Some props -> 
-           Printf.printf "Props %s\n" @@ String.concat "," @@ List.map prop_to_string props;
-           match props with
-            | [`Propname] -> `Ok (*TODO*)
-            | [`All_prop] -> `Ok
-            | [`Props ps] -> `Ok
-            | [`All_prop ; `Includes is] -> `Ok
-            | _ -> assert false
+      match Webdav.read_propfind body with
+       | None -> Lwt.return `Property_not_found
+       | Some `Propname -> Lwt.return `Ok (*TODO*)
+       | Some (`All_prop includes) ->
+         begin
+           get_properties fs url >>= function
+           | Error _ -> Lwt.return `Property_not_found
+           | Ok data ->
+             match string_to_tyxml Cstruct.(to_string @@ concat data) with
+             | None -> Lwt.return `Property_not_found
+             | Some xml ->
+               let body =
+                 let open Tyxml.Xml in
+                 node ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
+                   "multistatus"
+                   [ node "response"
+                       [ node "href" [ pcdata url ] ;
+                         node "propstat" [ xml ] ] ]
+               in
+               let str = Format.asprintf "%a" (Tyxml.Xml.pp ()) body in
+               Printf.printf "output %s\n" str ;
+               assert false
+         end
+       | Some (`Props ps) -> Lwt.return `Ok
     in
 
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
-    let res = if is_well_formed_xml body then `Ok else `Property_not_found in
     (* single resource vs collection? *)
-    let url = string_of_int (self#id rd) in 
+    let url = string_of_int (self#id rd) in
     Fs.stat fs url >>= function
     | Error _ -> assert false
     | Ok stat when stat.directory -> assert false
-    | Ok _ -> let res = process_property_leaf url body in
+    | Ok _ -> process_property_leaf url body >>= fun res ->
               Wm.continue res rd
 
   method delete_resource rd =
@@ -221,6 +201,18 @@ class item fs = object(self)
   method private id rd =
     int_of_string (Wm.Rd.lookup_path_info_exn "id" rd)
 end
+
+let create_file_and_property fs name data =
+  Fs.write fs name 0 (Cstruct.of_string data) >>= fun _ ->
+  let props file =
+    Webdav.create_properties ~content_type:"application/json"
+      false (Ptime.to_rfc3339 (Ptime_clock.now ())) file
+  in
+  let propfile filename =
+    "<?xml version=\"1.0\" encoding=\"utf-8\" ?>" ^
+    Format.asprintf "%a" (Tyxml.Xml.pp ()) (props filename)
+  in
+  Fs.write fs (file_to_propertyfile name) 0 (Cstruct.of_string (propfile name))
 
 let main () =
   (* listen on port 8080 *)
@@ -269,8 +261,8 @@ let main () =
       (Sexplib.Sexp.to_string_hum (Conduit_lwt_unix.sexp_of_flow ch))
   in
   (* init the database with two items *)
-  Fs.write fs "1" 0 (Cstruct.of_string "{\"name\":\"item 1\"}") >>= fun _ ->
-  Fs.write fs "2" 0 (Cstruct.of_string "{\"name\":\"item 2\"}") >>= fun _ ->
+  create_file_and_property fs "1" "{\"name\":\"item 1\"}" >>= fun _ ->
+  create_file_and_property fs "2" "{\"name\":\"item 2\"}" >>= fun _ ->
   let config = Server.make ~callback ~conn_closed () in
   Server.create  ~mode:(`TCP(`Port port)) config
   >>= (fun () -> Printf.eprintf "hello_lwt: listening on 0.0.0.0:%d%!" port;
