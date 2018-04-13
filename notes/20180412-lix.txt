@@ -1,0 +1,32 @@
+# ocaml caldav
+working title: caldav
+12APR2018
+Hannes, Linse, Lix
+
+# gestern (11APR2018)
+- conflict resolution. stategy: 0) Problem dem client überlassen (problem resolution: if no itag, then ressource does not exist), dann in einer zweiten phase 2) server seitige conflict resolution
+- grafik vorlage: http decision diagram für rust
+- iOS und macOS haben *unterschiedliche* client-implementierungen (webdav, oder caldav)
+- Android: davDroid
+- später brauchen wir auch ein interface um rechte und links zu verwalten. aber das kommt später
+- Linse: viele clients testen, damit man die tests dagegen entwickeln kann
+- Lix hat viele Server 😎
+
+# Zukunft (mögliche Ableger) / Etappen
+- minimale in dem "anderen textfile": webdav class1, no access-Zeugs, iCalendar 2 (ohne scheduling, ohne lock)
+
+## Zwischenschritte
+0) einen client zum laufen bringen (caldav: creat event, delete event, status, sync, multiget, properties)
+1) nur events
+2) events, todo items, journals
+3a) free/busy
+3b) scheduling
+
+- Server config interface (flat text format auf dem dav-server .rc)
+- Client webinterface (web-calendar e.g. [PGHP iCalendar](https://github.com/yllohy/phpicalendar))
+- cli client ([khard/khal](http://lostpackets.de/khal/), [org-caldav](https://github.com/dengste/org-caldav))
+- webdav nach git (git filesys)
+- LDAP-integration
+- identity "management" durchdenken
+- claim-chain
+- daten auf dem server verschlüsseln
