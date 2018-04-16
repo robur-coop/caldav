@@ -124,6 +124,12 @@ let drop_pcdata t =
   | `Pcdata str -> tail in
   List.hd @@ tree_fold f [] [t]
 
+let filter_in_ps ps xml =
+  let f s children tail = match s with
+  | `Node (a, n, c) -> if List.mem n ps || n = "prop" then `Node (a, n, children) :: tail else tail
+  | `Pcdata str -> `Pcdata str :: tail in
+  List.hd @@ tree_fold f [] [xml]
+
 let tree_to_tyxml t =
   let attrib_to_tyxml (name, value) =
     Tyxml.Xml.string_attrib name (Tyxml_xml.W.return value)
@@ -223,7 +229,27 @@ class item fs = object(self)
                let str = Format.asprintf "%a" (Tyxml.Xml.pp ()) body in
                Lwt.return (`Multistatus, `String str)
          end
-       | Some (`Props ps) -> Lwt.return (`Ok, `Empty)
+       | Some (`Props ps) -> 
+         begin
+           get_properties fs url >>= function
+           | Error _ -> Lwt.return (`Property_not_found, `Empty)
+           | Ok data ->
+             match string_to_tree Cstruct.(to_string @@ concat data) with
+             | None -> Lwt.return (`Property_not_found, `Empty)
+             | Some xml -> 
+               let xml' = filter_in_ps ps xml in
+               
+               let body =
+                 let open Tyxml.Xml in
+                 node ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
+                   "multistatus"
+                   [ node "response"
+                       [ node "href" [ pcdata url ] ;
+                         node "propstat" [ tree_to_tyxml xml' ] ] ]
+               in
+               let str = Format.asprintf "%a" (Tyxml.Xml.pp ()) body in
+               Lwt.return (`Multistatus, `String str)
+         end
     in
 
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
