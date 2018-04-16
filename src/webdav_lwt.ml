@@ -84,6 +84,57 @@ let get_properties fs filename =
   | Error e -> Lwt.return (Error e)
   | Ok size -> Fs.read fs propfile 0 (Int64.to_int size)
 
+let string_to_tree str =
+  let data str = `Pcdata str
+  and el ((ns, name), attrs) children =
+    let a =
+      let namespace = match ns with
+        | "" -> []
+        | ns -> [ ("xmlns", ns) ]
+      in
+      namespace @ List.map (fun ((_ns, name), value) -> (name, value)) attrs
+    in
+    `Node (a, name, children)
+  in
+  try
+    let input = Xmlm.make_input (`String (0, str)) in
+    ignore (Xmlm.input input) ; (* ignore DTD *)
+    Some (Xmlm.input_tree ~el ~data input)
+  with _ -> None
+
+let rec tree_fold f s forest = match forest with
+  | `Node (a, name, children) :: tail ->
+    let children' = tree_fold f s children
+    and tail' = tree_fold f s tail in
+    f (`Node (a, name, children)) children' tail'
+  | (`Pcdata _ as t') :: tail ->
+    let tail' = tree_fold f s tail in
+    f t' s tail'
+  | [] -> s
+
+let tree_to_string t =
+  let f s children tail = match s with
+  | `Node (a, name, _) -> " Node: " ^ name ^ "(" ^ children ^ ")(" ^ tail ^ ")"
+  | `Pcdata str -> " PCDATA: (" ^ str ^ ") " ^ tail in
+  tree_fold f "" [t]
+
+let drop_pcdata t =
+  let f s children tail = match s with
+  | `Node (a, n, c) -> `Node (a, n, children) :: tail
+  | `Pcdata str -> tail in
+  List.hd @@ tree_fold f [] [t]
+
+let tree_to_tyxml t =
+  let attrib_to_tyxml (name, value) =
+    Tyxml.Xml.string_attrib name (Tyxml_xml.W.return value)
+  in
+  let f s children tail = match s with
+  | `Node (a, n, c) -> 
+    let a' = List.map attrib_to_tyxml a in
+    Tyxml.Xml.node ~a:a' n (Tyxml_xml.W.return children) :: tail
+  | `Pcdata str -> Tyxml.Xml.pcdata (Tyxml_xml.W.return str) :: tail
+  in List.hd @@ tree_fold f [] [t]    
+
 let string_to_tyxml str =
   let attrib_to_tyxml name value =
     Tyxml.Xml.string_attrib name (Tyxml_xml.W.return value)
@@ -153,7 +204,27 @@ class item fs = object(self)
       Printf.printf "url %s\n" url;
       match Webdav.read_propfind body with
        | None -> Lwt.return (`Property_not_found, `Empty)
-       | Some `Propname -> Lwt.return (`Ok, `Empty) (*TODO*)
+       | Some `Propname -> 
+         begin
+           get_properties fs url >>= function
+           | Error _ -> Lwt.return (`Property_not_found, `Empty)
+           | Ok data ->
+             match string_to_tree Cstruct.(to_string @@ concat data) with
+             | None -> Lwt.return (`Property_not_found, `Empty)
+             | Some xml ->
+               let xml' = drop_pcdata xml in
+               let body =
+                 let open Tyxml.Xml in
+                 node ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
+                   "multistatus"
+                   [ node "response"
+                       [ node "href" [ pcdata url ] ;
+                         node "propstat" [ tree_to_tyxml xml' ] ] ]
+               in
+               let str = Format.asprintf "%a" (Tyxml.Xml.pp ()) body in
+               Printf.printf "tree %s\n" @@ tree_to_string xml';
+               Lwt.return (`Multistatus, `String str)
+         end
        | Some (`All_prop includes) ->
          begin
            get_properties fs url >>= function

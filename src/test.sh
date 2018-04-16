@@ -42,7 +42,6 @@ check_exit "PUT -H 'Content-Type: application/json' -d '{\"name\":\"modified ite
 curl -f -s -X PROPFIND -H 'Content-type: application/xml; charset="utf-8"' -d '<?xml version="1.0" encoding="utf-8" ?><propfind xmlns="DAV:"><propname/></propfind>' http://localhost:8080/item/1
 check_exit "PROPFIND -H 'Content-type: application/xml; charset=\"utf-8\"' -d '<?xml version=\"1.0\" encoding=\"utf-8\" ?><propfind xmlns=\"DAV:\"><propname/></propfind>' http://localhost:8080/item/1"
 
-
 curl -f -s -X PROPFIND -H 'Content-type: applicationgxml; charset="utf-8"' -d '<?xml version="1.0" encoding="utf-8" ?><D:propfind xmlns:D="DAV:"><D:prop xmlns:R="http://ns.example.com/boxschema/"><R:bigbox/><R:author/><R:DingALing/><R:Random/></D:prop></D:propfind>' http://localhost:8080/item/1
 check_exit "<?xml version=\"1.0\" encoding=\"utf-8\" ?><D:propfind xmlns:D=\"DAV:\"><D:prop xmlns:R=\"http://ns.example.com/boxschema/\"><R:bigbox/><R:author/><R:DingALing/><R:Random/></D:prop></D:propfind>"
 
