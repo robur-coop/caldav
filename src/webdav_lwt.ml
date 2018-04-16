@@ -135,27 +135,6 @@ let tree_to_tyxml t =
   | `Pcdata str -> Tyxml.Xml.pcdata (Tyxml_xml.W.return str) :: tail
   in List.hd @@ tree_fold f [] [t]    
 
-let string_to_tyxml str =
-  let attrib_to_tyxml name value =
-    Tyxml.Xml.string_attrib name (Tyxml_xml.W.return value)
-  in
-  let data str = Tyxml.Xml.pcdata (Tyxml_xml.W.return str)
-  and el ((ns, name), attrs) children =
-    let a =
-      let namespace = match ns with
-        | "" -> []
-        | ns -> [ attrib_to_tyxml "xmlns" ns ]
-      in
-      namespace @ List.map (fun ((_, name), value) -> attrib_to_tyxml name value) attrs
-    in
-    Tyxml.Xml.node ~a name (Tyxml_xml.W.return children)
-  in
-  try
-    let input = Xmlm.make_input (`String (0, str)) in
-    ignore (Xmlm.input input) ; (* ignore DTD *)
-    Some (Xmlm.input_tree ~el ~data input)
-  with _ -> None
-
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
 class item fs = object(self)
@@ -230,7 +209,7 @@ class item fs = object(self)
            get_properties fs url >>= function
            | Error _ -> Lwt.return (`Property_not_found, `Empty)
            | Ok data ->
-             match string_to_tyxml Cstruct.(to_string @@ concat data) with
+             match string_to_tree Cstruct.(to_string @@ concat data) with
              | None -> Lwt.return (`Property_not_found, `Empty)
              | Some xml ->
                let body =
@@ -239,7 +218,7 @@ class item fs = object(self)
                    "multistatus"
                    [ node "response"
                        [ node "href" [ pcdata url ] ;
-                         node "propstat" [ xml ] ] ]
+                         node "propstat" [ tree_to_tyxml xml ] ] ]
                in
                let str = Format.asprintf "%a" (Tyxml.Xml.pp ()) body in
                Lwt.return (`Multistatus, `String str)
