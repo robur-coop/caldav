@@ -179,6 +179,9 @@ class item fs = object(self)
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     (* single resource vs collection? *)
     let url = string_of_int (self#id rd) in
+    let rd = Wm.Rd.with_resp_headers (fun header -> 
+      let header' = Cohttp.Header.remove header "Content-Type" in
+      Cohttp.Header.add header' "Content-Type" "application/xml") rd in
     Fs.stat fs url >>= function
     | Error _ -> assert false
     | Ok stat when stat.directory -> assert false

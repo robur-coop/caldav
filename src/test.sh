@@ -1,9 +1,9 @@
 #!/bin/sh
 
-pidfile="/tmp/crud_lwt.pid"
+pidfile="/tmp/webdav_lwt.pid"
 
-#/bin/sh -c "echo \$\$ > $pidfile && exec ./crud_lwt.native > /dev/null" &
-/bin/sh -c "echo \$\$ > $pidfile && exec ./crud_lwt.native " &
+#/bin/sh -c "echo \$\$ > $pidfile && exec ./webdav_lwt.native > /dev/null" &
+/bin/sh -c "echo \$\$ > $pidfile && exec ./webdav_lwt.native " &
 sleep 0.3
 
 cleanup () {
