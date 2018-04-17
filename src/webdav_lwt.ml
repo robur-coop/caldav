@@ -120,9 +120,8 @@ let process_properties fs url f =
       let body =
         let res = `OK in
         let status =
-          Format.sprintf "%s %d %s"
+          Format.sprintf "%s %s"
             (Cohttp.Code.string_of_version `HTTP_1_1)
-            (Cohttp.Code.code_of_status res)
             (Cohttp.Code.string_of_status res)
         in
         let open Tyxml.Xml in
@@ -191,7 +190,6 @@ class handler prefix fs = object(self)
        | Some (`Props ps) -> process_properties fs url (filter_in_ps ps)
     in
 
-    Printf.printf "process property %s\n%!" (Uri.to_string rd.Wm.Rd.uri) ;
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     (* single resource vs collection? *)
     let url = self#id rd in
@@ -210,7 +208,7 @@ class handler prefix fs = object(self)
           Lwt_list.map_s (fun url -> process_property_leaf url body) (url :: els) >>= fun ans ->
           Printf.printf "processed properties %s\n"
             (String.concat "\n"
-               (List.map (function `Empty -> "empty" | `String str -> str)
+               (List.map (function `Empty -> "empty" | `String str -> "string" ^ str)
                     (List.map snd ans))) ;
           Wm.continue `Property_not_found rd
       end
