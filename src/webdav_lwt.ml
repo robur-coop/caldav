@@ -308,12 +308,10 @@ let main () =
     (* Perform route dispatch. If [None] is returned, then the URI path did not
      * match any of the route patterns. In this case the server should return a
      * 404 [`Not_found]. *)
-    Cohttp_lwt.Body.to_string body >>= fun mbody ->
-    Printf.printf "resource %s meth %s headers %s body %s\n"
+    Printf.printf "resource %s meth %s headers %s\n"
       (Request.resource request)
       (Code.string_of_method (Request.meth request))
-      (Header.to_string (Request.headers request))
-      mbody ;
+      (Header.to_string (Request.headers request)) ;
     Wm.dispatch' routes ~body ~request
     >|= begin function
       | None        -> (`Not_found, Header.init (), `String "Not found", [])
