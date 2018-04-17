@@ -141,6 +141,26 @@ let tree_to_tyxml t =
   | `Pcdata str -> Tyxml.Xml.pcdata (Tyxml_xml.W.return str) :: tail
   in List.hd @@ tree_fold f [] [t]    
 
+let process_properties fs url f =
+  get_properties fs url >>= function
+  | Error _ -> Lwt.return (`Property_not_found, `Empty)
+  | Ok data ->
+    match string_to_tree Cstruct.(to_string @@ concat data) with
+    | None -> Lwt.return (`Property_not_found, `Empty)
+    | Some xml ->
+      let xml' = f xml in
+      let body =
+        let open Tyxml.Xml in
+        node ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
+          "multistatus"
+          [ node "response"
+              [ node "href" [ pcdata url ] ;
+                node "propstat" [ tree_to_tyxml xml' ] ] ]
+      in
+      let str = Format.asprintf "%a" (Tyxml.Xml.pp ()) body in
+      Lwt.return (`Multistatus, `String str)
+
+
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
 class item fs = object(self)
@@ -186,83 +206,25 @@ class item fs = object(self)
 
   method process_property rd =
     let process_property_leaf url body =
-      Printf.printf "url %s\n" url;
       match Webdav.read_propfind body with
        | None -> Lwt.return (`Property_not_found, `Empty)
-       | Some `Propname -> 
-         begin
-           get_properties fs url >>= function
-           | Error _ -> Lwt.return (`Property_not_found, `Empty)
-           | Ok data ->
-             match string_to_tree Cstruct.(to_string @@ concat data) with
-             | None -> Lwt.return (`Property_not_found, `Empty)
-             | Some xml ->
-               let xml' = drop_pcdata xml in
-               let body =
-                 let open Tyxml.Xml in
-                 node ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
-                   "multistatus"
-                   [ node "response"
-                       [ node "href" [ pcdata url ] ;
-                         node "propstat" [ tree_to_tyxml xml' ] ] ]
-               in
-               let str = Format.asprintf "%a" (Tyxml.Xml.pp ()) body in
-               Printf.printf "tree %s\n" @@ tree_to_string xml';
-               Lwt.return (`Multistatus, `String str)
-         end
-       | Some (`All_prop includes) ->
-         begin
-           get_properties fs url >>= function
-           | Error _ -> Lwt.return (`Property_not_found, `Empty)
-           | Ok data ->
-             match string_to_tree Cstruct.(to_string @@ concat data) with
-             | None -> Lwt.return (`Property_not_found, `Empty)
-             | Some xml ->
-               let body =
-                 let open Tyxml.Xml in
-                 node ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
-                   "multistatus"
-                   [ node "response"
-                       [ node "href" [ pcdata url ] ;
-                         node "propstat" [ tree_to_tyxml xml ] ] ]
-               in
-               let str = Format.asprintf "%a" (Tyxml.Xml.pp ()) body in
-               Lwt.return (`Multistatus, `String str)
-         end
-       | Some (`Props ps) -> 
-         begin
-           get_properties fs url >>= function
-           | Error _ -> Lwt.return (`Property_not_found, `Empty)
-           | Ok data ->
-             match string_to_tree Cstruct.(to_string @@ concat data) with
-             | None -> Lwt.return (`Property_not_found, `Empty)
-             | Some xml -> 
-               let xml' = filter_in_ps ps xml in
-               
-               let body =
-                 let open Tyxml.Xml in
-                 node ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
-                   "multistatus"
-                   [ node "response"
-                       [ node "href" [ pcdata url ] ;
-                         node "propstat" [ tree_to_tyxml xml' ] ] ]
-               in
-               let str = Format.asprintf "%a" (Tyxml.Xml.pp ()) body in
-               Lwt.return (`Multistatus, `String str)
-         end
+       | Some `Propname -> process_properties fs url drop_pcdata
+       | Some (`All_prop includes) -> process_properties fs url (fun id -> id)
+       | Some (`Props ps) -> process_properties fs url (filter_in_ps ps)
     in
 
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     (* single resource vs collection? *)
     let url = string_of_int (self#id rd) in
-    let rd = Wm.Rd.with_resp_headers (fun header -> 
+    let rd = Wm.Rd.with_resp_headers (fun header ->
       let header' = Cohttp.Header.remove header "Content-Type" in
       Cohttp.Header.add header' "Content-Type" "application/xml") rd in
     Fs.stat fs url >>= function
     | Error _ -> assert false
     | Ok stat when stat.directory -> assert false
-    | Ok _ -> process_property_leaf url body >>= fun (res, resp_body) ->
-              Wm.continue res { rd with Wm.Rd.resp_body }
+    | Ok _ ->
+      process_property_leaf url body >>= fun (res, resp_body) ->
+      Wm.continue res { rd with Wm.Rd.resp_body }
 
   method delete_resource rd =
     Fs.destroy fs (string_of_int (self#id rd)) >>= fun res ->
