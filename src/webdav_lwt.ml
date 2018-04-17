@@ -103,38 +103,43 @@ let tree_to_tyxml t =
     Tyxml.Xml.string_attrib name (Tyxml_xml.W.return value)
   in
   let f s children tail = match s with
-  | `Node (a, n, c) -> 
+  | `Node (a, n, c) ->
     let a' = List.map attrib_to_tyxml a in
     Tyxml.Xml.node ~a:a' n (Tyxml_xml.W.return children) :: tail
   | `Pcdata str -> Tyxml.Xml.pcdata (Tyxml_xml.W.return str) :: tail
-  in List.hd @@ tree_fold f [] [t]    
+  in List.hd @@ tree_fold f [] [t]
 
-let process_properties fs url f =
-  get_properties fs url >>= function
-  | Error _ -> Lwt.return (`Property_not_found, `Empty)
+let tyxml_to_body t =
+  Format.asprintf "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n%a"
+    (Tyxml.Xml.pp ()) t
+
+let process_properties fs prefix url f =
+  Printf.printf "processing properties of %s\n" url ;
+  get_properties fs url >|= function
+  | Error _ ->
+    Printf.printf "not found\n" ;
+    `Not_found
   | Ok data ->
     match string_to_tree Cstruct.(to_string @@ concat data) with
-    | None -> Lwt.return (`Property_not_found, `Empty)
+    | None -> `Not_found
     | Some xml ->
+      Printf.printf "read tree %s\n" (tree_to_string xml) ;
       let xml' = f xml in
-      let body =
-        let res = `OK in
-        let status =
-          Format.sprintf "%s %s"
-            (Cohttp.Code.string_of_version `HTTP_1_1)
-            (Cohttp.Code.string_of_status res)
-        in
-        let open Tyxml.Xml in
-        node ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
-          "multistatus"
-          [ node "response"
-              [ node "href" [ pcdata url ] ;
-                node "propstat" [
-                  tree_to_tyxml xml' ;
-                  node "status" [ pcdata status ] ] ] ]
+      let res = `OK in
+      let status =
+        Format.sprintf "%s %s"
+          (Cohttp.Code.string_of_version `HTTP_1_1)
+          (Cohttp.Code.string_of_status res)
       in
-      let str = Format.asprintf "%a" (Tyxml.Xml.pp ()) body in
-      Lwt.return (`Multistatus, `String str)
+      let open Tyxml.Xml in
+      let tree =
+        node "response"
+          [ node "href" [ pcdata (prefix ^ "/" ^ url) ] ;
+            node "propstat" [
+              tree_to_tyxml xml' ;
+              node "status" [ pcdata status ] ] ]
+      in
+      `Single_response tree
 
 
 (** A resource for querying an individual item in the database by id via GET,
@@ -184,10 +189,10 @@ class handler prefix fs = object(self)
     Printf.printf "processing property!!!!\n%!" ;
     let process_property_leaf url body =
       match Webdav.read_propfind body with
-       | None -> Lwt.return (`Property_not_found, `Empty)
-       | Some `Propname -> process_properties fs url drop_pcdata
-       | Some (`All_prop includes) -> process_properties fs url (fun id -> id)
-       | Some (`Props ps) -> process_properties fs url (filter_in_ps ps)
+       | None -> Lwt.return `Not_found
+       | Some `Propname -> process_properties fs prefix url drop_pcdata
+       | Some (`All_prop includes) -> process_properties fs prefix url (fun id -> id)
+       | Some (`Props ps) -> process_properties fs prefix url (filter_in_ps ps)
     in
 
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
@@ -204,17 +209,39 @@ class handler prefix fs = object(self)
         Fs.listdir fs url >>= function
         | Error _ -> assert false
         | Ok els ->
+          let els =
+            List.filter (fun f ->
+                not @@ Astring.String.is_suffix ~affix:"prop.xml" f)
+              els
+          in
           Printf.printf "properties for %s and %s\n" url (String.concat ", " els) ;
-          Lwt_list.map_s (fun url -> process_property_leaf url body) (url :: els) >>= fun ans ->
-          Printf.printf "processed properties %s\n"
-            (String.concat "\n"
-               (List.map (function `Empty -> "empty" | `String str -> "string" ^ str)
-                    (List.map snd ans))) ;
-          Wm.continue `Property_not_found rd
+          Lwt_list.map_s (fun url -> process_property_leaf url body) (url :: els) >>= fun answers ->
+          (* answers : [ `Not_found | `Single_response of Tyxml.Xml.node ] list *)
+          let nodes = List.fold_left (fun acc element ->
+              match element with
+              | `Not_found -> acc
+              | `Single_response node -> node :: acc)
+              [] answers
+          in
+          let multistatus =
+            Tyxml.Xml.(node
+                         ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
+                         "multistatus" nodes)
+          in
+          let str = tyxml_to_body multistatus in
+          Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String str }
       end
     | Ok _ ->
-      process_property_leaf url body >>= fun (res, resp_body) ->
-      Wm.continue res { rd with Wm.Rd.resp_body }
+      process_property_leaf url body >>= function
+      | `Not_found -> Wm.continue `Property_not_found rd
+      | `Single_response t ->
+        let outer =
+          Tyxml.Xml.(node
+                       ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
+                       "multistatus" [ t ])
+        in
+        let str = tyxml_to_body outer in
+        Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String str }
 
   method delete_resource rd =
     Fs.destroy fs (self#id rd) >>= fun res ->
@@ -242,17 +269,17 @@ class handler prefix fs = object(self)
     path
 end
 
-let create_file_and_property fs name data =
-  Fs.write fs name 0 (Cstruct.of_string data) >>= fun _ ->
+let create_properties fs name is_dir =
   let props file =
     Webdav.create_properties ~content_type:"application/json"
-      false (Ptime.to_rfc3339 (Ptime_clock.now ())) file
+      is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) file
   in
-  let propfile filename =
-    "<?xml version=\"1.0\" encoding=\"utf-8\" ?>" ^
-    Format.asprintf "%a" (Tyxml.Xml.pp ()) (props filename)
-  in
+  let propfile filename = tyxml_to_body (props filename) in
   Fs.write fs (file_to_propertyfile name) 0 (Cstruct.of_string (propfile name))
+
+let create_file_and_property fs name data =
+  Fs.write fs name 0 (Cstruct.of_string data) >>= fun _ ->
+  create_properties fs name false
 
 let main () =
   (* listen on port 8080 *)
@@ -268,6 +295,12 @@ let main () =
     (* Perform route dispatch. If [None] is returned, then the URI path did not
      * match any of the route patterns. In this case the server should return a
      * 404 [`Not_found]. *)
+    Cohttp_lwt.Body.to_string body >>= fun mbody ->
+    Printf.printf "resource %s meth %s headers %s body %s\n"
+      (Request.resource request)
+      (Code.string_of_method (Request.meth request))
+      (Header.to_string (Request.headers request))
+      mbody ;
     Wm.dispatch' routes ~body ~request
     >|= begin function
       | None        -> (`Not_found, Header.init (), `String "Not found", [])
@@ -300,6 +333,7 @@ let main () =
       (Sexplib.Sexp.to_string_hum (Conduit_lwt_unix.sexp_of_flow ch))
   in
   (* init the database with two items *)
+  create_properties fs "" true >>= fun _ ->
   create_file_and_property fs "1" "{\"name\":\"item 1\"}" >>= fun _ ->
   create_file_and_property fs "2" "{\"name\":\"item 2\"}" >>= fun _ ->
   let config = Server.make ~callback ~conn_closed () in
