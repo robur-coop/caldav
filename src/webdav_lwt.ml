@@ -43,38 +43,6 @@ module Wm = struct
   include Webmachine.Make(Cohttp_lwt_unix__Io)
 end
 
-(** A resource for querying all the items in the database via GET and creating
-    a new item via POST. Check the [Location] header of a successful POST
-    response for the URI of the item. *)
-class items fs = object(self)
-  inherit [Cohttp_lwt.Body.t] Wm.resource
-
-  method private to_json rd =
-    (* TODO use path from request uri *)
-    Fs.listdir fs "" >>= function
-    | Error e -> assert false
-    | Ok items ->
-      let json = Printf.sprintf "[%s]" (String.concat ", " items) in
-      Wm.continue (`String json) rd
-
-  method allowed_methods rd =
-    Wm.continue [`GET; `HEAD; `POST] rd
-
-  method content_types_provided rd =
-    Wm.continue [
-      "application/json", self#to_json
-    ] rd
-
-  method content_types_accepted rd =
-    Wm.continue [] rd
-
-  method process_post rd =
-(*    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
-    Db.add db body >>= fun new_id ->
-      let rd' = Wm.Rd.redirect ("/item/" ^ (string_of_int new_id)) rd in *)
-    Wm.continue true rd
-end
-
 let file_to_propertyfile filename =
   filename ^ ".prop.xml"
 
@@ -150,12 +118,21 @@ let process_properties fs url f =
     | Some xml ->
       let xml' = f xml in
       let body =
+        let res = `OK in
+        let status =
+          Format.sprintf "%s %d %s"
+            (Cohttp.Code.string_of_version `HTTP_1_1)
+            (Cohttp.Code.code_of_status res)
+            (Cohttp.Code.string_of_status res)
+        in
         let open Tyxml.Xml in
         node ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
           "multistatus"
           [ node "response"
               [ node "href" [ pcdata url ] ;
-                node "propstat" [ tree_to_tyxml xml' ] ] ]
+                node "propstat" [
+                  tree_to_tyxml xml' ;
+                  node "status" [ pcdata status ] ] ] ]
       in
       let str = Format.asprintf "%a" (Tyxml.Xml.pp ()) body in
       Lwt.return (`Multistatus, `String str)
@@ -163,12 +140,12 @@ let process_properties fs url f =
 
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
-class item fs = object(self)
+class handler prefix fs = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
 
   method private of_json rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
-    Fs.write fs (string_of_int (self#id rd)) 0 (Cstruct.of_string body) >>= fun modified ->
+    Fs.write fs (self#id rd) 0 (Cstruct.of_string body) >>= fun modified ->
     let modified', resp_body =
       match modified with
       | Error _ -> false, `String "{\"status\":\"not found\"}"
@@ -177,7 +154,7 @@ class item fs = object(self)
     Wm.continue modified' { rd with Wm.Rd.resp_body }
 
   method private to_json rd =
-    Fs.read fs (string_of_int (self#id rd)) 0 100 >>= function
+    Fs.read fs (self#id rd) 0 100 >>= function
     | Error _ -> assert false
     | Ok data ->
       let value = String.concat "" @@ List.map Cstruct.to_string data in
@@ -190,7 +167,7 @@ class item fs = object(self)
     Wm.continue [`GET; `HEAD; `PUT; `DELETE; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"] rd
 
   method resource_exists rd =
-    Fs.stat fs (string_of_int (self#id rd)) >>= function
+    Fs.stat fs (self#id rd) >>= function
     | Error _ -> Wm.continue false rd
     | Ok _ -> Wm.continue true rd
 
@@ -205,6 +182,7 @@ class item fs = object(self)
     ] rd
 
   method process_property rd =
+    Printf.printf "processing property!!!!\n%!" ;
     let process_property_leaf url body =
       match Webdav.read_propfind body with
        | None -> Lwt.return (`Property_not_found, `Empty)
@@ -213,21 +191,35 @@ class item fs = object(self)
        | Some (`Props ps) -> process_properties fs url (filter_in_ps ps)
     in
 
+    Printf.printf "process property %s\n%!" (Uri.to_string rd.Wm.Rd.uri) ;
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     (* single resource vs collection? *)
-    let url = string_of_int (self#id rd) in
+    let url = self#id rd in
     let rd = Wm.Rd.with_resp_headers (fun header ->
       let header' = Cohttp.Header.remove header "Content-Type" in
       Cohttp.Header.add header' "Content-Type" "application/xml") rd in
+    Printf.printf "url %s\n" url ;
     Fs.stat fs url >>= function
     | Error _ -> assert false
-    | Ok stat when stat.directory -> assert false
+    | Ok stat when stat.directory ->
+      begin
+        Fs.listdir fs url >>= function
+        | Error _ -> assert false
+        | Ok els ->
+          Printf.printf "properties for %s and %s\n" url (String.concat ", " els) ;
+          Lwt_list.map_s (fun url -> process_property_leaf url body) (url :: els) >>= fun ans ->
+          Printf.printf "processed properties %s\n"
+            (String.concat "\n"
+               (List.map (function `Empty -> "empty" | `String str -> str)
+                    (List.map snd ans))) ;
+          Wm.continue `Property_not_found rd
+      end
     | Ok _ ->
       process_property_leaf url body >>= fun (res, resp_body) ->
       Wm.continue res { rd with Wm.Rd.resp_body }
 
   method delete_resource rd =
-    Fs.destroy fs (string_of_int (self#id rd)) >>= fun res ->
+    Fs.destroy fs (self#id rd) >>= fun res ->
     let deleted, resp_body =
       match res with
       | Ok () -> true, `String "{\"status\":\"ok\"}"
@@ -239,7 +231,11 @@ class item fs = object(self)
     Wm.continue (Some "foo") rd
 
   method private id rd =
-    int_of_string (Wm.Rd.lookup_path_info_exn "id" rd)
+    let url = Uri.path (rd.Wm.Rd.uri) in
+    let pl = String.length prefix in
+    let path = String.sub url pl (String.length url - pl) in
+    Printf.printf "path is %s\n" path ;
+    path
 end
 
 let create_file_and_property fs name data =
@@ -261,8 +257,8 @@ let main () =
   Fs.connect "" >>= fun fs ->
   (* the route table *)
   let routes = [
-    ("/items", fun () -> new items fs) ;
-    ("/item/:id", fun () -> new item fs) ;
+    ("/item", fun () -> new handler "/item" fs) ;
+    ("/item/:id", fun () -> new handler "/item/" fs) ;
   ] in
   let callback (ch, conn) request body =
     let open Cohttp in
