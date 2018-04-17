@@ -158,17 +158,21 @@ class handler prefix fs = object(self)
     Wm.continue modified' { rd with Wm.Rd.resp_body }
 
   method private to_json rd =
-    Fs.read fs (self#id rd) 0 100 >>= function
+    let file = self#id rd in
+    Fs.size fs file >>= function
     | Error _ -> assert false
-    | Ok data ->
-      let value = String.concat "" @@ List.map Cstruct.to_string data in
-      Wm.continue (`String value) rd
+    | Ok bytes ->
+      Fs.read fs (self#id rd) 0 (Int64.to_int bytes) >>= function
+      | Error _ -> assert false
+      | Ok data ->
+        let value = String.concat "" @@ List.map Cstruct.to_string data in
+        Wm.continue (`String value) rd
 
   method allowed_methods rd =
-    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"] rd
+    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"] rd
 
   method known_methods rd =
-    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"] rd
+    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"] rd
 
   method resource_exists rd =
     Fs.stat fs (self#id rd) >>= function
@@ -254,6 +258,15 @@ class handler prefix fs = object(self)
 
   method generate_etag rd =
     Wm.continue (Some "foo") rd
+
+  method finish_request rd =
+    let rd = Wm.Rd.with_resp_headers (fun header ->
+        Cohttp.Header.add header "DAV" "1") rd
+    in
+    Cohttp_lwt.Body.to_string rd.Wm.Rd.resp_body >>= fun body ->
+    Printf.printf "returning %s %s\n%!"
+      (Cohttp.Header.to_string rd.Wm.Rd.resp_headers) body ;
+    Wm.continue () rd
 
   method private id rd =
     let url = Uri.path (rd.Wm.Rd.uri) in

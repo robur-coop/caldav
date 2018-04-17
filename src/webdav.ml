@@ -41,6 +41,7 @@ let pp_prop fmt = function
 let create_properties ?(content_type = "text/html") ?(language = "en") is_dir timestamp filename =
   let open Tyxml.Xml in
   let rtype = if is_dir then [ leaf "collection" ] else [] in
+  let filename = if filename = "" then "hinz und kunz" else filename in
   node "prop" [
     node "creationdate" [ pcdata timestamp ] ;
     node "displayname" [ pcdata filename ] ;
