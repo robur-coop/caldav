@@ -233,7 +233,13 @@ class handler prefix fs = object(self)
   method private id rd =
     let url = Uri.path (rd.Wm.Rd.uri) in
     let pl = String.length prefix in
-    let path = String.sub url pl (String.length url - pl) in
+    let path =
+      let p = String.sub url pl (String.length url - pl) in
+      if String.length p > 0 && String.get p 0 = '/' then
+        String.sub p 1 (String.length p - 1)
+      else
+        p
+    in
     Printf.printf "path is %s\n" path ;
     path
 end
@@ -257,8 +263,7 @@ let main () =
   Fs.connect "" >>= fun fs ->
   (* the route table *)
   let routes = [
-    ("/item", fun () -> new handler "/item" fs) ;
-    ("/item/:id", fun () -> new handler "/item/" fs) ;
+    ("/item/*", fun () -> new handler "/item" fs) ;
   ] in
   let callback (ch, conn) request body =
     let open Cohttp in
