@@ -50,6 +50,50 @@ let process_properties fs prefix url f =
       in
       `Single_response tree
 
+let process_property_leaf fs prefix req url =
+  let f = match req with
+   | `Propname -> Webdav.drop_pcdata
+   | `All_prop includes -> (fun id -> id)
+   | `Props ps -> Webdav.filter_in_ps ps
+  in process_properties fs prefix url f
+
+let process_files fs prefix url req els =
+  let ends_in_prop x = not @@ Astring.String.is_suffix ~affix:"prop.xml" x in
+  List.filter ends_in_prop (url :: els) |>
+  Lwt_list.map_s (process_property_leaf fs prefix req) >|= fun answers ->
+  (* answers : [ `Not_found | `Single_response of Tyxml.Xml.node ] list *)
+  let nodes = List.fold_left (fun acc element ->
+      match element with
+      | `Not_found -> acc
+      | `Single_response node -> node :: acc) [] answers
+  in
+  let multistatus =
+    Tyxml.Xml.(node
+                 ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
+                 "multistatus" nodes)
+  in
+  `Response (Webdav.tyxml_to_body multistatus)
+
+let propfind fs url prefix req =
+  Fs.stat fs url >>= function
+  | Error _ -> assert false
+  | Ok stat when stat.directory ->
+    begin
+      Fs.listdir fs url >>= function
+      | Error _ -> assert false
+      | Ok els -> process_files fs prefix url req els
+    end
+  | Ok _ ->
+    process_property_leaf fs prefix req url >|= function
+    | `Not_found -> `Property_not_found
+    | `Single_response t ->
+      let outer =
+        Tyxml.Xml.(node
+                     ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
+                     "multistatus" [ t ])
+      in
+      `Response (Webdav.tyxml_to_body outer)
+
 
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
@@ -104,63 +148,20 @@ class handler prefix fs = object(self)
     ] rd
 
   method process_property rd =
-    Printf.printf "processing property!!!!\n%!" ;
-    let process_property_leaf url body =
-      match Webdav.read_propfind body with
-       | None -> Lwt.return `Not_found
-       | Some `Propname -> process_properties fs prefix url Webdav.drop_pcdata
-       | Some (`All_prop includes) -> process_properties fs prefix url (fun id -> id)
-       | Some (`Props ps) -> process_properties fs prefix url (Webdav.filter_in_ps ps)
-    in
-
-    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
-    (* single resource vs collection? *)
-    assert (body <> "");
-    Printf.printf "BODY::: %s\n" body; 
-    let url = self#id rd in
     let rd = Wm.Rd.with_resp_headers (fun header ->
       let header' = Cohttp.Header.remove header "Content-Type" in
       Cohttp.Header.add header' "Content-Type" "application/xml") rd in
-    Printf.printf "url %s\n" url ;
-    Fs.stat fs url >>= function
-    | Error _ -> assert false
-    | Ok stat when stat.directory ->
-      begin
-        Fs.listdir fs url >>= function
-        | Error _ -> assert false
-        | Ok els ->
-          let els =
-            List.filter (fun f ->
-                not @@ Astring.String.is_suffix ~affix:"prop.xml" f)
-              els
-          in
-          Printf.printf "properties for %s and %s\n" url (String.concat ", " els) ;
-          Lwt_list.map_s (fun url -> process_property_leaf url body) (url :: els) >>= fun answers ->
-          (* answers : [ `Not_found | `Single_response of Tyxml.Xml.node ] list *)
-          let nodes = List.fold_left (fun acc element ->
-              match element with
-              | `Not_found -> acc
-              | `Single_response node -> node :: acc) [] answers
-          in
-          let multistatus =
-            Tyxml.Xml.(node
-                         ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
-                         "multistatus" nodes)
-          in
-          let str = Webdav.tyxml_to_body multistatus in
-          Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String str }
-      end
-    | Ok _ ->
-      process_property_leaf url body >>= function
-      | `Not_found -> Wm.continue `Property_not_found rd
-      | `Single_response t ->
-        let outer =
-          Tyxml.Xml.(node
-                       ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
-                       "multistatus" [ t ])
-        in
-        let str = Webdav.tyxml_to_body outer in
-        Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String str }
+
+    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    assert (body <> "");
+    Printf.printf "BODY::: %s\n" body; 
+    let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
+    match Webdav.read_propfind body with
+    | None -> Wm.continue `Property_not_found rd
+    | Some req -> 
+        propfind fs (self#id rd) prefix req >>= function 
+        | `Response body -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String body }
+        | `Property_not_found -> Wm.continue `Property_not_found rd
 
   method delete_resource rd =
     Fs.destroy fs (self#id rd) >>= fun res ->
