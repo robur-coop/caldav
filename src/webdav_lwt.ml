@@ -92,11 +92,17 @@ let drop_pcdata t =
   | `Pcdata str -> tail in
   List.hd @@ tree_fold f [] [t]
 
+(* assumption: xml is <prop><a/><b/><c/></prop> *)
 let filter_in_ps ps xml =
-  let f s children tail = match s with
-  | `Node (a, n, c) -> if List.mem n ps || n = "prop" then `Node (a, n, children) :: tail else tail
-  | `Pcdata str -> `Pcdata str :: tail in
-  List.hd @@ tree_fold f [] [xml]
+  match xml with
+  | `Node (a, "prop", children) -> 
+    let f acc = function
+    | (`Node (a, n, c) as node) when List.mem n ps -> node :: acc 
+    | _ -> acc in
+    let c' = 
+      List.fold_left f [] children in
+    `Node (a, "prop", c')
+  | _ -> assert false
 
 let tree_to_tyxml t =
   let attrib_to_tyxml (name, value) =
@@ -125,6 +131,7 @@ let process_properties fs prefix url f =
     | Some xml ->
       Printf.printf "read tree %s\n" (tree_to_string xml) ;
       let xml' = f xml in
+      Printf.printf "^^^^ read tree %s\n" (tree_to_string xml') ;
       let res = `OK in
       let status =
         Format.sprintf "%s %s"
@@ -160,7 +167,7 @@ class handler prefix fs = object(self)
   method private to_json rd =
     let file = self#id rd in
     Fs.size fs file >>= function
-    | Error _ -> assert false
+    | Error _ -> Wm.continue `Empty rd
     | Ok bytes ->
       Fs.read fs (self#id rd) 0 (Int64.to_int bytes) >>= function
       | Error _ -> assert false
@@ -175,9 +182,14 @@ class handler prefix fs = object(self)
     Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"] rd
 
   method resource_exists rd =
+    Printf.printf "RESOURCE exists %s \n" (self#id rd);
     Fs.stat fs (self#id rd) >>= function
-    | Error _ -> Wm.continue false rd
-    | Ok _ -> Wm.continue true rd
+    | Error _ -> 
+      Printf.printf "FALSE\n";
+      Wm.continue false rd
+    | Ok _ -> 
+      Printf.printf "TRUE\n";
+      Wm.continue true rd
 
   method content_types_provided rd =
     Wm.continue [
@@ -201,6 +213,8 @@ class handler prefix fs = object(self)
 
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     (* single resource vs collection? *)
+    assert (body <> "");
+    Printf.printf "BODY::: %s\n" body; 
     let url = self#id rd in
     let rd = Wm.Rd.with_resp_headers (fun header ->
       let header' = Cohttp.Header.remove header "Content-Type" in
@@ -224,7 +238,9 @@ class handler prefix fs = object(self)
           let nodes = List.fold_left (fun acc element ->
               match element with
               | `Not_found -> acc
-              | `Single_response node -> node :: acc)
+              | `Single_response node -> 
+                Printf.printf "karpott %s \n" (tyxml_to_body node);
+                node :: acc)
               [] answers
           in
           let multistatus =
@@ -263,9 +279,8 @@ class handler prefix fs = object(self)
     let rd = Wm.Rd.with_resp_headers (fun header ->
         Cohttp.Header.add header "DAV" "1") rd
     in
-    Cohttp_lwt.Body.to_string rd.Wm.Rd.resp_body >>= fun body ->
-    Printf.printf "returning %s %s\n%!"
-      (Cohttp.Header.to_string rd.Wm.Rd.resp_headers) body ;
+    Printf.printf "returning %s\n%!"
+      (Cohttp.Header.to_string rd.Wm.Rd.resp_headers) ;
     Wm.continue () rd
 
   method private id rd =
@@ -287,8 +302,9 @@ let create_properties fs name is_dir =
     Webdav.create_properties ~content_type:"application/json"
       is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) file
   in
-  let propfile filename = tyxml_to_body (props filename) in
-  Fs.write fs (file_to_propertyfile name) 0 (Cstruct.of_string (propfile name))
+  let propfile = tyxml_to_body (props name) in
+  Printf.printf "IS A DIR? %s\n" propfile;
+  Fs.write fs (file_to_propertyfile name) 0 (Cstruct.of_string propfile)
 
 let create_file_and_property fs name data =
   Fs.write fs name 0 (Cstruct.of_string data) >>= fun _ ->
@@ -301,6 +317,7 @@ let main () =
   Fs.connect "" >>= fun fs ->
   (* the route table *)
   let routes = [
+    ("/item", fun () -> new handler "/item" fs) ;
     ("/item/*", fun () -> new handler "/item" fs) ;
   ] in
   let callback (ch, conn) request body =
