@@ -38,7 +38,7 @@ let pp_prop fmt = function
   | `All_prop xs -> Fmt.pf fmt "All prop %a" Fmt.(list ~sep:(unit ",@ ") string) xs
   | `Props xs -> Fmt.pf fmt "Props %a" Fmt.(list ~sep:(unit ",@ ") string) xs
 
-let create_properties ?(content_type = "text/html") ?(language = "en") is_dir timestamp filename =
+let create_properties ?(content_type = "text/html") ?(language = "en") is_dir timestamp length filename =
   let open Tyxml.Xml in
   let rtype = if is_dir then [ leaf "collection" ] else [] in
   let filename = if filename = "" then "hinz und kunz" else filename in
@@ -48,6 +48,7 @@ let create_properties ?(content_type = "text/html") ?(language = "en") is_dir ti
     node "getcontentlanguage" [ pcdata language ] ;
     node "getcontenttype" [ pcdata content_type ] ;
     node "getlastmodified" [ pcdata timestamp ] ;
+    node "getcontentlength" [ pcdata (string_of_int length) ] ;
     (* node "lockdiscovery" *)
     node "resourcetype" rtype ;
     (* node "supportedlock" *)

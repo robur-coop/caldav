@@ -297,10 +297,10 @@ class handler prefix fs = object(self)
     path
 end
 
-let create_properties fs name is_dir =
+let create_properties fs name is_dir length =
   let props file =
     Webdav.create_properties ~content_type:"application/json"
-      is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) file
+      is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length file
   in
   let propfile = tyxml_to_body (props name) in
   Printf.printf "IS A DIR? %s\n" propfile;
@@ -308,7 +308,7 @@ let create_properties fs name is_dir =
 
 let create_file_and_property fs name data =
   Fs.write fs name 0 (Cstruct.of_string data) >>= fun _ ->
-  create_properties fs name false
+  create_properties fs name false (String.length data)
 
 let main () =
   (* listen on port 8080 *)
@@ -361,7 +361,7 @@ let main () =
       (Sexplib.Sexp.to_string_hum (Conduit_lwt_unix.sexp_of_flow ch))
   in
   (* init the database with two items *)
-  create_properties fs "" true >>= fun _ ->
+  create_properties fs "" true 0 >>= fun _ ->
   create_file_and_property fs "1" "{\"name\":\"item 1\"}" >>= fun _ ->
   create_file_and_property fs "2" "{\"name\":\"item 2\"}" >>= fun _ ->
   let config = Server.make ~callback ~conn_closed () in
