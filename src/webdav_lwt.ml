@@ -1,34 +1,3 @@
-(** An example CRUD API for id-based operations on JSON objects. The objects are
-    stored in-memory and therefore will not persist across runs of the database.
-    The application does not perform any JSON validation at this time.
-
-    Build by running `jbuilder`:
-
-      [jbuilder build _build/default/examples/crud_lwt.exe]
-
-    Run using the following command, which will display the path that each
-    request takes through the decision diagram:
-
-      [DEBUG_PATH= ./crud_lwt.exe]
-
-    Here are some sample CURL commands to test on a running server:
-
-      - Get a complete list of items:
-        [curl -i -w "\n" -X GET http://localhost:8080/items]
-
-      - Get the item with id 1:
-        [curl -i -w "\n" -X GET http://localhost:8080/item/1]
-
-      - Create a new item:
-        [curl -i -w "\n" -X POST -d '{"name":"new item"}' http://localhost:8080/items]
-
-      - Modify the item with id 1:
-        [curl -i -w "\n" -X PUT -H 'Content-Type: application/json'\
-          -d '{"name":"modified item"}' http://localhost:8080/item/1]
-
-      - Delete the item with id 1:
-        [curl -i -w "\n" -X DELETE http://localhost:8080/item/1] *)
-
 open Cohttp_lwt_unix
 open Lwt.Infix
 
@@ -52,73 +21,6 @@ let get_properties fs filename =
   | Error e -> Lwt.return (Error e)
   | Ok size -> Fs.read fs propfile 0 (Int64.to_int size)
 
-let string_to_tree str =
-  let data str = `Pcdata str
-  and el ((ns, name), attrs) children =
-    let a =
-      let namespace = match ns with
-        | "" -> []
-        | ns -> [ ("xmlns", ns) ]
-      in
-      namespace @ List.map (fun ((_ns, name), value) -> (name, value)) attrs
-    in
-    `Node (a, name, children)
-  in
-  try
-    let input = Xmlm.make_input (`String (0, str)) in
-    ignore (Xmlm.input input) ; (* ignore DTD *)
-    Some (Xmlm.input_tree ~el ~data input)
-  with _ -> None
-
-let rec tree_fold f s forest = match forest with
-  | `Node (a, name, children) :: tail ->
-    let children' = tree_fold f s children
-    and tail' = tree_fold f s tail in
-    f (`Node (a, name, children)) children' tail'
-  | (`Pcdata _ as t') :: tail ->
-    let tail' = tree_fold f s tail in
-    f t' s tail'
-  | [] -> s
-
-let tree_to_string t =
-  let f s children tail = match s with
-  | `Node (a, name, _) -> " Node: " ^ name ^ "(" ^ children ^ ")(" ^ tail ^ ")"
-  | `Pcdata str -> " PCDATA: (" ^ str ^ ") " ^ tail in
-  tree_fold f "" [t]
-
-let drop_pcdata t =
-  let f s children tail = match s with
-  | `Node (a, n, c) -> `Node (a, n, children) :: tail
-  | `Pcdata str -> tail in
-  List.hd @@ tree_fold f [] [t]
-
-(* assumption: xml is <prop><a/><b/><c/></prop> *)
-let filter_in_ps ps xml =
-  match xml with
-  | `Node (a, "prop", children) -> 
-    let f acc = function
-    | (`Node (a, n, c) as node) when List.mem n ps -> node :: acc 
-    | _ -> acc in
-    let c' = 
-      List.fold_left f [] children in
-    `Node (a, "prop", c')
-  | _ -> assert false
-
-let tree_to_tyxml t =
-  let attrib_to_tyxml (name, value) =
-    Tyxml.Xml.string_attrib name (Tyxml_xml.W.return value)
-  in
-  let f s children tail = match s with
-  | `Node (a, n, c) ->
-    let a' = List.map attrib_to_tyxml a in
-    Tyxml.Xml.node ~a:a' n (Tyxml_xml.W.return children) :: tail
-  | `Pcdata str -> Tyxml.Xml.pcdata (Tyxml_xml.W.return str) :: tail
-  in List.hd @@ tree_fold f [] [t]
-
-let tyxml_to_body t =
-  Format.asprintf "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n%a"
-    (Tyxml.Xml.pp ()) t
-
 let process_properties fs prefix url f =
   Printf.printf "processing properties of %s\n" url ;
   get_properties fs url >|= function
@@ -126,12 +28,12 @@ let process_properties fs prefix url f =
     Printf.printf "not found\n" ;
     `Not_found
   | Ok data ->
-    match string_to_tree Cstruct.(to_string @@ concat data) with
+    match Webdav.string_to_tree Cstruct.(to_string @@ concat data) with
     | None -> `Not_found
     | Some xml ->
-      Printf.printf "read tree %s\n" (tree_to_string xml) ;
+      Printf.printf "read tree %s\n" (Webdav.tree_to_string xml) ;
       let xml' = f xml in
-      Printf.printf "^^^^ read tree %s\n" (tree_to_string xml') ;
+      Printf.printf "^^^^ read tree %s\n" (Webdav.tree_to_string xml') ;
       let res = `OK in
       let status =
         Format.sprintf "%s %s"
@@ -143,7 +45,7 @@ let process_properties fs prefix url f =
         node "response"
           [ node "href" [ pcdata (prefix ^ "/" ^ url) ] ;
             node "propstat" [
-              tree_to_tyxml xml' ;
+              Webdav.tree_to_tyxml xml' ;
               node "status" [ pcdata status ] ] ]
       in
       `Single_response tree
@@ -206,9 +108,9 @@ class handler prefix fs = object(self)
     let process_property_leaf url body =
       match Webdav.read_propfind body with
        | None -> Lwt.return `Not_found
-       | Some `Propname -> process_properties fs prefix url drop_pcdata
+       | Some `Propname -> process_properties fs prefix url Webdav.drop_pcdata
        | Some (`All_prop includes) -> process_properties fs prefix url (fun id -> id)
-       | Some (`Props ps) -> process_properties fs prefix url (filter_in_ps ps)
+       | Some (`Props ps) -> process_properties fs prefix url (Webdav.filter_in_ps ps)
     in
 
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
@@ -238,17 +140,14 @@ class handler prefix fs = object(self)
           let nodes = List.fold_left (fun acc element ->
               match element with
               | `Not_found -> acc
-              | `Single_response node -> 
-                Printf.printf "karpott %s \n" (tyxml_to_body node);
-                node :: acc)
-              [] answers
+              | `Single_response node -> node :: acc) [] answers
           in
           let multistatus =
             Tyxml.Xml.(node
                          ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
                          "multistatus" nodes)
           in
-          let str = tyxml_to_body multistatus in
+          let str = Webdav.tyxml_to_body multistatus in
           Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String str }
       end
     | Ok _ ->
@@ -260,7 +159,7 @@ class handler prefix fs = object(self)
                        ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
                        "multistatus" [ t ])
         in
-        let str = tyxml_to_body outer in
+        let str = Webdav.tyxml_to_body outer in
         Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String str }
 
   method delete_resource rd =
@@ -302,7 +201,7 @@ let create_properties fs name is_dir length =
     Webdav.create_properties ~content_type:"application/json"
       is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length file
   in
-  let propfile = tyxml_to_body (props name) in
+  let propfile = Webdav.tyxml_to_body (props name) in
   let trailing_slash = if is_dir then "/" else "" in
   let filename = file_to_propertyfile (name ^ trailing_slash) in
   Fs.write fs filename 0 (Cstruct.of_string propfile)
