@@ -303,8 +303,9 @@ let create_properties fs name is_dir length =
       is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length file
   in
   let propfile = tyxml_to_body (props name) in
-  Printf.printf "IS A DIR? %s\n" propfile;
-  Fs.write fs (file_to_propertyfile name) 0 (Cstruct.of_string propfile)
+  let trailing_slash = if is_dir then "/" else "" in
+  let filename = file_to_propertyfile (name ^ trailing_slash) in
+  Fs.write fs filename 0 (Cstruct.of_string propfile)
 
 let create_file_and_property fs name data =
   Fs.write fs name 0 (Cstruct.of_string data) >>= fun _ ->
@@ -317,8 +318,8 @@ let main () =
   Fs.connect "" >>= fun fs ->
   (* the route table *)
   let routes = [
-    ("/item", fun () -> new handler "/item" fs) ;
-    ("/item/*", fun () -> new handler "/item" fs) ;
+    ("/calendars", fun () -> new handler "/calendars" fs) ;
+    ("/calendars/*", fun () -> new handler "/calendars" fs) ;
   ] in
   let callback (ch, conn) request body =
     let open Cohttp in
@@ -361,7 +362,12 @@ let main () =
       (Sexplib.Sexp.to_string_hum (Conduit_lwt_unix.sexp_of_flow ch))
   in
   (* init the database with two items *)
+  Mirage_fs_mem.mkdir fs "" >>= fun _ ->
   create_properties fs "" true 0 >>= fun _ ->
+  Mirage_fs_mem.mkdir fs "__uids__" >>= fun _ ->
+  create_properties fs "__uids__" true 0 >>= fun _ ->
+  Mirage_fs_mem.mkdir fs "__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
+  create_properties fs "__uids__/10000000-0000-0000-0000-000000000001" true 0 >>= fun _ ->
   create_file_and_property fs "1" "{\"name\":\"item 1\"}" >>= fun _ ->
   create_file_and_property fs "2" "{\"name\":\"item 2\"}" >>= fun _ ->
   let config = Server.make ~callback ~conn_closed () in
