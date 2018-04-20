@@ -218,19 +218,31 @@ class handler prefix fs = object(self)
     path
 end
 
-let create_properties fs name is_dir length =
-  let props file =
-    Webdav.create_properties ~content_type:"application/json"
-      is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length file
+let initialise_fs fs =
+  let create_properties name is_dir length =
+    let props file =
+      Webdav.create_properties ~content_type:"application/json"
+        is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length file
+    in
+    let propfile = Webdav.tyxml_to_body (props name) in
+    let trailing_slash = if is_dir then "/" else "" in
+    let filename = file_to_propertyfile (name ^ trailing_slash) in
+    Fs.write fs filename 0 (Cstruct.of_string propfile)
   in
-  let propfile = Webdav.tyxml_to_body (props name) in
-  let trailing_slash = if is_dir then "/" else "" in
-  let filename = file_to_propertyfile (name ^ trailing_slash) in
-  Fs.write fs filename 0 (Cstruct.of_string propfile)
-
-let create_file_and_property fs name data =
-  Fs.write fs name 0 (Cstruct.of_string data) >>= fun _ ->
-  create_properties fs name false (String.length data)
+  let create_file name data =
+    Fs.write fs name 0 (Cstruct.of_string data) >>= fun _ ->
+    create_properties name false (String.length data)
+  and create_dir name =
+    Mirage_fs_mem.mkdir fs name >>= fun _ ->
+    create_properties name true 0
+  in
+  create_dir "" >>= fun _ ->
+  create_dir "__uids__" >>= fun _ ->
+  create_dir "__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
+  create_dir "__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
+  create_file "1" "{\"name\":\"item 1\"}" >>= fun _ ->
+  create_file "2" "{\"name\":\"item 2\"}" >>= fun _ ->
+  Lwt.return_unit
 
 let main () =
   (* listen on port 8080 *)
@@ -282,15 +294,7 @@ let main () =
     Printf.printf "connection %s closed\n%!"
       (Sexplib.Sexp.to_string_hum (Conduit_lwt_unix.sexp_of_flow ch))
   in
-  (* init the database with two items *)
-  Mirage_fs_mem.mkdir fs "" >>= fun _ ->
-  create_properties fs "" true 0 >>= fun _ ->
-  Mirage_fs_mem.mkdir fs "__uids__" >>= fun _ ->
-  create_properties fs "__uids__" true 0 >>= fun _ ->
-  Mirage_fs_mem.mkdir fs "__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
-  create_properties fs "__uids__/10000000-0000-0000-0000-000000000001" true 0 >>= fun _ ->
-  create_file_and_property fs "1" "{\"name\":\"item 1\"}" >>= fun _ ->
-  create_file_and_property fs "2" "{\"name\":\"item 2\"}" >>= fun _ ->
+  initialise_fs fs >>= fun () ->
   let config = Server.make ~callback ~conn_closed () in
   Server.create  ~mode:(`TCP(`Port port)) config
   >>= (fun () -> Printf.eprintf "hello_lwt: listening on 0.0.0.0:%d%!" port;
