@@ -107,6 +107,18 @@ let error_xml element =
   Tyxml.Xml.(node ~a:[ dav_ns ] "error" [ node element [] ])
   |> Webdav.tyxml_to_body
 
+let create_properties fs name content_type is_dir length =
+  let props file =
+    Webdav.create_properties ~content_type
+      is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length file
+  in
+  let propfile = Webdav.tyxml_to_body (props name) in
+  let trailing_slash = if is_dir then "/" else "" in
+  let filename = file_to_propertyfile (name ^ trailing_slash) in
+  Fs.write fs filename 0 (Cstruct.of_string propfile)
+
+let etag str = Digest.to_hex @@ Digest.string str
+
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
 class handler prefix fs = object(self)
@@ -121,6 +133,61 @@ class handler prefix fs = object(self)
       | Ok () -> true, `String "{\"status\":\"ok\"}"
     in
     Wm.continue modified' { rd with Wm.Rd.resp_body }
+
+  method private write_calendar rd =
+    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    let name = self#id rd in
+    let content_type =
+      match Cohttp.Header.get rd.Wm.Rd.req_headers "Content-Type" with
+      | None -> "text/calendar"
+      | Some x -> x
+    in
+    Fs.write fs name 0 (Cstruct.of_string body) >>= fun _ ->
+    create_properties fs name content_type false (String.length body) >>= fun _ ->
+    Printf.printf "received body text/calendar for %s\n" name ;
+    let etag = etag body in
+    let rd = Wm.Rd.with_resp_headers (fun header ->
+      let header' = Cohttp.Header.remove header "ETag" in
+      Cohttp.Header.add header' "Etag" etag) rd
+    in
+    Wm.continue true rd
+
+  method private read_calendar rd =
+    let file = self#id rd in
+    Fs.size fs file >>= function
+    | Error _ -> Wm.continue `Empty rd
+    | Ok bytes ->
+      Fs.read fs (self#id rd) 0 (Int64.to_int bytes) >>= function
+      | Error _ -> assert false
+      | Ok data ->
+        let value = String.concat "" @@ List.map Cstruct.to_string data in
+        get_properties fs file >>= function
+        | Error _ -> Wm.continue `Empty rd
+        | Ok data ->
+          match Webdav.string_to_tree Cstruct.(to_string @@ concat data) with
+          | None -> Wm.continue `Empty rd
+          | Some xml ->
+            let get_ct xml = match xml with
+              | `Node (a, "prop", children) ->
+                let ct =
+                  List.find
+                    (function `Node (_, "getcontenttype", _) -> true | _ -> false)
+                    children
+                in
+                begin match ct with
+                  | `Node (_, _, [ `Pcdata contenttype ]) -> contenttype
+                  | _ -> assert false
+                end
+              | _ -> assert false
+            in
+            let ct = try get_ct xml with _ -> "text/calendar" in
+            let rd =
+              Wm.Rd.with_resp_headers (fun header ->
+                  let header' = Cohttp.Header.remove header "Content-Type" in
+                  Cohttp.Header.add header' "Content-Type" ct)
+                rd
+            in
+            Wm.continue (`String value) rd
 
   method private to_json rd =
     let file = self#id rd in
@@ -139,6 +206,11 @@ class handler prefix fs = object(self)
   method known_methods rd =
     Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"] rd
 
+  method charsets_provided rd =
+    Wm.continue [
+      "utf-8", (fun id -> id)
+    ] rd
+
   method resource_exists rd =
     Printf.printf "RESOURCE exists %s \n" (self#id rd);
     Fs.stat fs (self#id rd) >>= function
@@ -151,12 +223,12 @@ class handler prefix fs = object(self)
 
   method content_types_provided rd =
     Wm.continue [
-      "application/json", self#to_json
+      "text/calendar", self#read_calendar
     ] rd
 
   method content_types_accepted rd =
     Wm.continue [
-      "application/json", self#of_json
+      "text/calendar", self#write_calendar
     ] rd
 
   method process_property rd =
@@ -175,6 +247,7 @@ class handler prefix fs = object(self)
       let body = `String (error_xml "propfind-finite-depth") in
       Wm.respond ~body (to_status `Forbidden) rd
     | Ok d ->
+      (* TODO actually deal with depth d (`Zero or `One) *)
       match Webdav.read_propfind body with
       | None -> Wm.continue `Property_not_found rd
       | Some req ->
@@ -194,7 +267,17 @@ class handler prefix fs = object(self)
     Wm.continue deleted { rd with Wm.Rd.resp_body }
 
   method generate_etag rd =
-    Wm.continue (Some "foo") rd
+    let name = self#id rd in
+    Mirage_fs_mem.size fs name >>= function
+    | Error _ -> Wm.continue None rd
+    | Ok size ->
+      Mirage_fs_mem.read fs name 0 (Int64.to_int size) >>= function
+      | Error _ -> Wm.continue None rd
+      | Ok bufs ->
+        let digest =
+          etag @@ Cstruct.to_string @@ Cstruct.concat bufs
+        in
+        Wm.continue (Some digest) rd
 
   method finish_request rd =
     let rd = Wm.Rd.with_resp_headers (fun header ->
@@ -219,22 +302,12 @@ class handler prefix fs = object(self)
 end
 
 let initialise_fs fs =
-  let create_properties name is_dir length =
-    let props file =
-      Webdav.create_properties ~content_type:"application/json"
-        is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length file
-    in
-    let propfile = Webdav.tyxml_to_body (props name) in
-    let trailing_slash = if is_dir then "/" else "" in
-    let filename = file_to_propertyfile (name ^ trailing_slash) in
-    Fs.write fs filename 0 (Cstruct.of_string propfile)
-  in
   let create_file name data =
     Fs.write fs name 0 (Cstruct.of_string data) >>= fun _ ->
-    create_properties name false (String.length data)
+    create_properties fs name "application/json" false (String.length data)
   and create_dir name =
     Mirage_fs_mem.mkdir fs name >>= fun _ ->
-    create_properties name true 0
+    create_properties fs name "text/directory" true 0
   in
   create_dir "" >>= fun _ ->
   create_dir "users" >>= fun _ ->
