@@ -237,6 +237,7 @@ let initialise_fs fs =
     create_properties name true 0
   in
   create_dir "" >>= fun _ ->
+  create_dir "users" >>= fun _ ->
   create_dir "__uids__" >>= fun _ ->
   create_dir "__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
   create_dir "__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
@@ -251,6 +252,8 @@ let main () =
   Fs.connect "" >>= fun fs ->
   (* the route table *)
   let routes = [
+    ("/", fun () -> new handler "/" fs) ;
+    ("/principals", fun () -> new handler "/principals" fs) ;
     ("/calendars", fun () -> new handler "/calendars" fs) ;
     ("/calendars/*", fun () -> new handler "/calendars" fs) ;
   ] in
