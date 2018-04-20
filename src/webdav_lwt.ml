@@ -148,6 +148,7 @@ class handler prefix fs = object(self)
     ] rd
 
   method process_property rd =
+    Printf.printf "processing property1!!!!\n" ;
     let rd = Wm.Rd.with_resp_headers (fun header ->
       let header' = Cohttp.Header.remove header "Content-Type" in
       Cohttp.Header.add header' "Content-Type" "application/xml") rd in
@@ -158,10 +159,12 @@ class handler prefix fs = object(self)
     let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
     match Webdav.read_propfind body with
     | None -> Wm.continue `Property_not_found rd
-    | Some req -> 
+    | Some req ->
         propfind fs (self#id rd) prefix req >>= function 
-        | `Response body -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String body }
-        | `Property_not_found -> Wm.continue `Property_not_found rd
+        | `Response body ->
+          Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String body }
+        | `Property_not_found ->
+          Wm.continue `Property_not_found rd
 
   method delete_resource rd =
     Fs.destroy fs (self#id rd) >>= fun res ->

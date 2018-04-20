@@ -4,7 +4,7 @@ let read_propfind str =
     let data str = assert false
     and el ((ns, name), attr) children = `N (ns, name, attr, children)
     in
-    let input = Xmlm.make_input (`String (0, str)) in
+    let input = Xmlm.make_input ~strip:true (`String (0, str)) in
     ignore (Xmlm.input input) ; (* ignore DTD *)
     let res = match Xmlm.input_tree ~el ~data input with
       | `N (_, "propfind", attr, children) ->
