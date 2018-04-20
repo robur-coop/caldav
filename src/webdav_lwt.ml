@@ -74,6 +74,8 @@ let process_files fs prefix url req els =
   in
   `Response (Webdav.tyxml_to_body multistatus)
 
+let dav_ns = Tyxml.Xml.string_attrib "xmlns" (Tyxml_xml.W.return "DAV:")
+
 let propfind fs url prefix req =
   Fs.stat fs url >>= function
   | Error _ -> assert false
@@ -88,12 +90,22 @@ let propfind fs url prefix req =
     | `Not_found -> `Property_not_found
     | `Single_response t ->
       let outer =
-        Tyxml.Xml.(node
-                     ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
-                     "multistatus" [ t ])
+        Tyxml.Xml.(node ~a:[ dav_ns ] "multistatus" [ t ])
       in
       `Response (Webdav.tyxml_to_body outer)
 
+let parse_depth = function
+  | None -> Ok `Infinity
+  | Some "0" -> Ok `Zero
+  | Some "1" -> Ok `One
+  | Some "infinity" -> Ok `Infinity
+  | _ -> Error `Bad_request
+
+let to_status x = Cohttp.Code.code_of_status x
+
+let error_xml element =
+  Tyxml.Xml.(node ~a:[ dav_ns ] "error" [ node element [] ])
+  |> Webdav.tyxml_to_body
 
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
@@ -157,9 +169,15 @@ class handler prefix fs = object(self)
     assert (body <> "");
     Printf.printf "BODY::: %s\n" body; 
     let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
-    match Webdav.read_propfind body with
-    | None -> Wm.continue `Property_not_found rd
-    | Some req ->
+    match parse_depth depth with
+    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    | Ok `Infinity ->
+      let body = `String (error_xml "propfind-finite-depth") in
+      Wm.respond ~body (to_status `Forbidden) rd
+    | Ok d ->
+      match Webdav.read_propfind body with
+      | None -> Wm.continue `Property_not_found rd
+      | Some req ->
         propfind fs (self#id rd) prefix req >>= function 
         | `Response body ->
           Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String body }
