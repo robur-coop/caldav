@@ -154,40 +154,39 @@ class handler prefix fs = object(self)
 
   method private read_calendar rd =
     let file = self#id rd in
-    Fs.size fs file >>= function
+
+    let (>>==) a f = a >>= function
     | Error _ -> Wm.continue `Empty rd
-    | Ok bytes ->
-      Fs.read fs (self#id rd) 0 (Int64.to_int bytes) >>= function
-      | Error _ -> assert false
-      | Ok data ->
-        let value = String.concat "" @@ List.map Cstruct.to_string data in
-        get_properties fs file >>= function
-        | Error _ -> Wm.continue `Empty rd
-        | Ok data ->
-          match Webdav.string_to_tree Cstruct.(to_string @@ concat data) with
-          | None -> Wm.continue `Empty rd
-          | Some xml ->
-            let get_ct xml = match xml with
-              | `Node (a, "prop", children) ->
-                let ct =
-                  List.find
-                    (function `Node (_, "getcontenttype", _) -> true | _ -> false)
-                    children
-                in
-                begin match ct with
-                  | `Node (_, _, [ `Pcdata contenttype ]) -> contenttype
-                  | _ -> assert false
-                end
-              | _ -> assert false
-            in
-            let ct = try get_ct xml with _ -> "text/calendar" in
-            let rd =
-              Wm.Rd.with_resp_headers (fun header ->
-                  let header' = Cohttp.Header.remove header "Content-Type" in
-                  Cohttp.Header.add header' "Content-Type" ct)
-                rd
-            in
-            Wm.continue (`String value) rd
+    | Ok res  -> f res in
+
+    Fs.size fs file >>== fun bytes ->
+    Fs.read fs (self#id rd) 0 (Int64.to_int bytes) >>== fun data ->
+    let value = String.concat "" @@ List.map Cstruct.to_string data in
+    get_properties fs file >>== fun data ->
+    match Webdav.string_to_tree Cstruct.(to_string @@ concat data) with
+    | None -> Wm.continue `Empty rd
+    | Some xml ->
+      let get_ct xml = match xml with
+        | `Node (a, "prop", children) ->
+          let ct =
+            List.find
+              (function `Node (_, "getcontenttype", _) -> true | _ -> false)
+              children
+          in
+          begin match ct with
+            | `Node (_, _, [ `Pcdata contenttype ]) -> contenttype
+            | _ -> assert false
+          end
+        | _ -> assert false
+      in
+      let ct = try get_ct xml with _ -> "text/calendar" in
+      let rd =
+        Wm.Rd.with_resp_headers (fun header ->
+            let header' = Cohttp.Header.remove header "Content-Type" in
+            Cohttp.Header.add header' "Content-Type" ct)
+          rd
+      in
+      Wm.continue (`String value) rd
 
   method private to_json rd =
     let file = self#id rd in
