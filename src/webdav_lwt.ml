@@ -142,52 +142,99 @@ class handler prefix fs = object(self)
       | None -> "text/calendar"
       | Some x -> x
     in
-    Fs.write fs name 0 (Cstruct.of_string body) >>= fun _ ->
-    create_properties fs name content_type false (String.length body) >>= fun _ ->
-    Printf.printf "received body text/calendar for %s\n" name ;
-    let etag = etag body in
-    let rd = Wm.Rd.with_resp_headers (fun header ->
-      let header' = Cohttp.Header.remove header "ETag" in
-      Cohttp.Header.add header' "Etag" etag) rd
-    in
-    Wm.continue true rd
+    match Icalendar.parse body with
+    | Error e ->
+      Printf.printf "error %s while parsing calendar\n" e ;
+      Wm.continue false rd
+    | Ok cal ->
+      let ics = Icalendar.to_ics cal in
+      Fs.write fs name 0 (Cstruct.of_string ics) >>= fun _ ->
+      create_properties fs name content_type false (String.length ics) >>= fun _ ->
+      let etag = etag ics in
+      let rd = Wm.Rd.with_resp_headers (fun header ->
+          let header' = Cohttp.Header.remove header "ETag" in
+          Cohttp.Header.add header' "Etag" etag) rd
+      in
+      Wm.continue true rd
 
   method private read_calendar rd =
     let file = self#id rd in
-    Fs.size fs file >>= function
-    | Error _ -> Wm.continue `Empty rd
-    | Ok bytes ->
-      Fs.read fs (self#id rd) 0 (Int64.to_int bytes) >>= function
-      | Error _ -> assert false
-      | Ok data ->
-        let value = String.concat "" @@ List.map Cstruct.to_string data in
-        get_properties fs file >>= function
-        | Error _ -> Wm.continue `Empty rd
-        | Ok data ->
-          match Webdav.string_to_tree Cstruct.(to_string @@ concat data) with
-          | None -> Wm.continue `Empty rd
-          | Some xml ->
-            let get_ct xml = match xml with
-              | `Node (a, "prop", children) ->
-                let ct =
-                  List.find
-                    (function `Node (_, "getcontenttype", _) -> true | _ -> false)
-                    children
+    Printf.printf "reading calendar %s\n" file ;
+    Fs.stat fs file >>= function
+    | Error e ->
+      Format.printf "error stat %s: %a\n" file Fs.pp_error e ;
+      Wm.continue `Empty rd
+    | Ok stat when stat.Mirage_fs.directory ->
+      Printf.printf "is a directory\n" ;
+      begin
+        Fs.listdir fs file >>= function
+        | Error e ->
+          Format.printf "error %a while listing directory %s\n" Fs.pp_error e file ;
+          Wm.continue `Empty rd
+        | Ok files ->
+          let print_file file =
+            Printf.sprintf "<tr><td><a href=\"%s/%s\">%s</a></td><td>text/calendar</td></tr>"
+              prefix file file
+          in
+          let files = String.concat "\n" (List.map print_file files) in
+          get_properties fs file >>= function
+          | Error e ->
+            Format.printf "error %a while reading directory properties"
+              Fs.pp_error e ;
+            Wm.continue `Empty rd
+          | Ok props ->
+            match Webdav.string_to_tree Cstruct.(to_string @@ concat props) with
+            | None -> Wm.continue `Empty rd
+            | Some xml ->
+              match Webdav.filter_in_ps [ "getlastmodified" ] xml with
+              | `Node (_, _, (`Node (_, _, `Pcdata lastmodified :: _) :: _)) ->
+                let rd =
+                  Wm.Rd.with_resp_headers (fun header ->
+                      let header' = Cohttp.Header.remove header "Etag" in
+                      let header'' = Cohttp.Header.add header' "Etag" (etag files) in
+                      let header''' = Cohttp.Header.remove header'' "Last-modified" in
+                      Cohttp.Header.add header''' "Last-modified" lastmodified)
+                    rd
                 in
-                begin match ct with
-                  | `Node (_, _, [ `Pcdata contenttype ]) -> contenttype
-                  | _ -> assert false
-                end
-              | _ -> assert false
-            in
-            let ct = try get_ct xml with _ -> "text/calendar" in
-            let rd =
-              Wm.Rd.with_resp_headers (fun header ->
-                  let header' = Cohttp.Header.remove header "Content-Type" in
-                  Cohttp.Header.add header' "Content-Type" ct)
-                rd
-            in
-            Wm.continue (`String value) rd
+                Wm.continue (`String files) rd
+      end
+    | Ok _stat ->
+      Fs.size fs file >>= function
+      | Error e ->
+        Format.printf "error for size %s: %a\n" file Fs.pp_error e ;
+        Wm.continue `Empty rd
+      | Ok bytes ->
+        Fs.read fs (self#id rd) 0 (Int64.to_int bytes) >>= function
+        | Error _ -> assert false
+        | Ok data ->
+          let value = String.concat "" @@ List.map Cstruct.to_string data in
+          get_properties fs file >>= function
+          | Error _ -> Wm.continue `Empty rd
+          | Ok data ->
+            match Webdav.string_to_tree Cstruct.(to_string @@ concat data) with
+            | None -> Wm.continue `Empty rd
+            | Some xml ->
+              let get_ct xml = match xml with
+                | `Node (a, "prop", children) ->
+                  let ct =
+                    List.find
+                      (function `Node (_, "getcontenttype", _) -> true | _ -> false)
+                      children
+                  in
+                  begin match ct with
+                    | `Node (_, _, [ `Pcdata contenttype ]) -> contenttype
+                    | _ -> assert false
+                  end
+                | _ -> assert false
+              in
+              let ct = try get_ct xml with _ -> "text/calendar" in
+              let rd =
+                Wm.Rd.with_resp_headers (fun header ->
+                    let header' = Cohttp.Header.remove header "Content-Type" in
+                    Cohttp.Header.add header' "Content-Type" ct)
+                  rd
+              in
+              Wm.continue (`String value) rd
 
   method private to_json rd =
     let file = self#id rd in
@@ -212,13 +259,13 @@ class handler prefix fs = object(self)
     ] rd
 
   method resource_exists rd =
-    Printf.printf "RESOURCE exists %s \n" (self#id rd);
+    (* Printf.printf "RESOURCE exists %s \n" (self#id rd); *)
     Fs.stat fs (self#id rd) >>= function
-    | Error _ -> 
-      Printf.printf "FALSE\n";
+    | Error _ ->
+      (* Printf.printf "FALSE\n"; *)
       Wm.continue false rd
-    | Ok _ -> 
-      Printf.printf "TRUE\n";
+    | Ok _ ->
+      (* Printf.printf "TRUE\n"; *)
       Wm.continue true rd
 
   method content_types_provided rd =
@@ -297,7 +344,7 @@ class handler prefix fs = object(self)
       else
         p
     in
-    Printf.printf "path is %s\n" path ;
+    (* Printf.printf "path is %s\n" path ; *)
     path
 end
 
@@ -335,10 +382,10 @@ let main () =
     (* Perform route dispatch. If [None] is returned, then the URI path did not
      * match any of the route patterns. In this case the server should return a
      * 404 [`Not_found]. *)
-    Printf.printf "resource %s meth %s headers %s\n"
+(*    Printf.printf "resource %s meth %s headers %s\n"
       (Request.resource request)
       (Code.string_of_method (Request.meth request))
-      (Header.to_string (Request.headers request)) ;
+      (Header.to_string (Request.headers request)) ; *)
     Wm.dispatch' routes ~body ~request
     >|= begin function
       | None        -> (`Not_found, Header.init (), `String "Not found", [])
