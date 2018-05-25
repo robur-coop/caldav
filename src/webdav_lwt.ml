@@ -18,7 +18,9 @@ let file_to_propertyfile filename =
 let get_properties fs filename =
   let propfile = file_to_propertyfile filename in
   Fs.size fs propfile >>= function
-  | Error e -> Lwt.return (Error e)
+  | Error e -> 
+    Format.printf "get_properties failed %s %a\n" propfile Fs.pp_error e;
+    Lwt.return (Error e)
   | Ok size -> Fs.read fs propfile 0 (Int64.to_int size)
 
 let process_properties fs prefix url f =
@@ -57,9 +59,13 @@ let process_property_leaf fs prefix req url =
    | `Props ps -> Webdav.filter_in_ps ps
   in process_properties fs prefix url f
 
-let process_files fs prefix url req els =
+(* exclude property files *)
+let real_files files =
   let ends_in_prop x = not @@ Astring.String.is_suffix ~affix:"prop.xml" x in
-  List.filter ends_in_prop (url :: els) |>
+  List.filter ends_in_prop files
+
+let process_files fs prefix url req els =
+  real_files (url :: els) |> 
   Lwt_list.map_s (process_property_leaf fs prefix req) >|= fun answers ->
   (* answers : [ `Not_found | `Single_response of Tyxml.Xml.node ] list *)
   let nodes = List.fold_left (fun acc element ->
@@ -107,17 +113,85 @@ let error_xml element =
   Tyxml.Xml.(node ~a:[ dav_ns ] "error" [ node element [] ])
   |> Webdav.tyxml_to_body
 
+let ptime_to_http_date ptime = 
+  let (y, m, d), ((hh, mm, ss), _)  = Ptime.to_date_time ptime
+  and weekday = match Ptime.weekday ptime with
+  | `Mon -> "Mon"
+  | `Tue -> "Tue"
+  | `Wed -> "Wed"
+  | `Thu -> "Thu"
+  | `Fri -> "Fri"
+  | `Sat -> "Sat"
+  | `Sun -> "Sun"
+  and month = [|"Jan"; "Feb"; "Mar"; "Apr"; "May"; "Jun"; "Jul"; "Aug"; "Sep"; "Oct"; "Nov"; "Dec"|]
+  in 
+  Printf.sprintf "%s, %02d %s %04d %02d:%02d:%02d GMT" weekday d (Array.get month (m-1)) y hh mm ss 
+
 let create_properties fs name content_type is_dir length =
+  Printf.printf "Creating properties!!! %s \n" name;
   let props file =
     Webdav.create_properties ~content_type
-      is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length file
+      is_dir (ptime_to_http_date (Ptime_clock.now ())) length file
   in
   let propfile = Webdav.tyxml_to_body (props name) in
   let trailing_slash = if is_dir then "/" else "" in
   let filename = file_to_propertyfile (name ^ trailing_slash) in
   Fs.write fs filename 0 (Cstruct.of_string propfile)
 
+(* mkdir -p with properties *)
+let create_dir_rec fs name =
+  let segments = Astring.String.cuts ~sep:"/" name in
+  let rec prefixes = function
+    | [] -> []
+    | h :: t -> [] :: (List.map (fun a -> h :: a) (prefixes t)) in
+  let directories = prefixes segments in
+  let create_dir path =
+    let filename = String.concat "/" path in 
+    Mirage_fs_mem.mkdir fs filename >>= fun _ ->
+    create_properties fs filename "text/directory" true 0 >|= fun _ ->
+    Printf.printf "creating properties %s\n" filename;
+    () in 
+  Lwt_list.iter_s create_dir directories
+
 let etag str = Digest.to_hex @@ Digest.string str
+
+let last_modified_pure fs file =
+  get_properties fs file >|= function 
+  | Error e -> 
+    Format.printf "%s %a\n" file Fs.pp_error e;
+    assert false
+  | Ok props ->
+    match Webdav.string_to_tree Cstruct.(to_string @@ concat props) with
+    | None -> 
+      Printf.printf "error while building tree, file %s" file;
+      assert false
+    | Some xml ->
+      match Webdav.filter_in_ps [ "getlastmodified" ] xml with
+      | `Node (_, _, (`Node (_, _, `Pcdata last_modified :: _) :: _)) -> last_modified
+      | _ -> 
+        Printf.printf "error while retrieving last_modified, file %s" file;
+        assert false
+
+(* assumption: path is a directory - otherwise we return none *)
+(* out: ( name * typ * last_modified ) list - non-recursive *)
+let list_dir fs dir =
+  let list_file file =
+    let full_filename = dir ^ file in
+    last_modified_pure fs full_filename >>= fun last_modified ->
+    Fs.stat fs full_filename >|= function
+    | Error _ -> assert false
+    | Ok stat -> 
+    let is_dir = stat.Mirage_fs.directory in
+    full_filename, is_dir, last_modified in
+  Fs.listdir fs dir >>= function
+  | Error e -> assert false
+  | Ok files -> Lwt_list.map_p list_file (real_files files)
+
+let print_dir prefix files = 
+  let print_file (file, is_dir, last_modified) =
+    Printf.sprintf "<tr><td><a href=\"%s/%s\">%s</a></td><td>%s</td><td>%s</td></tr>"
+      prefix file file (if is_dir then "directory" else "text/calendar") last_modified in
+  String.concat "\n" (List.map print_file files)
 
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
@@ -148,6 +222,7 @@ class handler prefix fs = object(self)
       Wm.continue false rd
     | Ok cal ->
       let ics = Icalendar.to_ics cal in
+      create_dir_rec fs name >>= fun () ->
       Fs.write fs name 0 (Cstruct.of_string ics) >>= fun _ ->
       create_properties fs name content_type false (String.length ics) >>= fun _ ->
       let etag = etag ics in
@@ -169,30 +244,9 @@ class handler prefix fs = object(self)
     Fs.stat fs file >>== function
     | stat when stat.Mirage_fs.directory ->
       Printf.printf "is a directory\n" ;
-      begin
-        Fs.listdir fs file >>== fun files ->
-        let print_file file =
-          Printf.sprintf "<tr><td><a href=\"%s/%s\">%s</a></td><td>text/calendar</td></tr>"
-            prefix file file
-        in
-        let files = String.concat "\n" (List.map print_file files) in
-        get_properties fs file >>== fun props ->
-        match Webdav.string_to_tree Cstruct.(to_string @@ concat props) with
-        | None -> Wm.continue `Empty rd
-        | Some xml ->
-          match Webdav.filter_in_ps [ "getlastmodified" ] xml with
-          | `Node (_, _, (`Node (_, _, `Pcdata lastmodified :: _) :: _)) ->
-            let rd =
-              Wm.Rd.with_resp_headers (fun header ->
-                  let header' = Cohttp.Header.remove header "Etag" in
-                  let header'' = Cohttp.Header.add header' "Etag" (etag files) in
-                  let header''' = Cohttp.Header.remove header'' "Last-modified" in
-                  Cohttp.Header.add header''' "Last-modified" lastmodified)
-                rd
-            in
-            Wm.continue (`String files) rd
-      end
-
+      list_dir fs file >>= fun files ->
+      let listing = print_dir prefix files in
+      Wm.continue (`String listing) rd
     | _ -> 
       Fs.size fs file >>== fun bytes ->
       Fs.read fs (self#id rd) 0 (Int64.to_int bytes) >>== fun data ->
@@ -265,31 +319,39 @@ class handler prefix fs = object(self)
       "text/calendar", self#write_calendar
     ] rd
 
-  method process_property rd =
-    Printf.printf "processing property1!!!!\n" ;
-    let rd = Wm.Rd.with_resp_headers (fun header ->
-      let header' = Cohttp.Header.remove header "Content-Type" in
-      Cohttp.Header.add header' "Content-Type" "application/xml") rd in
-
-    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
-    assert (body <> "");
-    Printf.printf "BODY::: %s\n" body; 
+  method private process_propfind rd =
     let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
+    let find_property req rd = 
+      propfind fs (self#id rd) prefix req >>= function 
+      | `Response body -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String body }
+      | `Property_not_found -> Wm.continue `Property_not_found rd in
     match parse_depth depth with
     | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
     | Ok `Infinity ->
       let body = `String (error_xml "propfind-finite-depth") in
+      Printf.printf "FORBIDDEN\n";
       Wm.respond ~body (to_status `Forbidden) rd
     | Ok d ->
       (* TODO actually deal with depth d (`Zero or `One) *)
-      match Webdav.read_propfind body with
+      Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body -> 
+      match Webdav.parse_propfind_xml body with
       | None -> Wm.continue `Property_not_found rd
-      | Some req ->
-        propfind fs (self#id rd) prefix req >>= function 
-        | `Response body ->
-          Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String body }
-        | `Property_not_found ->
-          Wm.continue `Property_not_found rd
+      | Some req -> find_property req rd
+
+  method private process_proppatch rd =
+    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    Printf.printf "PROPPATCH:%s\n" body; 
+    let apply_update update rd = Wm.continue `Ok rd in
+    match Webdav.parse_propupdate_xml body with
+    | None -> Wm.respond (to_status `Bad_request) rd
+    | Some update -> apply_update update rd
+
+  method process_property rd =
+    let replace_header h = Cohttp.Header.replace h "Content-Type" "application/xml" in
+    let rd' = Wm.Rd.with_resp_headers replace_header rd in
+    match rd'.Wm.Rd.meth with
+    | `Other "PROPFIND" -> self#process_propfind rd' 
+    | `Other "PROPPATCH" -> self#process_proppatch rd'
 
   method delete_resource rd =
     Fs.destroy fs (self#id rd) >>= fun res ->
@@ -300,23 +362,38 @@ class handler prefix fs = object(self)
     in
     Wm.continue deleted { rd with Wm.Rd.resp_body }
 
+  method last_modified rd =
+    let file = self#id rd in
+    Printf.printf "last modified in webmachine %s\n" file;
+    let to_lwt_option = function
+    | Error _ -> Lwt.return None
+    | Ok _ -> 
+      last_modified_pure fs file >|= fun last_modified ->
+      Some last_modified in
+    Fs.stat fs file >>= to_lwt_option >>= fun res ->
+    Wm.continue res rd
+    
   method generate_etag rd =
-    let name = self#id rd in
-    Mirage_fs_mem.size fs name >>= function
+    let file = self#id rd in
+    Fs.stat fs file >>= function
     | Error _ -> Wm.continue None rd
-    | Ok size ->
-      Mirage_fs_mem.read fs name 0 (Int64.to_int size) >>= function
-      | Error _ -> Wm.continue None rd
-      | Ok bufs ->
-        let digest =
-          etag @@ Cstruct.to_string @@ Cstruct.concat bufs
-        in
-        Wm.continue (Some digest) rd
+    | Ok stat ->
+      last_modified_pure fs (self#id rd) >>= fun lm ->
+      let add_headers h = Cohttp.Header.add_list h [ ("Last-Modified", lm) ] in
+      let rd = Wm.Rd.with_resp_headers add_headers rd in
+      (if stat.Mirage_fs.directory
+      then
+        list_dir fs file >|= fun files ->
+        Some (etag ( print_dir prefix files ))
+      else  
+        Fs.read fs file 0 (Int64.to_int stat.Mirage_fs.size) >|= function
+        | Error _ -> None 
+        | Ok bufs -> Some (etag @@ Cstruct.to_string @@ Cstruct.concat bufs)) >>= fun result ->
+      Wm.continue result rd
 
   method finish_request rd =
-    let rd = Wm.Rd.with_resp_headers (fun header ->
-        Cohttp.Header.add header "DAV" "1") rd
-    in
+    let add_headers h = Cohttp.Header.add_list h [ ("DAV", "1") ] in
+    let rd = Wm.Rd.with_resp_headers add_headers rd in
     Printf.printf "returning %s\n%!"
       (Cohttp.Header.to_string rd.Wm.Rd.resp_headers) ;
     Wm.continue () rd
@@ -338,16 +415,9 @@ end
 let initialise_fs fs =
   let create_file name data =
     Fs.write fs name 0 (Cstruct.of_string data) >>= fun _ ->
-    create_properties fs name "application/json" false (String.length data)
-  and create_dir name =
-    Mirage_fs_mem.mkdir fs name >>= fun _ ->
-    create_properties fs name "text/directory" true 0
-  in
-  create_dir "" >>= fun _ ->
-  create_dir "users" >>= fun _ ->
-  create_dir "__uids__" >>= fun _ ->
-  create_dir "__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
-  create_dir "__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
+    create_properties fs name "application/json" false (String.length data) in
+  create_dir_rec fs "users" >>= fun _ ->
+  create_dir_rec fs "__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
   create_file "1" "{\"name\":\"item 1\"}" >>= fun _ ->
   create_file "2" "{\"name\":\"item 2\"}" >>= fun _ ->
   Lwt.return_unit
@@ -369,10 +439,10 @@ let main () =
     (* Perform route dispatch. If [None] is returned, then the URI path did not
      * match any of the route patterns. In this case the server should return a
      * 404 [`Not_found]. *)
-(*    Printf.printf "resource %s meth %s headers %s\n"
+    Printf.printf "resource %s meth %s headers %s\n"
       (Request.resource request)
       (Code.string_of_method (Request.meth request))
-      (Header.to_string (Request.headers request)) ; *)
+      (Header.to_string (Request.headers request)) ;
     Wm.dispatch' routes ~body ~request
     >|= begin function
       | None        -> (`Not_found, Header.init (), `String "Not found", [])

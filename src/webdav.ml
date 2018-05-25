@@ -1,5 +1,4 @@
-
-let read_propfind str =
+let parse_propfind_xml str =
   try
     let data str = assert false
     and el ((ns, name), attr) children = `N (ns, name, attr, children)
@@ -71,6 +70,11 @@ let string_to_tree str =
     ignore (Xmlm.input input) ; (* ignore DTD *)
     Some (Xmlm.input_tree ~el ~data input)
   with _ -> None
+
+let parse_propupdate_xml str =
+  match string_to_tree str with
+  | None -> None
+  | Some tree -> (* TODO *) 
 
 let rec tree_fold f s forest = match forest with
   | `Node (a, name, children) :: tail ->
