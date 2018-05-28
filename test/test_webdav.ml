@@ -12,51 +12,51 @@ let prop =
 let empty_propfind () =
   let xml = header ^ "<propfind/>" in
   Alcotest.(check (option prop) "parsing <propfind/>"
-              None (Webdav.read_propfind xml))
+              None (Webdav.parse_propfind_xml xml))
 
 let propname () =
   let xml = header ^ "<propfind><propname/></propfind>" in
   Alcotest.(check (option prop) "parsing <propfind><propname/></propfind>"
-              (Some `Propname) (Webdav.read_propfind xml))
+              (Some `Propname) (Webdav.parse_propfind_xml xml))
 
 let two_propname () =
   let xml = header ^ "<propfind><propname/><propname/></propfind>" in
   Alcotest.(check (option prop) "parsing <propfind><propname/><propname/></propfind>"
-              None (Webdav.read_propfind xml))
+              None (Webdav.parse_propfind_xml xml))
 
 let allprop () =
   let xml = header ^ "<propfind><allprop/></propfind>" in
   Alcotest.(check (option prop) "parsing <propfind><allprop/></propfind>"
-              (Some (`All_prop [])) (Webdav.read_propfind xml))
+              (Some (`All_prop [])) (Webdav.parse_propfind_xml xml))
 
 let allprop_include () =
   let xml = header ^ "<propfind><allprop/><include><foo/><bar/></include></propfind>" in
   Alcotest.(check (option prop) "parsing all prop with includes"
-              (Some (`All_prop ["foo";"bar"])) (Webdav.read_propfind xml))
+              (Some (`All_prop ["foo";"bar"])) (Webdav.parse_propfind_xml xml))
 
 let invalid_xml () =
   Alcotest.(check (option prop) "parsing header only"
-              None (Webdav.read_propfind header)) ;
+              None (Webdav.parse_propfind_xml header)) ;
   let xml = header ^ "<propfind>" in
   Alcotest.(check (option prop) "hanging paren"
-              None (Webdav.read_propfind xml)) ;
+              None (Webdav.parse_propfind_xml xml)) ;
   let xml = header ^ "<propfind" in
   Alcotest.(check (option prop) "missing bracket"
-              None (Webdav.read_propfind xml)) ;
+              None (Webdav.parse_propfind_xml xml)) ;
   let xml = header ^ "<propname/>" in
   Alcotest.(check (option prop) "missing propfind"
-              None (Webdav.read_propfind xml)) ;
+              None (Webdav.parse_propfind_xml xml)) ;
   let xml = header ^ "<propfind/>" in
   Alcotest.(check (option prop) "empty propfind"
-              None (Webdav.read_propfind xml)) ;
+              None (Webdav.parse_propfind_xml xml)) ;
   let xml = header ^ "<propfind><foo/></propfind>" in
   Alcotest.(check (option prop) "unexpected element foo"
-              None (Webdav.read_propfind xml)) ;
+              None (Webdav.parse_propfind_xml xml)) ;
   let xml = header ^ "<propfind><prop><foo><bar/></foo></prop></propfind>" in
   Alcotest.(check (option prop) "only flat property list"
-              None (Webdav.read_propfind xml))
+              None (Webdav.parse_propfind_xml xml))
 
-let read_propfind_tests = [
+let parse_propfind_xml_tests = [
   "Empty", `Quick, empty_propfind ;
   "Propname", `Quick, propname ;
   "Two propnames", `Quick, two_propname ;
@@ -65,8 +65,48 @@ let read_propfind_tests = [
   "Invalid XML", `Quick, invalid_xml ;
 ]
 
+let propupdate =
+  let module M = struct
+    type t = [ `Remove of string list | `Set of (string * Webdav.tree list) list ] list
+    let pp = Webdav.pp_propupdate
+    let equal a b = compare a b = 0
+  end in
+  (module M : Alcotest.TESTABLE with type t = M.t)
+
+
+let proppatch () =
+  let xml = header ^
+    {|<D:propertyupdate xmlns:D="DAV:"
+             xmlns:Z="http://ns.example.com/standards/z39.50/">
+       <D:set>
+         <D:prop>
+           <Z:Authors>
+             <Z:Author>Jim Whitehead</Z:Author>
+             <Z:Author>Roy Fielding</Z:Author>
+           </Z:Authors>
+         </D:prop>
+       </D:set>
+       <D:remove>
+         <D:prop><Z:Copyright-Owner/></D:prop>
+       </D:remove>
+      </D:propertyupdate>|}
+  in
+  Alcotest.check propupdate __LOC__
+    [`Set [("Authors",
+            [`Node (["xmlns", "http://ns.example.com/standards/z39.50/"],
+                    "Author", [ `Pcdata "Jim Whitehead"]) ;
+             `Node (["xmlns", "http://ns.example.com/standards/z39.50/"],
+                    "Author", [ `Pcdata "Roy Fielding" ]) ]) ] ;
+     `Remove [ "Copyright-Owner" ] ]
+    (Webdav.parse_propupdate_xml xml)
+
+let parse_propupdate_xml_tests = [
+  "propertyupdate RFC example", `Quick, proppatch
+]
+
 let tests = [
-  "Read propfind", read_propfind_tests
+  "Read propfind", parse_propfind_xml_tests ;
+  "Read propertyupdate", parse_propupdate_xml_tests ;
 ]
 
 let () =
