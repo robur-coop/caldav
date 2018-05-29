@@ -23,7 +23,7 @@ type tree = [
 let rec pp_tree fmt = function
   | `Pcdata str -> Fmt.string fmt str
   | `Node (attrib, name, children) ->
-    Fmt.pf fmt "%s: %a %a"
+    Fmt.pf fmt "(%s: %a, %a)"
       name
       Fmt.(list (pair string string)) attrib
       Fmt.(list pp_tree) children
@@ -56,21 +56,6 @@ let rec tree_fold f s forest = match forest with
     f t' s tail'
   | [] -> s
 
-(*
-  val select : ???
-
-<a>
-  <b/>
-<a/>
-
-name_equals : string -> string parser
-next_segment : 'a parser -> 'a parser -> 'a parser
-alternative : parser -> parser -> parser
-
-
-optional_segment : default -> parser -> parser
-*)
-
 let rec filter_map f = function
   | []    -> []
   | x::xs ->
@@ -78,73 +63,77 @@ let rec filter_map f = function
     | None    ->       filter_map f xs
     | Some x' -> x' :: filter_map f xs
 
-type x = [
-  | `Segment of string
-  | `Alternative of x * x
-  | `Optional_segment of string
-]
+let segment s f = (fun tree ->
+  match tree with
+  | (`Node (a, n, c) as nd) when s = n -> Some (f, nd)
+  | _ -> None)
 
-let rec pp_x fmt = function
-  | `Segment s -> Fmt.string fmt s
-  | `Alternative (a, b) -> Fmt.pf fmt "(%a|%a)" pp_x a pp_x b
-  | `Optional_segment s -> Fmt.pf fmt "opt %s" s
+let alternative a b = (fun tree ->
+  match a tree with 
+  | None -> b tree 
+  | Some x -> Some x)
 
-let rec select_path path tree =
-  let alternative a b tl t =
-    match select_path (a::tl) t with
-    | Some t' -> Some t'
-    | None -> select_path (b::tl) t
-  and segment s tl = function
-    | `Node (attr, n, ch) when s = n ->
-      let ch' = filter_map (select_path tl) ch in
-      if ch' = [] && tl <> [] then None else Some (`Node (attr, n, ch'))
-    | _ -> None
-  and optional_segment s tl = function
-    | `Node (attr, n, ch) when s = n ->
-      let ch' = filter_map (select_path tl) ch in
-      if ch' = [] && tl <> [] then None else Some (`Node (attr, n, ch'))
-    | tree' -> select_path tl tree'
-  in
+let (|||) = alternative
+
+type 'a liftf = (string * string) list -> string -> tree list -> 'a list -> 'a
+
+let rec apply (path: (tree -> ('a liftf * tree) option) list ) (tree: tree) : 'a option = 
   match path with
-  | [] -> Some tree
-  | `Alternative (a, b)::tl -> alternative a b tl tree
-  | `Segment x::zs -> segment x zs tree
-  | `Optional_segment p::tl -> optional_segment p tl tree
-  | _ -> None
+  | [] -> assert false
+  | [f] -> begin match f tree with None -> None | Some (lift, `Node (a, n, c)) -> Some (lift a n c []) | Some (lift, `Pcdata _) -> None end
+  | f::g::hs ->
+     begin match f tree with
+       | None -> None
+       | Some (lift, `Pcdata _) -> None
+       | Some (lift, `Node (a, n, c)) ->
+          let c' = filter_map (apply (g::hs)) c in
+          if c' = [] then None else Some (lift a n [] c')
+     end
+(*
+- verifiziere shape vom request-xml baum (strukturelle rekursion auf path)
+- selecte teilbaum(e) von request-xml baum den/die wir zur verarbeitung brauchen (z.b. eine liste von set und remove) (strukturelle rekursion auf path + "lift")
+=> rueckgabe: liste von transformationen fuer den property xml baum
+- wende die aenderungen auf den property-xml-baum an (strukturelle rekursion auf property xml baum?)
+*)
 
+let rec pp_transform fmt = function
+  | `Pcdata str -> Fmt.string fmt str
+  | `Node (attrib, name, children) ->
+    Fmt.pf fmt "Node (%s: %a, %a)"
+      name
+      Fmt.(list (pair string string)) attrib
+      Fmt.(list pp_transform) children
+  | `Transformation (attrib, name, children) ->
+    Fmt.pf fmt "Transformation (%s: %a, %a)"
+      name
+      Fmt.(list (pair string string)) attrib
+      Fmt.(list pp_transform) children
 
-(* let rec select_path path tree =
-match path with
-| [] -> Some tree
-| f::fs ->
-   begin match f tree with
-     | None -> None
-     | Some (`Node (attr, name, ch)) ->
-        let ch' = filter_map (select_path fs) ch in
-        if ch' = [] then None else Some (`Node (attr, name, ch'))
-   end
-
-tree =
-<a>
-  <b></b>
-  <c></c>
-  <b><d></d><b/>
-</a>
-
---> <a><b></b><b><d></d></b></a>
-
-path = (string "a") --> [ a ; b|c ]
-path = (string "a" ; string "b") --> [ a ; b ]
- *)
-
-
+let rec pp_prop fmt = function
+  | `Propname -> Fmt.string fmt "Propname"
+  | `All_prop xs -> Fmt.pf fmt "All prop %a" Fmt.(list ~sep:(unit ",@ ") string) xs
+  | `Props xs -> Fmt.pf fmt "Props %a" Fmt.(list ~sep:(unit ",@ ") string) xs
+  | `Kids xs -> Fmt.pf fmt "Kids %a" Fmt.(list ~sep:(unit ",@ ") pp_prop) xs
+  | `Include -> Fmt.string fmt "Include"
 
 let parse_propfind_xml str =
   try
     let r = match string_to_tree str with
       | None -> assert false
       | Some tree ->
-        (*        select [ "propfind" ; ("propname" | "prop" | "allprop" ["include"]) ] *)
+        let incl a n c c' = `Include
+        and get_kids a n c c' = `Kids c'
+        and create_propname a n c c' = `Propname
+        and create_prop a n c c' = 
+          let get_names = function
+            | `Node (_, name, []) -> name
+            | _ -> assert false in
+          `Props (List.map get_names c)
+        and create_allprop a n c c' = `All_prop [] in
+        let selected_tree2 = apply [segment "propfind" get_kids;  segment "propname" create_propname ||| segment "prop" create_prop |||  segment "allprop" create_allprop ||| segment "include" incl] tree 
+        in
+        Format.printf "Using apply to select tree: %a\n" Fmt.(option ~none:(unit "No tree found") pp_prop) selected_tree2;
+        
 
         match tree with
         | `Node (attr, "propfind", children) ->
@@ -172,11 +161,6 @@ let parse_propfind_xml str =
     Some r
   with
   | _ -> None
-
-let pp_prop fmt = function
-  | `Propname -> Fmt.string fmt "Propname"
-  | `All_prop xs -> Fmt.pf fmt "All prop %a" Fmt.(list ~sep:(unit ",@ ") string) xs
-  | `Props xs -> Fmt.pf fmt "Props %a" Fmt.(list ~sep:(unit ",@ ") string) xs
 
 let pp_propupdate fmt update =
   List.iter (function
@@ -215,10 +199,10 @@ let parse_propupdate_xml str =
     List.map process_kid children
   in
   match string_to_tree str with
-  | None -> assert false
+  | None -> None
   | Some tree -> match tree with
-    | `Node (attr, "propertyupdate", children) -> process_children children
-    | _ -> assert false
+    | `Node (attr, "propertyupdate", children) -> (try Some (process_children children) with _ -> None)
+    | _ -> None
 
 let tree_to_string t =
   let f s children tail = match s with

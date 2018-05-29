@@ -91,14 +91,14 @@ let proppatch () =
        </D:remove>
       </D:propertyupdate>|}
   in
-  Alcotest.check propupdate __LOC__
-    [`Set [("Authors",
+  Alcotest.(check (option propupdate) __LOC__
+    (Some [`Set [("Authors",
             [`Node (["xmlns", "http://ns.example.com/standards/z39.50/"],
                     "Author", [ `Pcdata "Jim Whitehead"]) ;
              `Node (["xmlns", "http://ns.example.com/standards/z39.50/"],
                     "Author", [ `Pcdata "Roy Fielding" ]) ]) ] ;
-     `Remove [ "Copyright-Owner" ] ]
-    (Webdav.parse_propupdate_xml xml)
+     `Remove [ "Copyright-Owner" ] ])
+    (Webdav.parse_propupdate_xml xml))
 
 let parse_propupdate_xml_tests = [
   "propertyupdate RFC example", `Quick, proppatch
