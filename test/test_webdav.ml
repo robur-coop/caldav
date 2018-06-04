@@ -53,8 +53,9 @@ let invalid_xml () =
   Alcotest.(check (option prop) "unexpected element foo"
               None (Webdav.parse_propfind_xml xml)) ;
   let xml = header ^ "<propfind><prop><foo><bar/></foo></prop></propfind>" in
-  Alcotest.(check (option prop) "only flat property list"
-              None (Webdav.parse_propfind_xml xml))
+  Alcotest.(check (option prop) "non-flat property list"
+              (Some (`Props [ "foo" ]))
+              (Webdav.parse_propfind_xml xml))
 
 let parse_propfind_xml_tests = [
   "Empty", `Quick, empty_propfind ;

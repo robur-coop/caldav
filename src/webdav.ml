@@ -56,6 +56,21 @@ let rec tree_fold f s forest = match forest with
     f t' s tail'
   | [] -> s
 
+let rec tree_filter_map keep_leaves f = function (* : ('a -> 'b option) -> 'a forest -> 'b forest *)
+  | [] -> []
+  | (`Pcdata str as t)::ts ->
+    let ts' = tree_filter_map keep_leaves f ts in
+    if keep_leaves then
+      t :: ts'
+    else
+      ts'
+  | (`Node (a, name, children) as t)::ts ->
+    let ts' = tree_filter_map keep_leaves f ts in
+    match f t with
+    | None -> ts'
+    | Some (a', name') ->
+      `Node (a', name', tree_filter_map keep_leaves f children) :: ts'
+
 let rec filter_map f = function
   | []    -> []
   | x::xs ->
@@ -65,7 +80,7 @@ let rec filter_map f = function
 
 let segment s f = (fun tree ->
   match tree with
-  | (`Node (a, n, c) as nd) when s = n -> Some (f, nd)
+  | (`Node (a, n, c) as nd) when String.equal s n -> Some (f, nd)
   | _ -> None)
 
 let alternative a b = (fun tree ->
@@ -77,7 +92,7 @@ let (|||) = alternative
 
 type 'a liftf = (string * string) list -> string -> tree list -> 'a list -> 'a
 
-let rec apply (path: (tree -> ('a liftf * tree) option) list ) (tree: tree) : 'a option = 
+let rec select (path: (tree -> ('a liftf * tree) option) list ) (tree: tree) : 'a option = 
   match path with
   | [] -> assert false
   | [f] -> begin match f tree with None -> None | Some (lift, `Node (a, n, c)) -> Some (lift a n c []) | Some (lift, `Pcdata _) -> None end
@@ -86,7 +101,7 @@ let rec apply (path: (tree -> ('a liftf * tree) option) list ) (tree: tree) : 'a
        | None -> None
        | Some (lift, `Pcdata _) -> None
        | Some (lift, `Node (a, n, c)) ->
-          let c' = filter_map (apply (g::hs)) c in
+          let c' = filter_map (select (g::hs)) c in
           if c' = [] then None else Some (lift a n [] c')
      end
 (*
@@ -113,54 +128,111 @@ let rec pp_prop fmt = function
   | `Propname -> Fmt.string fmt "Propname"
   | `All_prop xs -> Fmt.pf fmt "All prop %a" Fmt.(list ~sep:(unit ",@ ") string) xs
   | `Props xs -> Fmt.pf fmt "Props %a" Fmt.(list ~sep:(unit ",@ ") string) xs
-  | `Kids xs -> Fmt.pf fmt "Kids %a" Fmt.(list ~sep:(unit ",@ ") pp_prop) xs
-  | `Include -> Fmt.string fmt "Include"
+
+let rec filter_map f = function
+  | []    -> []
+  | x::xs ->
+    match f x with
+    | Error e ->       filter_map f xs
+    | Ok x'   -> x' :: filter_map f xs
+
+let tree_lift f node_p children_p =
+  (fun tree ->
+     match node_p tree with
+     | Error e -> Error e
+     | Ok node ->
+       let ch' = match tree with
+         | `Node (_, _, ch) -> filter_map children_p ch
+         | `Pcdata _        -> []
+       in
+       f node ch')
+
+let name string = function
+  | (`Node (_, name, _) as node) ->
+    if String.equal name string then
+      Ok node
+    else
+      Error ("expected " ^ string ^ ", but found " ^ name)
+  | _ ->
+    Error ("expected " ^ string ^ ", but got pcdata")
+
+let any tree = Ok tree
+
+let alternative a b =
+  (fun tree ->
+     match a tree with
+     | Error _ -> b tree
+     | Ok x    -> Ok x)
+
+let (>>=) p f =
+  (fun tree -> match p tree with
+     | Ok x    -> f x
+     | Error e -> Error e)
+
+let extract_name = function
+  | `Node (_, n, _) -> Ok n
+  | `Pcdata _       -> Error "couldn't extract name from pcdata"
+
+let extract_name_value = function
+  | `Node (_, n, c) -> Ok (n, c)
+  | `Pcdata _       -> Error "couldn't extract name and value from pcdata"
+
+let leaf_node = function
+  | `Node (_, _, []) as n -> Ok n
+  | _                     -> Error "not a leaf"
+
+let (|||) = alternative
+let (>>|) = Rresult.R.Infix.(>>|)
+
+let is_empty = function
+  | [] -> Ok ()
+  | _ -> Error "expected no children, but got some"
+
+let non_empty = function
+  | [] -> Error "expected non-empty, got empty"
+  | _  -> Ok ()
+
+let run p tree = p tree
+
+type res = [
+  | `All_prop of string list
+  | `Propname
+  | `Props of string list
+]
+
+let apply x a b = x a b
 
 let parse_propfind_xml str =
-  try
-    let r = match string_to_tree str with
-      | None -> assert false
-      | Some tree ->
-        let incl a n c c' = `Include
-        and get_kids a n c c' = `Kids c'
-        and create_propname a n c c' = `Propname
-        and create_prop a n c c' = 
-          let get_names = function
-            | `Node (_, name, []) -> name
-            | _ -> assert false in
-          `Props (List.map get_names c)
-        and create_allprop a n c c' = `All_prop [] in
-        let selected_tree2 = apply [segment "propfind" get_kids;  segment "propname" create_propname ||| segment "prop" create_prop |||  segment "allprop" create_allprop ||| segment "include" incl] tree 
-        in
-        Format.printf "Using apply to select tree: %a\n" Fmt.(option ~none:(unit "No tree found") pp_prop) selected_tree2;
-        
-
-        match tree with
-        | `Node (attr, "propfind", children) ->
-          begin match children with
-            | [ `Node (_, "propname", []) ] -> `Propname
-            | [ `Node (_, "prop", props) ] ->
-              let children =
-                List.map (function
-                  | `Node (_, name, []) -> name
-                  | _ -> assert false) props
-              in
-              `Props children
-            | [ `Node (_, "allprop", []) ] -> `All_prop []
-            | [ `Node (_, "allprop", []) ; `Node (_, "include", includes) ] ->
-              let successors =
-              List.map (function
-                    | `Node (_, name, []) -> name
-                    | _ -> assert false) includes
-              in
-              `All_prop successors
-            | _ -> assert false
-          end
-        | _ -> assert false
+  match string_to_tree str with
+  | None -> None
+  | Some tree ->
+    let tree_grammar =
+      tree_lift
+        (fun _ c -> match c with
+           | [ #res as r ] -> Ok r
+           | [ `Include _ ] -> Error "lonely include"
+           | [ `All_prop _ ; `Include is ] -> Ok (`All_prop is)
+           | _ -> Error "broken")
+        (name "propfind")
+        ((tree_lift
+            (fun _ c -> is_empty c >>| fun () -> `Propname)
+            (name "propname") any)
+         ||| (tree_lift
+                (fun _ c -> non_empty c >>| fun () -> `Props c)
+                (name "prop") (any >>= extract_name))
+         ||| (tree_lift
+                (fun _ c -> is_empty c >>| fun () -> `All_prop [])
+                (name "allprop") any)
+         ||| (tree_lift
+                (fun _ c -> non_empty c >>| fun () -> `Include c)
+                (name "include") (any >>= extract_name)))
     in
-    Some r
-  with
-  | _ -> None
+    match run tree_grammar tree with
+    | Error e ->
+      Format.printf "error %s while parsing tree\n" e ; None
+    | Ok tree ->
+      Format.printf "Parsed tree with tree_grammar: %a\n" pp_prop tree;
+      Some tree
 
 let pp_propupdate fmt update =
   List.iter (function
@@ -170,39 +242,33 @@ let pp_propupdate fmt update =
         Fmt.pf fmt "Remove %a" Fmt.(list ~sep:(unit ",@ ") string) xs
     ) update
 
+let exactly_one = function
+  | [ x ] -> Ok x
+  | _     -> Error "expected exactly one child"
+
 let parse_propupdate_xml str =
-  let process_children children =
-    let process_kid = function
-      | `Node (_, "set", [ `Node (_, "prop", children) ]) ->
-        let children =
-          List.map (function
-              | `Node (_, name, v) -> (name, v)
-              | _ -> assert false)
-            children
-        in
-        `Set children
-      | `Node (_, "remove", [ `Node (_, "prop", children) ]) ->
-        let children =
-          List.map (function
-              | `Node (_, name, []) -> name
-              | _ -> assert false)
-            children
-        in
-        `Remove children
-      | `Node (_, name, children) ->
-        Printf.eprintf "name is %s, %d children\n%!" name (List.length children) ;
-        assert false
-      | `Pcdata str ->
-        Printf.eprintf "got pcdata FF%sFF\n%!" str ;
-        assert false
+  let propupdate =
+    let prop f =
+      tree_lift (fun _ c -> Ok c) (name "prop") (any >>= f)
     in
-    List.map process_kid children
+    tree_lift
+      (fun _ c -> Ok c)
+      (name "propertyupdate")
+      ((tree_lift
+          (fun _ c -> exactly_one c >>| fun kid -> `Set kid)
+          (name "set")
+          (prop extract_name_value))
+       ||| (tree_lift
+              (fun _ c -> exactly_one c >>| fun kid -> `Remove kid)
+              (name "remove")
+              (prop extract_name)))
   in
   match string_to_tree str with
   | None -> None
-  | Some tree -> match tree with
-    | `Node (attr, "propertyupdate", children) -> (try Some (process_children children) with _ -> None)
-    | _ -> None
+  | Some tree ->
+    match run propupdate tree with
+    | Ok x -> Some x
+    | Error e -> None
 
 let tree_to_string t =
   let f s children tail = match s with
