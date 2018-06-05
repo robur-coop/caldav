@@ -1,0 +1,4 @@
+S src
+S test
+B _build/**
+PKG lwt alcotest xmlm tyxml rresult webmachine lwt ptime ptime.clock.os cohttp-lwt-unix mirage-fs-mem icalendar 
