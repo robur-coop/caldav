@@ -236,10 +236,8 @@ let parse_propfind_xml str =
 
 let pp_propupdate fmt update =
   List.iter (function
-      | `Set xs ->
-        Fmt.pf fmt "Set %a" Fmt.(list ~sep:(unit ",@ ") (pair string (list pp_tree))) xs
-      | `Remove xs ->
-        Fmt.pf fmt "Remove %a" Fmt.(list ~sep:(unit ",@ ") string) xs
+      | `Set (k, v) -> Fmt.pf fmt "Set %s %a" k (Fmt.list pp_tree) v
+      | `Remove k   -> Fmt.pf fmt "Remove %s" k
     ) update
 
 let exactly_one = function
@@ -252,14 +250,14 @@ let parse_propupdate_xml str =
       tree_lift (fun _ c -> Ok c) (name "prop") (any >>= f)
     in
     tree_lift
-      (fun _ c -> Ok c)
+      (fun _ lol -> Ok (List.flatten lol))
       (name "propertyupdate")
-      ((tree_lift
-          (fun _ c -> exactly_one c >>| fun kid -> `Set kid)
+      ((tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
+          (fun _ c -> exactly_one c >>| List.map (fun k -> `Set k))
           (name "set")
           (prop extract_name_value))
-       ||| (tree_lift
-              (fun _ c -> exactly_one c >>| fun kid -> `Remove kid)
+       ||| (tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
+              (fun _ c -> exactly_one c >>| List.map (fun k -> `Remove k))
               (name "remove")
               (prop extract_name)))
   in

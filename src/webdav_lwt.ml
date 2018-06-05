@@ -23,34 +23,34 @@ let get_properties fs filename =
     Lwt.return (Error e)
   | Ok size -> Fs.read fs propfile 0 (Int64.to_int size)
 
+let get_property_tree fs filename =
+  get_properties fs filename >|= function
+  | Error _ -> None
+  | Ok data -> Webdav.string_to_tree Cstruct.(to_string @@ concat data)
+
 let process_properties fs prefix url f =
   Printf.printf "processing properties of %s\n" url ;
-  get_properties fs url >|= function
-  | Error _ ->
-    Printf.printf "not found\n" ;
-    `Not_found
-  | Ok data ->
-    match Webdav.string_to_tree Cstruct.(to_string @@ concat data) with
-    | None -> `Not_found
-    | Some xml ->
-      Printf.printf "read tree %s\n" (Webdav.tree_to_string xml) ;
-      let xml' = f xml in
-      Printf.printf "^^^^ read tree %s\n" (Webdav.tree_to_string xml') ;
-      let res = `OK in
-      let status =
-        Format.sprintf "%s %s"
-          (Cohttp.Code.string_of_version `HTTP_1_1)
-          (Cohttp.Code.string_of_status res)
-      in
-      let open Tyxml.Xml in
-      let tree =
-        node "response"
-          [ node "href" [ pcdata (prefix ^ "/" ^ url) ] ;
-            node "propstat" [
-              Webdav.tree_to_tyxml xml' ;
-              node "status" [ pcdata status ] ] ]
-      in
-      `Single_response tree
+  get_property_tree fs url >|= function
+  | None -> `Not_found
+  | Some xml ->
+    Printf.printf "read tree %s\n" (Webdav.tree_to_string xml) ;
+    let xml' = f xml in
+    Printf.printf "^^^^ read tree %s\n" (Webdav.tree_to_string xml') ;
+    let res = `OK in
+    let status =
+      Format.sprintf "%s %s"
+        (Cohttp.Code.string_of_version `HTTP_1_1)
+        (Cohttp.Code.string_of_status res)
+    in
+    let open Tyxml.Xml in
+    let tree =
+      node "response"
+        [ node "href" [ pcdata (prefix ^ "/" ^ url) ] ;
+          node "propstat" [
+            Webdav.tree_to_tyxml xml' ;
+            node "status" [ pcdata status ] ] ]
+    in
+    `Single_response tree
 
 let process_property_leaf fs prefix req url =
   let f = match req with
@@ -127,16 +127,19 @@ let ptime_to_http_date ptime =
   in 
   Printf.sprintf "%s, %02d %s %04d %02d:%02d:%02d GMT" weekday d (Array.get month (m-1)) y hh mm ss 
 
+let write_property_tree fs name is_dir tree : (unit, [> Mirage_fs.write_error]) result Lwt.t =
+  let propfile = Webdav.tyxml_to_body tree in
+  let trailing_slash = if is_dir then "/" else "" in
+  let filename = file_to_propertyfile (name ^ trailing_slash) in
+  Fs.write fs filename 0 (Cstruct.of_string propfile)
+
 let create_properties fs name content_type is_dir length =
   Printf.printf "Creating properties!!! %s \n" name;
   let props file =
     Webdav.create_properties ~content_type
       is_dir (ptime_to_http_date (Ptime_clock.now ())) length file
   in
-  let propfile = Webdav.tyxml_to_body (props name) in
-  let trailing_slash = if is_dir then "/" else "" in
-  let filename = file_to_propertyfile (name ^ trailing_slash) in
-  Fs.write fs filename 0 (Cstruct.of_string propfile)
+  write_property_tree fs name is_dir (props name)
 
 (* mkdir -p with properties *)
 let create_dir_rec fs name =
@@ -156,21 +159,16 @@ let create_dir_rec fs name =
 let etag str = Digest.to_hex @@ Digest.string str
 
 let last_modified_pure fs file =
-  get_properties fs file >|= function 
-  | Error e -> 
-    Format.printf "%s %a\n" file Fs.pp_error e;
+  get_property_tree fs file >|= function 
+  | None -> 
+    Printf.printf "error while building tree, file %s" file;
     assert false
-  | Ok props ->
-    match Webdav.string_to_tree Cstruct.(to_string @@ concat props) with
-    | None -> 
-      Printf.printf "error while building tree, file %s" file;
+  | Some xml ->
+    match Webdav.filter_in_ps [ "getlastmodified" ] xml with
+    | `Node (_, _, (`Node (_, _, `Pcdata last_modified :: _) :: _)) -> last_modified
+    | _ -> 
+      Printf.printf "error while retrieving last_modified, file %s" file;
       assert false
-    | Some xml ->
-      match Webdav.filter_in_ps [ "getlastmodified" ] xml with
-      | `Node (_, _, (`Node (_, _, `Pcdata last_modified :: _) :: _)) -> last_modified
-      | _ -> 
-        Printf.printf "error while retrieving last_modified, file %s" file;
-        assert false
 
 (* assumption: path is a directory - otherwise we return none *)
 (* out: ( name * typ * last_modified ) list - non-recursive *)
@@ -193,20 +191,30 @@ let print_dir prefix files =
       prefix file file (if is_dir then "directory" else "text/calendar") last_modified in
   String.concat "\n" (List.map print_file files)
 
+let apply_updates fs id updates =
+  let remove name t = 
+    let f node kids tail = match node with
+    | `Node (a, n, _) -> if n = name then tail else `Node (a, n, kids) :: tail 
+    | `Pcdata d -> `Pcdata d :: tail in 
+    match Webdav.tree_fold f [] [t] with
+    | [tree] -> Some tree
+    | _ -> None
+  in 
+  let update_fun t = 
+    let apply t update = match t, update with
+      | None, _ -> None
+      | Some t, `Set (k, v) -> Some t
+      | Some t, `Remove k   -> remove k t in
+    List.fold_left apply t updates in
+  get_property_tree fs id >>= fun tree -> match update_fun tree with
+  | None -> Lwt.return (Error `Update_failed)
+  | Some t -> write_property_tree fs id false (Webdav.tree_to_tyxml t)
+      
+
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
 class handler prefix fs = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
-
-  method private of_json rd =
-    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
-    Fs.write fs (self#id rd) 0 (Cstruct.of_string body) >>= fun modified ->
-    let modified', resp_body =
-      match modified with
-      | Error _ -> false, `String "{\"status\":\"not found\"}"
-      | Ok () -> true, `String "{\"status\":\"ok\"}"
-    in
-    Wm.continue modified' { rd with Wm.Rd.resp_body }
 
   method private write_calendar rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
@@ -251,8 +259,7 @@ class handler prefix fs = object(self)
       Fs.size fs file >>== fun bytes ->
       Fs.read fs (self#id rd) 0 (Int64.to_int bytes) >>== fun data ->
       let value = String.concat "" @@ List.map Cstruct.to_string data in
-      get_properties fs file >>== fun data ->
-      match Webdav.string_to_tree Cstruct.(to_string @@ concat data) with
+      get_property_tree fs file >>= function
       | None -> Wm.continue `Empty rd
       | Some xml ->
         let get_ct xml = match xml with
@@ -275,17 +282,6 @@ class handler prefix fs = object(self)
               Cohttp.Header.add header' "Content-Type" ct)
             rd
         in
-        Wm.continue (`String value) rd
-
-  method private to_json rd =
-    let file = self#id rd in
-    Fs.size fs file >>= function
-    | Error _ -> Wm.continue `Empty rd
-    | Ok bytes ->
-      Fs.read fs (self#id rd) 0 (Int64.to_int bytes) >>= function
-      | Error _ -> assert false
-      | Ok data ->
-        let value = String.concat "" @@ List.map Cstruct.to_string data in
         Wm.continue (`String value) rd
 
   method allowed_methods rd =
@@ -341,10 +337,12 @@ class handler prefix fs = object(self)
   method private process_proppatch rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "PROPPATCH:%s\n" body; 
-    let apply_update update rd = Wm.continue `Ok rd in
     match Webdav.parse_propupdate_xml body with
     | None -> Wm.respond (to_status `Bad_request) rd
-    | Some update -> apply_update update rd
+    | Some updates -> 
+        apply_updates fs (self#id rd) updates >>= function
+        | Error _ -> Wm.respond (to_status `Bad_request) rd
+        | Ok ()   -> Wm.continue `Ok rd
 
   method process_property rd =
     let replace_header h = Cohttp.Header.replace h "Content-Type" "application/xml" in

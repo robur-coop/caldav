@@ -68,7 +68,7 @@ let parse_propfind_xml_tests = [
 
 let propupdate =
   let module M = struct
-    type t = [ `Remove of string list | `Set of (string * Webdav.tree list) list ] list
+    type t = [ `Remove of string | `Set of (string * Webdav.tree list) ] list
     let pp = Webdav.pp_propupdate
     let equal a b = compare a b = 0
   end in
@@ -93,12 +93,12 @@ let proppatch () =
       </D:propertyupdate>|}
   in
   Alcotest.(check (option propupdate) __LOC__
-    (Some [`Set [("Authors",
+    (Some [`Set ("Authors",
             [`Node (["xmlns", "http://ns.example.com/standards/z39.50/"],
                     "Author", [ `Pcdata "Jim Whitehead"]) ;
              `Node (["xmlns", "http://ns.example.com/standards/z39.50/"],
-                    "Author", [ `Pcdata "Roy Fielding" ]) ]) ] ;
-     `Remove [ "Copyright-Owner" ] ])
+                    "Author", [ `Pcdata "Roy Fielding" ]) ]) ;
+     `Remove "Copyright-Owner" ])
     (Webdav.parse_propupdate_xml xml))
 
 let parse_propupdate_xml_tests = [
