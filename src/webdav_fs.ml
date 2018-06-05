@@ -61,7 +61,13 @@ let filter_properties files =
   List.filter ends_in_prop files
 
 let size fs name = Fs.size fs name
-let read fs name offset length = Fs.read fs name offset length
+let read fs name = 
+  Fs.size fs name >>== fun length ->
+  Fs.read fs name 0 (Int64.to_int length) >>== fun data ->
+  get_property_tree fs name >|= function 
+  | None -> assert false
+  | Some props -> Ok (Cstruct.concat data, props)
+
 let stat fs name = Fs.stat fs name
 let listdir fs name = 
   Fs.listdir fs name >>|= fun files ->

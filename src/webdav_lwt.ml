@@ -112,27 +112,25 @@ let create_properties name content_type is_dir length =
 
 let etag str = Digest.to_hex @@ Digest.string str
 
-let last_modified_pure fs file =
+let get_last_modified_prop fs file =
   Fs.get_property_tree fs file >|= function 
-  | None -> 
-    Printf.printf "error while building tree, file %s" file;
-    assert false
+  | None -> Error `Invalid_xml 
   | Some xml ->
-    match Webdav.filter_in_ps [ "getlastmodified" ] xml with
-    | `Node (_, _, (`Node (_, _, `Pcdata last_modified :: _) :: _)) -> last_modified
-    | _ -> 
-      Printf.printf "error while retrieving last_modified, file %s" file;
-      assert false
+    match Webdav.get_prop "getlastmodified" xml with
+    | Some (`Node (_, _, `Pcdata last_modified :: _)) -> Ok last_modified
+    | _ -> Error `Unknown_prop 
 
 (* assumption: path is a directory - otherwise we return none *)
 (* out: ( name * typ * last_modified ) list - non-recursive *)
 let list_dir fs dir =
   let list_file file =
     let full_filename = dir ^ file in
-    last_modified_pure fs full_filename >>= fun last_modified ->
-    Fs.isdir fs full_filename >|= function
+    get_last_modified_prop fs full_filename >>= function
     | Error _ -> assert false
-    | Ok is_dir -> full_filename, is_dir, last_modified in
+    | Ok last_modified ->
+      Fs.isdir fs full_filename >|= function
+      | Error _ -> assert false
+      | Ok is_dir -> full_filename, is_dir, last_modified in
   Fs.listdir fs dir >>= function
   | Error e -> assert false
   | Ok files -> Lwt_list.map_p list_file files
@@ -223,20 +221,17 @@ class handler prefix fs = object(self)
       let listing = print_dir prefix files in
       Wm.continue (`String listing) rd
     | false -> 
-      Fs.size fs file >>== fun bytes ->
-      Fs.read fs (self#id rd) 0 (Int64.to_int bytes) >>== fun data ->
-      let value = String.concat "" @@ List.map Cstruct.to_string data in
-      Fs.get_property_tree fs file >>= function
-      | None -> Wm.continue `Empty rd
-      | Some xml ->
-        let ct = try Webdav.get_prop "contenttype" xml with _ -> "text/calendar" in
-        let rd =
-          Wm.Rd.with_resp_headers (fun header ->
-              let header' = Cohttp.Header.remove header "Content-Type" in
-              Cohttp.Header.add header' "Content-Type" ct)
-            rd
-        in
-        Wm.continue (`String value) rd
+      Fs.read fs (self#id rd) >>== fun (data, props) ->
+      let ct = match Webdav.get_prop "contenttype" props with
+        | Some (`Node (_, _, [`Pcdata ct])) -> ct
+        | _ -> "text/calendar" in
+      let rd =
+        Wm.Rd.with_resp_headers (fun header ->
+            let header' = Cohttp.Header.remove header "Content-Type" in
+            Cohttp.Header.add header' "Content-Type" ct)
+          rd
+      in
+      Wm.continue (`String (Cstruct.to_string data)) rd
 
   method allowed_methods rd =
     Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"] rd
@@ -319,28 +314,28 @@ class handler prefix fs = object(self)
     Printf.printf "last modified in webmachine %s\n" file;
     let to_lwt_option = function
     | Error _ -> Lwt.return None
-    | Ok _ -> 
-      last_modified_pure fs file >|= fun last_modified ->
-      Some last_modified in
-    Fs.stat fs file >>= to_lwt_option >>= fun res ->
+    | Ok x -> Lwt.return (Some x) in
+    get_last_modified_prop fs file >>= to_lwt_option >>= fun res ->
     Wm.continue res rd
     
   method generate_etag rd =
     let file = self#id rd in
-    Fs.stat fs file >>= function
+    Fs.isdir fs file >>= function
     | Error _ -> Wm.continue None rd
-    | Ok stat ->
-      last_modified_pure fs (self#id rd) >>= fun lm ->
-      let add_headers h = Cohttp.Header.add_list h [ ("Last-Modified", lm) ] in
-      let rd = Wm.Rd.with_resp_headers add_headers rd in
-      (if stat.Mirage_fs.directory
+    | Ok is_dir ->
+      (get_last_modified_prop fs (self#id rd) >|= function
+      | Error _ -> rd
+      | Ok lm ->
+        let add_headers h = Cohttp.Header.add_list h [ ("Last-Modified", lm) ] in
+        Wm.Rd.with_resp_headers add_headers rd) >>= fun rd ->
+      (if is_dir
       then
         list_dir fs file >|= fun files ->
         Some (etag ( print_dir prefix files ))
       else  
-        Fs.read fs file 0 (Int64.to_int stat.Mirage_fs.size) >|= function
+        Fs.read fs file >|= function
         | Error _ -> None 
-        | Ok bufs -> Some (etag @@ Cstruct.to_string @@ Cstruct.concat bufs)) >>= fun result ->
+        | Ok (data, _) -> Some (etag @@ Cstruct.to_string data)) >>= fun result ->
       Wm.continue result rd
 
   method finish_request rd =

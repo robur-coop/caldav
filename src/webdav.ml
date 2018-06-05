@@ -294,16 +294,10 @@ let filter_in_ps ps xml =
 
 let get_prop p xml = match xml with
   | `Node (a, "prop", children) ->
-    let ct =
-      List.find
+      List.find_opt
         (function `Node (_, p, _) -> true | _ -> false)
         children
-    in
-    begin match ct with
-      | `Node (_, _, [ `Pcdata d ]) -> d
-      | _ -> assert false
-    end
-  | _ -> assert false
+  | _ -> None
 
 let tree_to_tyxml t =
   let attrib_to_tyxml (name, value) =
