@@ -12,25 +12,9 @@ module Wm = struct
   include Webmachine.Make(Cohttp_lwt_unix__Io)
 end
 
-let file_to_propertyfile filename =
-  filename ^ ".prop.xml"
-
-let get_properties fs filename =
-  let propfile = file_to_propertyfile filename in
-  Fs.size fs propfile >>= function
-  | Error e -> 
-    Format.printf "get_properties failed %s %a\n" propfile Fs.pp_error e;
-    Lwt.return (Error e)
-  | Ok size -> Fs.read fs propfile 0 (Int64.to_int size)
-
-let get_property_tree fs filename =
-  get_properties fs filename >|= function
-  | Error _ -> None
-  | Ok data -> Webdav.string_to_tree Cstruct.(to_string @@ concat data)
-
 let process_properties fs prefix url f =
   Printf.printf "processing properties of %s\n" url ;
-  get_property_tree fs url >|= function
+  Fs.get_property_tree fs url >|= function
   | None -> `Not_found
   | Some xml ->
     Printf.printf "read tree %s\n" (Webdav.tree_to_string xml) ;
@@ -127,39 +111,15 @@ let ptime_to_http_date ptime =
   in 
   Printf.sprintf "%s, %02d %s %04d %02d:%02d:%02d GMT" weekday d (Array.get month (m-1)) y hh mm ss 
 
-let write_property_tree fs name is_dir tree : (unit, [> Mirage_fs.write_error]) result Lwt.t =
-  let propfile = Webdav.tyxml_to_body tree in
-  let trailing_slash = if is_dir then "/" else "" in
-  let filename = file_to_propertyfile (name ^ trailing_slash) in
-  Fs.write fs filename 0 (Cstruct.of_string propfile)
-
-let create_properties fs name content_type is_dir length =
+let create_properties name content_type is_dir length =
   Printf.printf "Creating properties!!! %s \n" name;
-  let props file =
-    Webdav.create_properties ~content_type
-      is_dir (ptime_to_http_date (Ptime_clock.now ())) length file
-  in
-  write_property_tree fs name is_dir (props name)
-
-(* mkdir -p with properties *)
-let create_dir_rec fs name =
-  let segments = Astring.String.cuts ~sep:"/" name in
-  let rec prefixes = function
-    | [] -> []
-    | h :: t -> [] :: (List.map (fun a -> h :: a) (prefixes t)) in
-  let directories = prefixes segments in
-  let create_dir path =
-    let filename = String.concat "/" path in 
-    Mirage_fs_mem.mkdir fs filename >>= fun _ ->
-    create_properties fs filename "text/directory" true 0 >|= fun _ ->
-    Printf.printf "creating properties %s\n" filename;
-    () in 
-  Lwt_list.iter_s create_dir directories
+  Webdav.create_properties ~content_type
+    is_dir (ptime_to_http_date (Ptime_clock.now ())) length name
 
 let etag str = Digest.to_hex @@ Digest.string str
 
 let last_modified_pure fs file =
-  get_property_tree fs file >|= function 
+  Fs.get_property_tree fs file >|= function 
   | None -> 
     Printf.printf "error while building tree, file %s" file;
     assert false
@@ -206,10 +166,25 @@ let apply_updates fs id updates =
       | Some t, `Set (k, v) -> Some t
       | Some t, `Remove k   -> remove k t in
     List.fold_left apply t updates in
-  get_property_tree fs id >>= fun tree -> match update_fun tree with
+  Fs.get_property_tree fs id >>= fun tree -> match update_fun tree with
   | None -> assert false
-  | Some t -> write_property_tree fs id false (Webdav.tree_to_tyxml t)
-      
+  | Some t -> Fs.write_property_tree fs id false (Webdav.tree_to_tyxml t)
+
+let create_dir_rec fs name =
+  let segments = Astring.String.cuts ~sep:"/" name in
+  let rec prefixes = function
+    | [] -> []
+    | h :: t -> [] :: (List.map (fun a -> h :: a) (prefixes t)) in
+  let directories = prefixes segments in
+  let create_dir path =
+    let filename = String.concat "/" path in 
+    Fs.mkdir fs filename >>= fun _ ->
+    let props = create_properties filename "text/directory" true 0 in
+    Fs.write_property_tree fs filename true props
+    >|= fun _ ->
+    Printf.printf "creating properties %s\n" filename;
+    () in 
+  Lwt_list.iter_s create_dir directories
 
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
@@ -231,8 +206,8 @@ class handler prefix fs = object(self)
     | Ok cal ->
       let ics = Icalendar.to_ics cal in
       create_dir_rec fs name >>= fun () ->
-      Fs.write fs name 0 (Cstruct.of_string ics) >>= fun _ ->
-      create_properties fs name content_type false (String.length ics) >>= fun _ ->
+      let props = create_properties name content_type false (String.length ics) in 
+      Fs.write fs name (Cstruct.of_string ics) props >>= fun _ ->
       let etag = etag ics in
       let rd = Wm.Rd.with_resp_headers (fun header ->
           let header' = Cohttp.Header.remove header "ETag" in
@@ -259,7 +234,7 @@ class handler prefix fs = object(self)
       Fs.size fs file >>== fun bytes ->
       Fs.read fs (self#id rd) 0 (Int64.to_int bytes) >>== fun data ->
       let value = String.concat "" @@ List.map Cstruct.to_string data in
-      get_property_tree fs file >>= function
+      Fs.get_property_tree fs file >>= function
       | None -> Wm.continue `Empty rd
       | Some xml ->
         let get_ct xml = match xml with
@@ -412,8 +387,9 @@ end
 
 let initialise_fs fs =
   let create_file name data =
-    Fs.write fs name 0 (Cstruct.of_string data) >>= fun _ ->
-    create_properties fs name "application/json" false (String.length data) in
+    let props = create_properties name "application/json" false (String.length data) in
+    Fs.write fs name (Cstruct.of_string data) props
+  in
   create_dir_rec fs "users" >>= fun _ ->
   create_dir_rec fs "__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
   create_file "1" "{\"name\":\"item 1\"}" >>= fun _ ->
