@@ -292,6 +292,19 @@ let filter_in_ps ps xml =
     `Node (a, "prop", c')
   | _ -> assert false
 
+let get_prop p xml = match xml with
+  | `Node (a, "prop", children) ->
+    let ct =
+      List.find
+        (function `Node (_, p, _) -> true | _ -> false)
+        children
+    in
+    begin match ct with
+      | `Node (_, _, [ `Pcdata d ]) -> d
+      | _ -> assert false
+    end
+  | _ -> assert false
+
 let tree_to_tyxml t =
   let attrib_to_tyxml (name, value) =
     Tyxml.Xml.string_attrib name (Tyxml_xml.W.return value)

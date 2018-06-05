@@ -43,14 +43,8 @@ let process_property_leaf fs prefix req url =
    | `Props ps -> Webdav.filter_in_ps ps
   in process_properties fs prefix url f
 
-(* exclude property files *)
-let real_files files =
-  let ends_in_prop x = not @@ Astring.String.is_suffix ~affix:"prop.xml" x in
-  List.filter ends_in_prop files
-
 let process_files fs prefix url req els =
-  real_files (url :: els) |> 
-  Lwt_list.map_s (process_property_leaf fs prefix req) >|= fun answers ->
+  Lwt_list.map_s (process_property_leaf fs prefix req) (url :: els) >|= fun answers ->
   (* answers : [ `Not_found | `Single_response of Tyxml.Xml.node ] list *)
   let nodes = List.fold_left (fun acc element ->
       match element with
@@ -136,14 +130,12 @@ let list_dir fs dir =
   let list_file file =
     let full_filename = dir ^ file in
     last_modified_pure fs full_filename >>= fun last_modified ->
-    Fs.stat fs full_filename >|= function
+    Fs.isdir fs full_filename >|= function
     | Error _ -> assert false
-    | Ok stat -> 
-    let is_dir = stat.Mirage_fs.directory in
-    full_filename, is_dir, last_modified in
+    | Ok is_dir -> full_filename, is_dir, last_modified in
   Fs.listdir fs dir >>= function
   | Error e -> assert false
-  | Ok files -> Lwt_list.map_p list_file (real_files files)
+  | Ok files -> Lwt_list.map_p list_file files
 
 let print_dir prefix files = 
   let print_file (file, is_dir, last_modified) =
@@ -224,33 +216,20 @@ class handler prefix fs = object(self)
       Wm.continue `Empty rd
     | Ok res  -> f res in
 
-    Fs.stat fs file >>== function
-    | stat when stat.Mirage_fs.directory ->
+    Fs.isdir fs file >>== function
+    | true ->
       Printf.printf "is a directory\n" ;
       list_dir fs file >>= fun files ->
       let listing = print_dir prefix files in
       Wm.continue (`String listing) rd
-    | _ -> 
+    | false -> 
       Fs.size fs file >>== fun bytes ->
       Fs.read fs (self#id rd) 0 (Int64.to_int bytes) >>== fun data ->
       let value = String.concat "" @@ List.map Cstruct.to_string data in
       Fs.get_property_tree fs file >>= function
       | None -> Wm.continue `Empty rd
       | Some xml ->
-        let get_ct xml = match xml with
-          | `Node (a, "prop", children) ->
-            let ct =
-              List.find
-                (function `Node (_, "getcontenttype", _) -> true | _ -> false)
-                children
-            in
-            begin match ct with
-              | `Node (_, _, [ `Pcdata contenttype ]) -> contenttype
-              | _ -> assert false
-            end
-          | _ -> assert false
-        in
-        let ct = try get_ct xml with _ -> "text/calendar" in
+        let ct = try Webdav.get_prop "contenttype" xml with _ -> "text/calendar" in
         let rd =
           Wm.Rd.with_resp_headers (fun header ->
               let header' = Cohttp.Header.remove header "Content-Type" in
