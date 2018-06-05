@@ -1,7 +1,7 @@
 open Cohttp_lwt_unix
 open Lwt.Infix
 
-module Fs = Mirage_fs_mem
+module Fs = Webdav_fs
 
 (* Apply the [Webmachine.Make] functor to the Lwt_unix-based IO module
  * exported by cohttp. For added convenience, include the [Rd] module
@@ -207,7 +207,7 @@ let apply_updates fs id updates =
       | Some t, `Remove k   -> remove k t in
     List.fold_left apply t updates in
   get_property_tree fs id >>= fun tree -> match update_fun tree with
-  | None -> Lwt.return (Error `Update_failed)
+  | None -> assert false
   | Some t -> write_property_tree fs id false (Webdav.tree_to_tyxml t)
       
 
@@ -424,7 +424,7 @@ let main () =
   (* listen on port 8080 *)
   let port = 8080 in
   (* create the file system *)
-  Fs.connect "" >>= fun fs ->
+  Fs.connect () >>= fun fs ->
   (* the route table *)
   let routes = [
     ("/", fun () -> new handler "/" fs) ;
