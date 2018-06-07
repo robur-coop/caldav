@@ -10,8 +10,8 @@ val mkcol : state -> string ->
 val propfind : state -> prefix:string -> name:string -> body:string -> depth:string option ->
   (state * string, [ `Bad_request | `Forbidden of string | `Property_not_found ]) result Lwt.t
 
-val proppatch : state -> name:string -> body:string ->
-  (state, [ `Bad_request ]) result Lwt.t
+val proppatch : state -> prefix:string -> name:string -> body:string ->
+  (state * string, [ `Bad_request ]) result Lwt.t
 
 (*
 val delete : state -> string -> state

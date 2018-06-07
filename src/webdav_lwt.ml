@@ -180,8 +180,8 @@ class handler prefix fs = object(self)
   method private process_proppatch rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "PROPPATCH:%s\n" body;
-    Webdav_api.proppatch fs ~name:(self#id rd) ~body >>= function
-    | Ok _ -> Wm.continue `Ok rd
+    Webdav_api.proppatch fs ~prefix ~name:(self#id rd) ~body >>= function
+    | Ok (_, answer) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String answer }
     | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
   method process_property rd =
@@ -256,7 +256,7 @@ let initialise_fs fs =
     Fs.write fs name (Cstruct.of_string data) props
   in
   create_dir_rec fs "users" >>= fun _ ->
-  create_dir_rec fs "__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
+  create_dir_rec fs "__uids__/10000000-0000-0000-0000-000000000001/calendar/" >>= fun _ ->
   create_file "1" "{\"name\":\"item 1\"}" >>= fun _ ->
   create_file "2" "{\"name\":\"item 2\"}" >>= fun _ ->
   Lwt.return_unit
@@ -300,11 +300,12 @@ let main () =
         | _ -> Printf.sprintf " - %s" (String.concat ", " path)
         | exception Not_found   -> ""
       in
-      Printf.eprintf "%d - %s %s%s"
+      Printf.eprintf "%d - %s %s%s, body: %s\n"
         (Code.code_of_status status)
         (Code.string_of_method (Request.meth request))
         (Uri.path (Request.uri request))
-        path;
+        path
+        (match body with `String s -> s | `Empty -> "empty" | _ -> "unknown") ;
       (* Finally, send the response to the client *)
       Server.respond ~headers ~body ~status ()
   in

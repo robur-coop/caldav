@@ -295,7 +295,7 @@ let filter_in_ps ps xml =
 let get_prop p xml = match xml with
   | `Node (a, "prop", children) ->
       List.find_opt
-        (function `Node (_, p, _) -> true | _ -> false)
+        (function `Node (_, name, _) when name = p -> true | _ -> false)
         children
   | _ -> None
 

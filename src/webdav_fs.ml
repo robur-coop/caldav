@@ -22,10 +22,23 @@ let get_property_tree fs name =
   | Error _ -> None
   | Ok data -> Webdav.string_to_tree Cstruct.(to_string @@ concat data)
 
+(*
+GET /foo
+GET /foo/
+
+foo.prop.xml
+foo/.prop.xml
+directory "foo", propfile "foo/.prop.xml"
+
+file "bar.xml", propfile "bar.xml.prop.xml"
+file "foo/boo.ics", propfile "foo/boo.ics.prop.xml"
+ *)
+
 let write_property_tree fs name is_dir tree =
   let propfile = Webdav.tyxml_to_body tree in
   let trailing_slash = if is_dir then "/" else "" in
   let filename = file_to_propertyfile (name ^ trailing_slash) in
+  Printf.printf "writing %s, content: %s\n" filename propfile ;
   Fs.write fs filename 0 (Cstruct.of_string propfile)
 
 (*
