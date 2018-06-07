@@ -12,86 +12,9 @@ module Wm = struct
   include Webmachine.Make(Cohttp_lwt_unix__Io)
 end
 
-let process_properties fs prefix url f =
-  Printf.printf "processing properties of %s\n" url ;
-  Fs.get_property_tree fs url >|= function
-  | None -> `Not_found
-  | Some xml ->
-    Printf.printf "read tree %s\n" (Webdav.tree_to_string xml) ;
-    let xml' = f xml in
-    Printf.printf "^^^^ read tree %s\n" (Webdav.tree_to_string xml') ;
-    let res = `OK in
-    let status =
-      Format.sprintf "%s %s"
-        (Cohttp.Code.string_of_version `HTTP_1_1)
-        (Cohttp.Code.string_of_status res)
-    in
-    let open Tyxml.Xml in
-    let tree =
-      node "response"
-        [ node "href" [ pcdata (prefix ^ "/" ^ url) ] ;
-          node "propstat" [
-            Webdav.tree_to_tyxml xml' ;
-            node "status" [ pcdata status ] ] ]
-    in
-    `Single_response tree
-
-let process_property_leaf fs prefix req url =
-  let f = match req with
-   | `Propname -> Webdav.drop_pcdata
-   | `All_prop includes -> (fun id -> id)
-   | `Props ps -> Webdav.filter_in_ps ps
-  in process_properties fs prefix url f
-
-let process_files fs prefix url req els =
-  Lwt_list.map_s (process_property_leaf fs prefix req) (url :: els) >|= fun answers ->
-  (* answers : [ `Not_found | `Single_response of Tyxml.Xml.node ] list *)
-  let nodes = List.fold_left (fun acc element ->
-      match element with
-      | `Not_found -> acc
-      | `Single_response node -> node :: acc) [] answers
-  in
-  let multistatus =
-    Tyxml.Xml.(node
-                 ~a:[ string_attrib "xmlns" (Tyxml_xml.W.return "DAV:") ]
-                 "multistatus" nodes)
-  in
-  `Response (Webdav.tyxml_to_body multistatus)
-
-let dav_ns = Tyxml.Xml.string_attrib "xmlns" (Tyxml_xml.W.return "DAV:")
-
-let propfind fs url prefix req =
-  Fs.stat fs url >>= function
-  | Error _ -> assert false
-  | Ok stat when stat.directory ->
-    begin
-      Fs.listdir fs url >>= function
-      | Error _ -> assert false
-      | Ok els -> process_files fs prefix url req els
-    end
-  | Ok _ ->
-    process_property_leaf fs prefix req url >|= function
-    | `Not_found -> `Property_not_found
-    | `Single_response t ->
-      let outer =
-        Tyxml.Xml.(node ~a:[ dav_ns ] "multistatus" [ t ])
-      in
-      `Response (Webdav.tyxml_to_body outer)
-
-let parse_depth = function
-  | None -> Ok `Infinity
-  | Some "0" -> Ok `Zero
-  | Some "1" -> Ok `One
-  | Some "infinity" -> Ok `Infinity
-  | _ -> Error `Bad_request
-
 let to_status x = Cohttp.Code.code_of_status x
 
-let error_xml element =
-  Tyxml.Xml.(node ~a:[ dav_ns ] "error" [ node element [] ])
-  |> Webdav.tyxml_to_body
-
-let ptime_to_http_date ptime = 
+let ptime_to_http_date ptime =
   let (y, m, d), ((hh, mm, ss), _)  = Ptime.to_date_time ptime
   and weekday = match Ptime.weekday ptime with
   | `Mon -> "Mon"
@@ -102,7 +25,7 @@ let ptime_to_http_date ptime =
   | `Sat -> "Sat"
   | `Sun -> "Sun"
   and month = [|"Jan"; "Feb"; "Mar"; "Apr"; "May"; "Jun"; "Jul"; "Aug"; "Sep"; "Oct"; "Nov"; "Dec"|]
-  in 
+  in
   Printf.sprintf "%s, %02d %s %04d %02d:%02d:%02d GMT" weekday d (Array.get month (m-1)) y hh mm ss 
 
 let create_properties name content_type is_dir length =
@@ -140,25 +63,6 @@ let print_dir prefix files =
     Printf.sprintf "<tr><td><a href=\"%s/%s\">%s</a></td><td>%s</td><td>%s</td></tr>"
       prefix file file (if is_dir then "directory" else "text/calendar") last_modified in
   String.concat "\n" (List.map print_file files)
-
-let apply_updates fs id updates =
-  let remove name t = 
-    let f node kids tail = match node with
-    | `Node (a, n, _) -> if n = name then tail else `Node (a, n, kids) :: tail 
-    | `Pcdata d -> `Pcdata d :: tail in 
-    match Webdav.tree_fold f [] [t] with
-    | [tree] -> Some tree
-    | _ -> None
-  in 
-  let update_fun t = 
-    let apply t update = match t, update with
-      | None, _ -> None
-      | Some t, `Set (k, v) -> Some t
-      | Some t, `Remove k   -> remove k t in
-    List.fold_left apply t updates in
-  Fs.get_property_tree fs id >>= fun tree -> match update_fun tree with
-  | None -> assert false
-  | Some t -> Fs.write_property_tree fs id false (Webdav.tree_to_tyxml t)
 
 let create_dir_rec fs name =
   let segments = Astring.String.cuts ~sep:"/" name in
@@ -266,38 +170,25 @@ class handler prefix fs = object(self)
 
   method private process_propfind rd =
     let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
-    let find_property req rd = 
-      propfind fs (self#id rd) prefix req >>= function 
-      | `Response body -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String body }
-      | `Property_not_found -> Wm.continue `Property_not_found rd in
-    match parse_depth depth with
+    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    Webdav_api.propfind fs ~prefix ~name:(self#id rd) ~body ~depth >>= function
+    | Ok (_, answer) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String answer }
+    | Error `Property_not_found -> Wm.continue `Property_not_found rd
+    | Error (`Forbidden b) -> Wm.respond ~body:(`String b) (to_status `Forbidden) rd
     | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
-    | Ok `Infinity ->
-      let body = `String (error_xml "propfind-finite-depth") in
-      Printf.printf "FORBIDDEN\n";
-      Wm.respond ~body (to_status `Forbidden) rd
-    | Ok d ->
-      (* TODO actually deal with depth d (`Zero or `One) *)
-      Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body -> 
-      match Webdav.parse_propfind_xml body with
-      | None -> Wm.continue `Property_not_found rd
-      | Some req -> find_property req rd
 
   method private process_proppatch rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
-    Printf.printf "PROPPATCH:%s\n" body; 
-    match Webdav.parse_propupdate_xml body with
-    | None -> Wm.respond (to_status `Bad_request) rd
-    | Some updates -> 
-        apply_updates fs (self#id rd) updates >>= function
-        | Error _ -> Wm.respond (to_status `Bad_request) rd
-        | Ok ()   -> Wm.continue `Ok rd
+    Printf.printf "PROPPATCH:%s\n" body;
+    Webdav_api.proppatch fs ~name:(self#id rd) ~body >>= function
+    | Ok _ -> Wm.continue `Ok rd
+    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
   method process_property rd =
     let replace_header h = Cohttp.Header.replace h "Content-Type" "application/xml" in
     let rd' = Wm.Rd.with_resp_headers replace_header rd in
     match rd'.Wm.Rd.meth with
-    | `Other "PROPFIND" -> self#process_propfind rd' 
+    | `Other "PROPFIND" -> self#process_propfind rd'
     | `Other "PROPPATCH" -> self#process_proppatch rd'
 
   method delete_resource rd =
