@@ -97,74 +97,6 @@ let string_to_tree str =
     Some (Xmlm.input_tree ~el ~data input)
   with _ -> None
 
-let rec tree_filter_map keep_leaves f = function (* : ('a -> 'b option) -> 'a forest -> 'b forest *)
-  | [] -> []
-  | (`Pcdata str as t)::ts ->
-    let ts' = tree_filter_map keep_leaves f ts in
-    if keep_leaves then
-      t :: ts'
-    else
-      ts'
-  | (`Node (a, name, children) as t)::ts ->
-    let ts' = tree_filter_map keep_leaves f ts in
-    match f t with
-    | None -> ts'
-    | Some (a', name') ->
-      `Node (a', name', tree_filter_map keep_leaves f children) :: ts'
-
-let rec filter_map f = function
-  | []    -> []
-  | x::xs ->
-    match f x with
-    | None    ->       filter_map f xs
-    | Some x' -> x' :: filter_map f xs
-
-let segment s f = (fun tree ->
-  match tree with
-  | (`Node (a, n, c) as nd) when String.equal s n -> Some (f, nd)
-  | _ -> None)
-
-let alternative a b = (fun tree ->
-  match a tree with 
-  | None -> b tree 
-  | Some x -> Some x)
-
-let (|||) = alternative
-
-type 'a liftf = (string * string) list -> string -> tree list -> 'a list -> 'a
-
-let rec select (path: (tree -> ('a liftf * tree) option) list ) (tree: tree) : 'a option = 
-  match path with
-  | [] -> assert false
-  | [f] -> begin match f tree with None -> None | Some (lift, `Node (a, n, c)) -> Some (lift a n c []) | Some (lift, `Pcdata _) -> None end
-  | f::g::hs ->
-     begin match f tree with
-       | None -> None
-       | Some (lift, `Pcdata _) -> None
-       | Some (lift, `Node (a, n, c)) ->
-          let c' = filter_map (select (g::hs)) c in
-          if c' = [] then None else Some (lift a n [] c')
-     end
-(*
-- verifiziere shape vom request-xml baum (strukturelle rekursion auf path)
-- selecte teilbaum(e) von request-xml baum den/die wir zur verarbeitung brauchen (z.b. eine liste von set und remove) (strukturelle rekursion auf path + "lift")
-=> rueckgabe: liste von transformationen fuer den property xml baum
-- wende die aenderungen auf den property-xml-baum an (strukturelle rekursion auf property xml baum?)
-*)
-
-let rec pp_transform fmt = function
-  | `Pcdata str -> Fmt.string fmt str
-  | `Node (attrib, name, children) ->
-    Fmt.pf fmt "Node (%s: %a, %a)"
-      name
-      Fmt.(list (pair string string)) attrib
-      Fmt.(list pp_transform) children
-  | `Transformation (attrib, name, children) ->
-    Fmt.pf fmt "Transformation (%s: %a, %a)"
-      name
-      Fmt.(list (pair string string)) attrib
-      Fmt.(list pp_transform) children
-
 let rec pp_prop fmt = function
   | `Propname -> Fmt.string fmt "Propname"
   | `All_prop xs -> Fmt.pf fmt "All prop %a" Fmt.(list ~sep:(unit ",@ ") string) xs
@@ -241,8 +173,6 @@ type res = [
   | `Props of string list
 ]
 
-let apply x a b = x a b
-
 let parse_propfind_xml str =
   match string_to_tree str with
   | None -> None
@@ -277,7 +207,7 @@ let parse_propfind_xml str =
 
 let pp_propupdate fmt update =
   List.iter (function
-      | `Set (k, v) -> Fmt.pf fmt "Set %s %a" k (Fmt.list pp_tree) v
+      | `Set (a, k, v) -> Fmt.pf fmt "Set %a %s %a" Fmt.(list (pair string string)) a k (Fmt.list pp_tree) v
       | `Remove k   -> Fmt.pf fmt "Remove %s" k
     ) update
 
@@ -308,29 +238,5 @@ let parse_propupdate_xml str =
     match run propupdate tree with
     | Ok x -> Some x
     | Error e -> None
-
-let tree_to_string t =
-  let f s children tail = match s with
-  | `Node (a, name, _) -> " Node: " ^ name ^ "(" ^ children ^ ")(" ^ tail ^ ")"
-  | `Pcdata str -> " PCDATA: (" ^ str ^ ") " ^ tail in
-  tree_fold f "" [t]
-
-let drop_pcdata t =
-  let f s children tail = match s with
-  | `Node (a, n, c) -> `Node (a, n, children) :: tail
-  | `Pcdata str -> tail in
-  List.hd @@ tree_fold f [] [t]
-
-(* assumption: xml is <prop><a/><b/><c/></prop> *)
-let filter_in_ps ps xml =
-  match xml with
-  | `Node (a, "prop", children) ->
-    let f acc = function
-    | (`Node (a, n, c) as node) when List.mem n ps -> node :: acc
-    | _ -> acc in
-    let c' =
-      List.fold_left f [] children in
-    `Node (a, "prop", c')
-  | _ -> assert false
 
 let get_prop p map = M.find_opt p map
