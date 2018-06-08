@@ -35,6 +35,7 @@ let process_properties fs prefix url f =
             fail_propstats ; node "status" [ pcdata (status `Forbidden) ] ];
           ]
     in
+    Printf.printf "response %s\n" (Webdav.tyxml_to_body tree); 
     `Single_response tree
 
 let process_property_leaf fs prefix req url =

@@ -82,9 +82,12 @@ let string_to_tree str =
     let a =
       let namespace = match ns with
         | "" -> []
+        | ns when ns = "DAV:" -> []
         | ns -> [ ("xmlns", ns) ]
       in
-      namespace @ List.map (fun ((_ns, name), value) -> (name, value)) attrs
+      namespace @ List.map (fun ((ns, name), value) -> 
+      let ns' = if ns = "" then "" else if ns = Xmlm.ns_xml then "xml:" else ns ^ ":" in
+      (ns' ^ name, value)) attrs
     in
     `Node (a, name, children)
   in
