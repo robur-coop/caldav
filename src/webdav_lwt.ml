@@ -36,11 +36,11 @@ let create_properties name content_type is_dir length =
 let etag str = Digest.to_hex @@ Digest.string str
 
 let get_last_modified_prop fs file =
-  Fs.get_property_tree fs file >|= function 
+  Fs.get_property_map fs file >|= function 
   | None -> Error `Invalid_xml 
-  | Some xml ->
-    match Webdav.get_prop "getlastmodified" xml with
-    | Some (`Node (_, _, `Pcdata last_modified :: _)) -> Ok last_modified
+  | Some map ->
+    match Webdav.get_prop "getlastmodified" map with
+    | Some (_, [ `Pcdata last_modified ]) -> Ok last_modified
     | _ -> Error `Unknown_prop 
 
 (* assumption: path is a directory - otherwise we return none *)
@@ -74,7 +74,7 @@ let create_dir_rec fs name =
     let filename = String.concat "/" path in 
     Fs.mkdir fs filename >>= fun _ ->
     let props = create_properties filename "text/directory" true 0 in
-    Fs.write_property_tree fs filename true props
+    Fs.write_property_map fs filename props
     >|= fun _ ->
     Printf.printf "creating properties %s\n" filename;
     () in 
@@ -127,7 +127,7 @@ class handler prefix fs = object(self)
     | false -> 
       Fs.read fs (self#id rd) >>== fun (data, props) ->
       let ct = match Webdav.get_prop "contenttype" props with
-        | Some (`Node (_, _, [`Pcdata ct])) -> ct
+        | Some (_, [ `Pcdata ct ]) -> ct
         | _ -> "text/calendar" in
       let rd =
         Wm.Rd.with_resp_headers (fun header ->

@@ -13,33 +13,35 @@ let parse_depth = function
 
 let process_properties fs prefix url f =
   Printf.printf "processing properties of %s\n" url ;
-  Fs.get_property_tree fs url >|= function
+  Fs.get_property_map fs url >|= function
   | None -> `Not_found
-  | Some xml ->
-    Printf.printf "read tree %s\n" (Webdav.tree_to_string xml) ;
-    let xml' = f xml in
-    Printf.printf "^^^^ read tree %s\n" (Webdav.tree_to_string xml') ;
-    let res = `OK in
-    let status =
+  | Some map ->
+    Printf.printf "read map %s\n" (Webdav.props_to_string map) ;
+    let (success, fail) = f map in
+    let status res =
       Format.sprintf "%s %s"
         (Cohttp.Code.string_of_version `HTTP_1_1)
         (Cohttp.Code.string_of_status res)
     in
     let open Tyxml.Xml in
+    let success_propstats = node "prop" success
+    and fail_propstats = node "prop" fail in
     let tree =
       node "response"
         [ node "href" [ pcdata (prefix ^ "/" ^ url) ] ;
           node "propstat" [
-            Webdav.tree_to_tyxml xml' ;
-            node "status" [ pcdata status ] ] ]
+            success_propstats ; node "status" [ pcdata (status `OK) ] ];
+          node "propstat" [
+            fail_propstats ; node "status" [ pcdata (status `Forbidden) ] ];
+          ]
     in
     `Single_response tree
 
 let process_property_leaf fs prefix req url =
   let f = match req with
-   | `Propname -> Webdav.drop_pcdata
-   | `All_prop includes -> (fun id -> id) (* TODO: finish this *)
-   | `Props ps -> Webdav.filter_in_ps ps
+   | `Propname -> (fun m -> List.map ( fun k -> Tyxml.Xml.node k [] ) @@ List.map fst (Webdav.M.bindings m), [])
+   | `All_prop includes -> (fun m -> Webdav.props_to_tree m, []) (* TODO: finish this *)
+   | `Props ps -> (fun m -> Webdav.find_props ps m)
   in process_properties fs prefix url f
 
 let dav_ns = Tyxml.Xml.string_attrib "xmlns" (Tyxml_xml.W.return "DAV:")
@@ -94,56 +96,27 @@ let propfind state ~prefix ~name ~body ~depth =
       | `Property_not_found -> Error `Property_not_found
 
 let apply_updates fs id updates =
-  let remove name t =
-    let f node kids tail = match node with
-      | `Node (a, n, _) -> if n = name then tail else `Node (a, n, kids) :: tail
-      | `Pcdata d -> `Pcdata d :: tail
-    in
-    match Webdav.tree_fold f [] [t] with
-    | [tree] -> Some tree
-    | _ -> None
-  and set name v t =
-    match Webdav.get_prop name t with
-    | Some _ ->
-      begin
-        Printf.printf "found property %s\n" name ;
-        let f node kids tail = match node with
-          | `Node (a, n, _) -> if n = name then `Node (a, n, v) :: tail else `Node (a, n, kids) :: tail
-          | `Pcdata d -> `Pcdata d :: tail
-        in
-        match Webdav.tree_fold f [] [t] with
-        | [tree] -> Some tree
-        | _ -> None
-      end
-    | None ->
-      Printf.printf "no property %s\n" name ;
-      match t with
-      | `Node (a, "prop", k) -> Some (`Node (a, "prop", `Node ([], name, v) :: k))
-      | _ -> None
+  let set_prop k v m = match k with
+    | "resourcetype" -> None, (k, `Forbidden)
+    | _ -> 
+      (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
+      let map = Webdav.M.add k v m in
+      Printf.printf "map after set %s %s\n" k (Webdav.props_to_string map) ;
+      Some map, (k, `OK)
   in
-  let update_fun t =
-    (* if an update did not apply, t will be None! *)
-    let apply (t, propstats) update = match t, update with
-      | None, `Set (k, _) -> None, (k, `Failed_dependency) :: propstats
+  let update_fun m =
+    (* if an update did not apply, m will be None! *)
+    let apply (m, propstats) update = match m, update with
+      | None, `Set (_, k, _) -> None, (k, `Failed_dependency) :: propstats
       | None, `Remove k   -> None, (k, `Failed_dependency) :: propstats
-      | Some t, `Set (k, v) ->
-        Printf.printf "tree is %s\n" Webdav.(tyxml_to_body (tree_to_tyxml t)) ;
-        (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
-        let tree = set k v t in
-        begin match tree with
-          | None -> None, (k, `Conflict) :: propstats
-          | Some t ->
-            Printf.printf "tree after set %s %s\n"
-              k Webdav.(tyxml_to_body (tree_to_tyxml t)) ;
-            Some t, (k, `OK) :: propstats
-        end
-      | Some t, `Remove k   ->
-        match remove k t with
-        | None -> None, (k, `Conflict) :: propstats
-        | Some t -> Some t, (k, `OK) :: propstats
+      | Some m, `Set (a, k, v) -> let (m, p) = set_prop k (a, v) m in (m, p :: propstats)
+      | Some m, `Remove k ->
+        let map = Webdav.M.remove k m in
+        Printf.printf "map after remove %s %s\n" k (Webdav.props_to_string map) ;
+        Some map, (k, `OK) :: propstats
     in
-    match List.fold_left apply (t, []) updates with
-    | Some t, xs -> Some t, xs
+    match List.fold_left apply (m, []) updates with
+    | Some m, xs -> Some m, xs
     | None, xs ->
       (* some update did not apply -> tree: None *)
       let ok_to_failed (k, s) =
@@ -153,22 +126,22 @@ let apply_updates fs id updates =
       in
       None, List.map ok_to_failed xs
   in
-  Fs.get_property_tree fs id >>= fun tree -> match update_fun tree with
-  | None, xs -> assert false
-  | Some t, xs ->
-    let propstats =
-      List.map (fun (name, status) ->
-          let status_code =
-            Format.sprintf "%s %s"
-              (Cohttp.Code.string_of_version `HTTP_1_1)
-              (Cohttp.Code.string_of_status status)
-          in
-          Tyxml.Xml.(node "propstat" [
-              node "prop" [node name []] ;
-              node "status" [ pcdata status_code ] ]))
-        xs
-    in
-    Fs.write_property_tree fs id true (Webdav.tree_to_tyxml t) >|= function
+  Fs.get_property_map fs id >>= fun map -> 
+  let map', xs = update_fun map in
+  let propstats =
+    List.map (fun (name, status) ->
+        let status_code =
+          Format.sprintf "%s %s"
+            (Cohttp.Code.string_of_version `HTTP_1_1)
+            (Cohttp.Code.string_of_status status)
+        in
+        Tyxml.Xml.(node "propstat" [
+            node "prop" [node name []] ;
+            node "status" [ pcdata status_code ] ]))
+      xs in
+  (match map' with
+  | None -> Lwt.return (Ok ())
+  | Some m -> Fs.write_property_map fs id m) >|= function
     | Error e -> Error e
     | Ok () -> Ok propstats
 

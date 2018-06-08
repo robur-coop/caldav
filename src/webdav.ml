@@ -1,24 +1,63 @@
-
-let create_properties ?(content_type = "text/html") ?(language = "en") is_dir timestamp length filename =
-  let open Tyxml.Xml in
-  let rtype = if is_dir then [ leaf "collection" ] else [] in
-  let filename = if filename = "" then "hinz und kunz" else filename in
-  node "prop" [
-    node "creationdate" [ pcdata timestamp ] ;
-    node "displayname" [ pcdata filename ] ;
-    node "getcontentlanguage" [ pcdata language ] ;
-    node "getcontenttype" [ pcdata content_type ] ;
-    node "getlastmodified" [ pcdata timestamp ] ;
-    node "getcontentlength" [ pcdata (string_of_int length) ] ;
-    (* node "lockdiscovery" *)
-    node "resourcetype" rtype ;
-    (* node "supportedlock" *)
-  ]
+module M = Map.Make(String)
 
 type tree = [
   | `Pcdata of string
   | `Node of (string * string) list * string * tree list
 ]
+
+let rec tree_fold f s forest = match forest with
+  | `Node (a, name, children) :: tail ->
+    let children' = tree_fold f s children
+    and tail' = tree_fold f s tail in
+    f (`Node (a, name, children)) children' tail'
+  | (`Pcdata _ as t') :: tail ->
+    let tail' = tree_fold f s tail in
+    f t' s tail'
+  | [] -> s
+
+let tyxml_to_body t =
+  Format.asprintf "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n%a"
+    (Tyxml.Xml.pp ()) t
+
+let attrib_to_tyxml (name, value) =
+  Tyxml.Xml.string_attrib name (Tyxml_xml.W.return value)
+
+let tree_to_tyxml t =
+  let f s children tail = match s with
+  | `Node (a, n, c) ->
+    let a' = List.map attrib_to_tyxml a in
+    Tyxml.Xml.node ~a:a' n (Tyxml_xml.W.return children) :: tail
+  | `Pcdata str -> Tyxml.Xml.pcdata (Tyxml_xml.W.return str) :: tail
+  in List.hd @@ tree_fold f [] [t]
+
+let props_to_tree m =
+  M.fold (fun k (a, v) acc -> 
+    let a' = List.map attrib_to_tyxml a in 
+    let children = List.map tree_to_tyxml v in 
+    Tyxml.Xml.node ~a:a' k children :: acc)
+  m []
+
+let props_to_string m =
+  let c = props_to_tree m in
+  tyxml_to_body (Tyxml.Xml.node "prop" c)
+
+let find_props ps m =
+  List.fold_left (fun (s, f) k -> match M.find_opt k m with
+  | None        -> (s, Tyxml.Xml.node k [] :: f)
+  | Some (a, v) -> (Tyxml.Xml.node ~a:(List.map attrib_to_tyxml a) k (List.map tree_to_tyxml v) :: s, f)) ([], []) ps
+
+let create_properties ?(content_type = "text/html") ?(language = "en") is_dir timestamp length filename =
+  let rtype = if is_dir then [ `Node ([], "collection", []) ] else [] in
+  let filename = if filename = "" then "hinz und kunz" else filename in
+  M.add "creationdate" ([], [ `Pcdata timestamp ]) @@
+  M.add "displayname" ([], [ `Pcdata filename ]) @@
+  M.add "getcontentlanguage" ([], [ `Pcdata language ]) @@
+  M.add "getcontenttype" ([], [ `Pcdata content_type ]) @@
+  M.add "getlastmodified" ([], [ `Pcdata timestamp ]) @@
+  M.add "getcontentlength" ([], [ `Pcdata (string_of_int length) ]) @@
+  (* M.add "lockdiscovery" *)
+  M.add "resourcetype" ([], rtype) M.empty
+  (* M.add "supportedlock" *)
 
 let rec pp_tree fmt = function
   | `Pcdata str -> Fmt.string fmt str
@@ -27,6 +66,15 @@ let rec pp_tree fmt = function
       name
       Fmt.(list (pair string string)) attrib
       Fmt.(list pp_tree) children
+
+let prop_tree_to_map t =
+  match t with
+  | `Node (_, "prop", children) -> 
+    List.fold_left (fun m c -> match c with
+    | `Node (a, k, v) -> M.add k (a, v) m
+    | `Pcdata _ -> assert false)
+    M.empty children
+  | _ -> assert false
 
 let string_to_tree str =
   let data str = `Pcdata str
@@ -45,16 +93,6 @@ let string_to_tree str =
     ignore (Xmlm.input input) ; (* ignore DTD *)
     Some (Xmlm.input_tree ~el ~data input)
   with _ -> None
-
-let rec tree_fold f s forest = match forest with
-  | `Node (a, name, children) :: tail ->
-    let children' = tree_fold f s children
-    and tail' = tree_fold f s tail in
-    f (`Node (a, name, children)) children' tail'
-  | (`Pcdata _ as t') :: tail ->
-    let tail' = tree_fold f s tail in
-    f t' s tail'
-  | [] -> s
 
 let rec tree_filter_map keep_leaves f = function (* : ('a -> 'b option) -> 'a forest -> 'b forest *)
   | [] -> []
@@ -174,7 +212,7 @@ let extract_name = function
   | `Pcdata _       -> Error "couldn't extract name from pcdata"
 
 let extract_name_value = function
-  | `Node (_, n, c) -> Ok (n, c)
+  | `Node (a, n, c) -> Ok (a, n, c)
   | `Pcdata _       -> Error "couldn't extract name and value from pcdata"
 
 let leaf_node = function
@@ -292,24 +330,4 @@ let filter_in_ps ps xml =
     `Node (a, "prop", c')
   | _ -> assert false
 
-let get_prop p xml = match xml with
-  | `Node (a, "prop", children) ->
-      List.find_opt
-        (function `Node (_, name, _) when name = p -> true | _ -> false)
-        children
-  | _ -> None
-
-let tree_to_tyxml t =
-  let attrib_to_tyxml (name, value) =
-    Tyxml.Xml.string_attrib name (Tyxml_xml.W.return value)
-  in
-  let f s children tail = match s with
-  | `Node (a, n, c) ->
-    let a' = List.map attrib_to_tyxml a in
-    Tyxml.Xml.node ~a:a' n (Tyxml_xml.W.return children) :: tail
-  | `Pcdata str -> Tyxml.Xml.pcdata (Tyxml_xml.W.return str) :: tail
-  in List.hd @@ tree_fold f [] [t]
-
-let tyxml_to_body t =
-  Format.asprintf "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n%a"
-    (Tyxml.Xml.pp ()) t
+let get_prop p map = M.find_opt p map
