@@ -17,31 +17,29 @@ let process_properties fs prefix url f =
   | None -> `Not_found
   | Some map ->
     Printf.printf "read map %s\n" (Webdav.props_to_string map) ;
-    let (success, fail) = f map in
+    let propstats = f map in
     let status res =
       Format.sprintf "%s %s"
         (Cohttp.Code.string_of_version `HTTP_1_1)
         (Cohttp.Code.string_of_status res)
     in
     let open Tyxml.Xml in
-    let success_propstats = node "prop" success
-    and fail_propstats = node "prop" fail in
+    let ps = List.map (fun (code, props) -> 
+      node "propstat" [
+        node "prop" props ; node "status" [ pcdata (status code) ] ])
+      propstats
+    in
     let tree =
       node "response"
-        [ node "href" [ pcdata (prefix ^ "/" ^ url) ] ;
-          node "propstat" [
-            success_propstats ; node "status" [ pcdata (status `OK) ] ];
-          node "propstat" [
-            fail_propstats ; node "status" [ pcdata (status `Forbidden) ] ];
-          ]
+        ( node "href" [ pcdata (prefix ^ "/" ^ url) ] :: ps )
     in
     Printf.printf "response %s\n" (Webdav.tyxml_to_body tree); 
     `Single_response tree
 
 let process_property_leaf fs prefix req url =
   let f = match req with
-   | `Propname -> (fun m -> List.map ( fun k -> Tyxml.Xml.node k [] ) @@ List.map fst (Webdav.M.bindings m), [])
-   | `All_prop includes -> (fun m -> Webdav.props_to_tree m, []) (* TODO: finish this *)
+   | `Propname -> (fun m -> [`OK, List.map ( fun k -> Tyxml.Xml.node k [] ) @@ List.map fst (Webdav.M.bindings m)])
+   | `All_prop includes -> (fun m -> [`OK, Webdav.props_to_tree m]) (* TODO: finish this *)
    | `Props ps -> (fun m -> Webdav.find_props ps m)
   in process_properties fs prefix url f
 

@@ -42,9 +42,12 @@ let props_to_string m =
   tyxml_to_body (Tyxml.Xml.node "prop" c)
 
 let find_props ps m =
-  List.fold_left (fun (s, f) k -> match M.find_opt k m with
-  | None        -> (s, Tyxml.Xml.node k [] :: f)
-  | Some (a, v) -> (Tyxml.Xml.node ~a:(List.map attrib_to_tyxml a) k (List.map tree_to_tyxml v) :: s, f)) ([], []) ps
+  let (found, not_found) = 
+    List.fold_left (fun (s, f) k -> match M.find_opt k m with
+    | None        -> (s, Tyxml.Xml.node k [] :: f)
+    | Some (a, v) -> (Tyxml.Xml.node ~a:(List.map attrib_to_tyxml a) k (List.map tree_to_tyxml v) :: s, f)) ([], []) ps
+  in
+  [(`OK, found) ; (`Forbidden, not_found)]
 
 let create_properties ?(content_type = "text/html") ?(language = "en") is_dir timestamp length filename =
   let rtype = if is_dir then [ `Node ([], "collection", []) ] else [] in
