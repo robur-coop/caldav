@@ -126,7 +126,7 @@ class handler prefix fs = object(self)
       Wm.continue (`String listing) rd
     | false -> 
       Fs.read fs (self#id rd) >>== fun (data, props) ->
-      let ct = match Webdav.get_prop "contenttype" props with
+      let ct = match Webdav.get_prop "getcontenttype" props with
         | Some (_, [ `Pcdata ct ]) -> ct
         | _ -> "text/calendar" in
       let rd =
