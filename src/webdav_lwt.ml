@@ -45,11 +45,28 @@ let list_dir fs dir =
   | Error e -> assert false
   | Ok files -> Lwt_list.map_p list_file files
 
-let print_dir prefix files =
+let directory_listing prefix files =
   let print_file (file, is_dir, last_modified) =
     Printf.sprintf "<tr><td><a href=\"%s/%s\">%s</a></td><td>%s</td><td>%s</td></tr>"
       prefix file file (if is_dir then "directory" else "text/calendar") last_modified in
   String.concat "\n" (List.map print_file files)
+
+let collate_directory fs files =
+  let extract_components (filename, is_dir, _) =
+    Fs.read fs filename >|= function
+    | Error _ -> Printf.printf "error while reading file!\n" ; []
+    | Ok (data, _props) ->
+      match Icalendar.parse (Cstruct.to_string data) with
+      | Ok calendar -> snd calendar
+      | Error e -> Printf.printf "error %s while parsing ics\n" e ; []
+  in
+  (* TODO: hardcoded calprops, put them elsewhere *)
+  let calprops = [
+    `Prodid ([], "-//ROBUR.IO//EN") ;
+    `Version ([], "2.0")
+  ] in
+  Lwt_list.map_p extract_components files >|= fun components ->
+  Icalendar.to_ics (calprops, List.flatten components)
 
 let create_dir_rec fs name =
   let segments = Astring.String.cuts ~sep:"/" name in
@@ -73,6 +90,7 @@ class handler prefix fs = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
 
   method private write_calendar rd =
+    Format.printf "write_calendar, fs is: %a\n" Mirage_fs_mem.pp fs ;
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     let name = self#id rd in
     (* figure out whether it is a directory or not, and maybe append / *)
@@ -84,6 +102,7 @@ class handler prefix fs = object(self)
     match Icalendar.parse body with
     | Error e ->
       Printf.printf "error %s while parsing calendar\n" e ;
+      Format.printf "write_calendar end, fs is now: %a\n" Mirage_fs_mem.pp fs ;
       Wm.continue false rd
     | Ok cal ->
       let ics = Icalendar.to_ics cal in
@@ -95,10 +114,19 @@ class handler prefix fs = object(self)
           let header' = Cohttp.Header.remove header "ETag" in
           Cohttp.Header.add header' "Etag" etag) rd
       in
+      Format.printf "write_calendar end, fs is now: %a\n" Mirage_fs_mem.pp fs ;
       Wm.continue true rd
 
   method private read_calendar rd =
     let file = self#id rd in
+    let gecko =
+      match Cohttp.Header.get rd.Wm.Rd.req_headers "User-Agent" with
+      | None -> false
+      | Some x ->
+        (* Apple seems to use the regular expression 'Mozilla/.*Gecko.*' *)
+        Astring.String.is_prefix ~affix:"Mozilla/" x &&
+        Astring.String.is_infix ~affix:"Gecko" x
+    in
 
     let (>>==) a f = a >>= function
     | Error e ->
@@ -111,8 +139,12 @@ class handler prefix fs = object(self)
       (* TODO: append / to name! *)
       Printf.printf "is a directory\n" ;
       list_dir fs file >>= fun files ->
-      let listing = print_dir prefix files in
-      Wm.continue (`String listing) rd
+      if gecko then
+        let listing = directory_listing prefix files in
+        Wm.continue (`String listing) rd
+      else
+        collate_directory fs files >>= fun data ->
+        Wm.continue (`String data) rd
     | false ->
       Fs.read fs file >>== fun (data, props) ->
       let ct = match Webdav.get_prop "getcontenttype" props with
@@ -210,11 +242,12 @@ class handler prefix fs = object(self)
         Wm.Rd.with_resp_headers add_headers rd) >>= fun rd ->
       (if is_dir
       then
-        list_dir fs file >|= fun files ->
-        Some (etag ( print_dir prefix files ))
-      else  
+        list_dir fs file >>= fun files ->
+        collate_directory fs files >|= fun data ->
+        Some (etag data)
+      else
         Fs.read fs file >|= function
-        | Error _ -> None 
+        | Error _ -> None
         | Ok (data, _) -> Some (etag @@ Cstruct.to_string data)) >>= fun result ->
       Wm.continue result rd
 
