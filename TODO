@@ -1,0 +1,13 @@
+- GET on collection - what is the desired return
+- which XML properties are supported (see webdav.ml:create_properties)?  which can be modified by a client?
+- do we implement the right HTTP error codes?
+- caldav collection properties (RFC 4791 Sec 5.2)
+- MKCALENDAR HTTP verb (RFC 4791 Sec 5.3)
+- REPORT (from CalDAV including XML requests, answers, collation)
+- tests (wir haben: icalendar/ics, webdav-xml. was fehlt: webdav/http und caldav/http)
+- apple's ist umfangreich - dokumentieren was schon funktioniert und was wir denken, dass funktionieren sollte
+
+- Access control (both WebDAV and CalDAV layers)
+- service discovery of calendars
+- Persistent storage
+- WebUI
