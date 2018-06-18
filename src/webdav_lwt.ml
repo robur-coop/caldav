@@ -14,24 +14,10 @@ end
 
 let to_status x = Cohttp.Code.code_of_status x
 
-let ptime_to_http_date ptime =
-  let (y, m, d), ((hh, mm, ss), _)  = Ptime.to_date_time ptime
-  and weekday = match Ptime.weekday ptime with
-  | `Mon -> "Mon"
-  | `Tue -> "Tue"
-  | `Wed -> "Wed"
-  | `Thu -> "Thu"
-  | `Fri -> "Fri"
-  | `Sat -> "Sat"
-  | `Sun -> "Sun"
-  and month = [|"Jan"; "Feb"; "Mar"; "Apr"; "May"; "Jun"; "Jul"; "Aug"; "Sep"; "Oct"; "Nov"; "Dec"|]
-  in
-  Printf.sprintf "%s, %02d %s %04d %02d:%02d:%02d GMT" weekday d (Array.get month (m-1)) y hh mm ss 
-
 let create_properties name content_type is_dir length =
   Printf.printf "Creating properties!!! %s \n" name;
   Webdav.create_properties ~content_type
-    is_dir (ptime_to_http_date (Ptime_clock.now ())) length name
+    is_dir (Webdav.ptime_to_http_date (Ptime_clock.now ())) length name
 
 let etag str = Digest.to_hex @@ Digest.string str
 

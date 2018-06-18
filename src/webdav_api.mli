@@ -1,11 +1,10 @@
 
 type state = Webdav_fs.Fs.t
 
-(*
-val mkcol : state -> string ->
-  (state, [ `Forbidden | `Method_not_allowed | `Conflict
-          | `Unsupported_media_type | `Insufficient_storage ]) result
-*)
+
+val mkcol : state -> name:string -> body:string ->
+  (state, [ `Bad_request | `Conflict | `Forbidden of Tyxml.Xml.elt list ])
+    result Lwt.t
 
 val propfind : state -> prefix:string -> name:string -> body:string -> depth:string option ->
   (state * string, [ `Bad_request | `Forbidden of string | `Property_not_found ]) result Lwt.t

@@ -218,22 +218,27 @@ let exactly_one = function
   | [ x ] -> Ok x
   | _     -> Error "expected exactly one child"
 
+let prop_parser f =
+  tree_lift (fun _ c -> Ok c) (name "prop") (any >>= f)
+
+let set_parser =
+  tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
+    (fun _ c -> exactly_one c >>| List.map (fun k -> `Set k))
+    (name "set")
+    (prop_parser extract_name_value)
+
+let remove_parser =
+  tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
+    (fun _ c -> exactly_one c >>| List.map (fun k -> `Remove k))
+    (name "remove")
+    (prop_parser extract_name)
+
 let parse_propupdate_xml str =
   let propupdate =
-    let prop f =
-      tree_lift (fun _ c -> Ok c) (name "prop") (any >>= f)
-    in
     tree_lift
       (fun _ lol -> Ok (List.flatten lol))
       (name "propertyupdate")
-      ((tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
-          (fun _ c -> exactly_one c >>| List.map (fun k -> `Set k))
-          (name "set")
-          (prop extract_name_value))
-       ||| (tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
-              (fun _ c -> exactly_one c >>| List.map (fun k -> `Remove k))
-              (name "remove")
-              (prop extract_name)))
+      (set_parser ||| remove_parser)
   in
   match string_to_tree str with
   | None -> None
@@ -242,4 +247,32 @@ let parse_propupdate_xml str =
     | Ok x -> Some x
     | Error e -> None
 
+let parse_mkcol_xml str =
+  let mkcol =
+    tree_lift
+      (fun _ lol -> Ok (List.flatten lol))
+      (name "mkcol")
+      set_parser
+  in
+  match string_to_tree str with
+  | None -> None
+  | Some tree ->
+    match run mkcol tree with
+    | Ok x -> Some x
+    | Error e -> None
+
 let get_prop p map = M.find_opt p map
+
+let ptime_to_http_date ptime =
+  let (y, m, d), ((hh, mm, ss), _)  = Ptime.to_date_time ptime
+  and weekday = match Ptime.weekday ptime with
+  | `Mon -> "Mon"
+  | `Tue -> "Tue"
+  | `Wed -> "Wed"
+  | `Thu -> "Thu"
+  | `Fri -> "Fri"
+  | `Sat -> "Sat"
+  | `Sun -> "Sun"
+  and month = [|"Jan"; "Feb"; "Mar"; "Apr"; "May"; "Jun"; "Jul"; "Aug"; "Sep"; "Oct"; "Nov"; "Dec"|]
+  in
+  Printf.sprintf "%s, %02d %s %04d %02d:%02d:%02d GMT" weekday d (Array.get month (m-1)) y hh mm ss 
