@@ -1,11 +1,11 @@
 
 type state = Webdav_fs.Fs.t
 
-
-val mkcol : state -> name:string -> body:string ->
+val mkcol : ?now:Ptime.t -> state -> name:string -> body:string ->
   (state, [ `Bad_request | `Conflict | `Forbidden of Tyxml.Xml.elt list ])
     result Lwt.t
 
+(* TODO remove cohttp and tyxml dependencies!? *)
 val propfind : state -> prefix:string -> name:string -> body:string -> depth:string option ->
   (state * string, [ `Bad_request | `Forbidden of string | `Property_not_found ]) result Lwt.t
 

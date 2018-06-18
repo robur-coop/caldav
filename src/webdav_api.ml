@@ -162,12 +162,16 @@ let proppatch state ~prefix ~name ~body =
       let status = multistatus [ nodes ] in
       Ok (state, Webdav.tyxml_to_body status)
 
-let mkcol state ~name ~body =
-  (match List.rev (Astring.String.cuts ~sep:"/" name) with
-   | [ _ ] -> Lwt.return (Error `Conflict) (* assumption: absolute path *)
-   | _::tl ->
+(* assumption: name is a relative path! *)
+let mkcol ?(now = Ptime_clock.now ()) state ~name ~body =
+  (* TODO: move to caller *)
+  let name' = if Astring.String.is_suffix ~affix:"/" name then name else name ^ "/" in
+  Printf.printf "mkcol: DDD%sDDD\n%!" name' ;
+  (match List.rev (Astring.String.cuts ~sep:"/" name') with
+   | ""::_::tl ->
      begin
        let parent = Astring.String.concat ~sep:"/" (List.rev tl) in
+       Printf.printf "mkcol parent is DD%sDD\n%!" parent ;
        Fs.stat state parent >|= function
        | Error _ -> Error `Conflict
        | Ok _ -> Ok ()
@@ -180,7 +184,7 @@ let mkcol state ~name ~body =
     | Ok () ->
       let props =
         Webdav.create_properties ~content_type:"text/directory"
-          true (Webdav.ptime_to_http_date (Ptime_clock.now ())) 0 name
+          true (Webdav.ptime_to_http_date now) 0 name
       in
       match Webdav.parse_mkcol_xml body with
       | None -> Lwt.return (Error `Bad_request)

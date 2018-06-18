@@ -22,17 +22,18 @@ let create_properties name content_type is_dir length =
 let etag str = Digest.to_hex @@ Digest.string str
 
 let get_last_modified_prop fs file =
-  Fs.get_property_map fs file >|= function 
-  | None -> Error `Invalid_xml 
+  Fs.get_property_map fs file >|= function
+  | None -> Error `Invalid_xml
   | Some map ->
     match Webdav.get_prop "getlastmodified" map with
     | Some (_, [ `Pcdata last_modified ]) -> Ok last_modified
-    | _ -> Error `Unknown_prop 
+    | _ -> Error `Unknown_prop
 
 (* assumption: path is a directory - otherwise we return none *)
 (* out: ( name * typ * last_modified ) list - non-recursive *)
 let list_dir fs dir =
   let list_file file =
+    (* TODO: figure out whether _file_ is a file or a directory *)
     let full_filename = dir ^ file in
     get_last_modified_prop fs full_filename >>= function
     | Error _ -> assert false
@@ -44,7 +45,7 @@ let list_dir fs dir =
   | Error e -> assert false
   | Ok files -> Lwt_list.map_p list_file files
 
-let print_dir prefix files = 
+let print_dir prefix files =
   let print_file (file, is_dir, last_modified) =
     Printf.sprintf "<tr><td><a href=\"%s/%s\">%s</a></td><td>%s</td><td>%s</td></tr>"
       prefix file file (if is_dir then "directory" else "text/calendar") last_modified in
@@ -57,7 +58,7 @@ let create_dir_rec fs name =
     | h :: t -> [] :: (List.map (fun a -> h :: a) (prefixes t)) in
   let directories = prefixes segments in
   let create_dir path =
-    let filename = String.concat "/" path in 
+    let filename = String.concat "/" path in
     Fs.mkdir fs filename >>= fun _ ->
     let props = create_properties filename "text/directory" true 0 in
     Fs.write_property_map fs filename props
@@ -74,6 +75,7 @@ class handler prefix fs = object(self)
   method private write_calendar rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     let name = self#id rd in
+    (* figure out whether it is a directory or not, and maybe append / *)
     let content_type =
       match Cohttp.Header.get rd.Wm.Rd.req_headers "Content-Type" with
       | None -> "text/calendar"
@@ -99,19 +101,20 @@ class handler prefix fs = object(self)
     let file = self#id rd in
 
     let (>>==) a f = a >>= function
-    | Error e -> 
+    | Error e ->
       Format.printf "Error %s: %a\n" file Fs.pp_error e ;
       Wm.continue `Empty rd
     | Ok res  -> f res in
 
     Fs.isdir fs file >>== function
     | true ->
+      (* TODO: append / to name! *)
       Printf.printf "is a directory\n" ;
       list_dir fs file >>= fun files ->
       let listing = print_dir prefix files in
       Wm.continue (`String listing) rd
-    | false -> 
-      Fs.read fs (self#id rd) >>== fun (data, props) ->
+    | false ->
+      Fs.read fs file >>== fun (data, props) ->
       let ct = match Webdav.get_prop "getcontenttype" props with
         | Some (_, [ `Pcdata ct ]) -> ct
         | _ -> "text/calendar" in
