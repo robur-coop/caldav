@@ -85,6 +85,7 @@ let create_dir_rec fs name =
   Lwt_list.iter_s create_dir directories
 
 let calendar_to_collection data =
+  if data = "" then Ok "" else
   match Webdav.string_to_tree data with
   | Some (`Node (a, "mkcalendar", c)) -> Ok (Webdav.tyxml_to_body (Webdav.tree_to_tyxml (`Node (a, "mkcol", c))))
   | _ -> Error `Bad_request

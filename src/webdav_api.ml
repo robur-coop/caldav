@@ -162,6 +162,29 @@ let proppatch state ~prefix ~name ~body =
       let status = multistatus [ nodes ] in
       Ok (state, Webdav.tyxml_to_body status)
 
+let body_to_props body default_props = 
+  if body = "" then Ok default_props else
+  match Webdav.parse_mkcol_xml body with
+  | None -> Error `Bad_request
+  | Some set_props ->
+    match apply_updates (Some default_props) set_props with
+    | None, errs ->
+      let propstats =
+        List.map (fun (name, status) ->
+            let status_code =
+              Format.sprintf "%s %s"
+                (Cohttp.Code.string_of_version `HTTP_1_1)
+                (Cohttp.Code.string_of_status status)
+            in
+            Tyxml.Xml.(node "propstat" [
+                node "prop" [node name []] ;
+                node "status" [ pcdata status_code ] ]))
+          errs
+      in
+      let xml = Tyxml.Xml.node "mkcol-response" propstats in
+      Error (`Forbidden (Webdav.tyxml_to_body xml))
+    | Some map, _ -> Ok map
+
 (* assumption: name is a relative path! *)
 let mkcol ?(now = Ptime_clock.now ()) state ~name ~body =
   (* TODO: move to caller *)
@@ -182,30 +205,13 @@ let mkcol ?(now = Ptime_clock.now ()) state ~name ~body =
     Fs.mkdir state name >>= function
     | Error _ -> Lwt.return (Error `Conflict)
     | Ok () ->
-      let props =
+      let default_props =
         Webdav.create_properties ~content_type:"text/directory"
           true (Webdav.ptime_to_http_date now) 0 name
       in
-      match Webdav.parse_mkcol_xml body with
-      | None -> Lwt.return (Error `Bad_request)
-      | Some set_props ->
-        match apply_updates (Some props) set_props with
-        | None, errs ->
-          let propstats =
-            List.map (fun (name, status) ->
-                let status_code =
-                  Format.sprintf "%s %s"
-                    (Cohttp.Code.string_of_version `HTTP_1_1)
-                    (Cohttp.Code.string_of_status status)
-                in
-                Tyxml.Xml.(node "propstat" [
-                    node "prop" [node name []] ;
-                    node "status" [ pcdata status_code ] ]))
-              errs
-          in
-          let xml = Tyxml.Xml.node "mkcol-response" propstats in
-          Lwt.return (Error (`Forbidden (Webdav.tyxml_to_body xml)))
-        | Some map, _ ->
-          Fs.write_property_map state name map >|= function
-          | Ok _ -> Ok state
-          | Error _ -> Error `Conflict
+      match body_to_props body default_props with
+      | Error e -> Lwt.return (Error e)
+      | Ok map -> 
+        Fs.write_property_map state name map >|= function
+        | Ok _ -> Ok state
+        | Error _ -> Error `Conflict
