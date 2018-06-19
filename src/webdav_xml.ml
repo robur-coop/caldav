@@ -32,22 +32,17 @@ let tree_to_tyxml t =
 
 let tree_to_string t = tyxml_to_body @@ tree_to_tyxml t
 
-let props_to_tree m =
-  M.fold (fun k (a, v) acc -> 
-    let a' = List.map attrib_to_tyxml a in 
-    let children = List.map tree_to_tyxml v in 
-    Tyxml.Xml.node ~a:a' k children :: acc)
-  m []
+let props_to_tree m = M.fold (fun k (a, v) acc -> `Node (a, k, v) :: acc) m []
 
 let props_to_string m =
   let c = props_to_tree m in
-  tyxml_to_body (Tyxml.Xml.node "prop" c)
+  tree_to_string (`Node ([], "prop", c))
 
 let find_props ps m =
   let (found, not_found) = 
     List.fold_left (fun (s, f) k -> match M.find_opt k m with
-    | None        -> (s, Tyxml.Xml.node k [] :: f)
-    | Some (a, v) -> (Tyxml.Xml.node ~a:(List.map attrib_to_tyxml a) k (List.map tree_to_tyxml v) :: s, f)) ([], []) ps
+    | None        -> (s, `Node ([], k, []) :: f)
+    | Some (a, v) -> (`Node (a, k, v) :: s, f)) ([], []) ps
   in
   [(`OK, found) ; (`Forbidden, not_found)]
 
@@ -178,37 +173,29 @@ type res = [
   | `Props of string list
 ]
 
-let parse_propfind_xml str =
-  match string_to_tree str with
-  | None -> None
-  | Some tree ->
-    let tree_grammar =
-      tree_lift
-        (fun _ c -> match c with
-           | [ #res as r ] -> Ok r
-           | [ `Include _ ] -> Error "lonely include"
-           | [ `All_prop _ ; `Include is ] -> Ok (`All_prop is)
-           | _ -> Error "broken")
-        (name "propfind")
-        ((tree_lift
-            (fun _ c -> is_empty c >>| fun () -> `Propname)
-            (name "propname") any)
-         ||| (tree_lift
-                (fun _ c -> non_empty c >>| fun () -> `Props c)
-                (name "prop") (any >>= extract_name))
-         ||| (tree_lift
-                (fun _ c -> is_empty c >>| fun () -> `All_prop [])
-                (name "allprop") any)
-         ||| (tree_lift
-                (fun _ c -> non_empty c >>| fun () -> `Include c)
-                (name "include") (any >>= extract_name)))
-    in
-    match run tree_grammar tree with
-    | Error e ->
-      Format.printf "error %s while parsing tree\n" e ; None
-    | Ok tree ->
-      Format.printf "Parsed tree with tree_grammar: %a\n" pp_prop tree;
-      Some tree
+let parse_propfind_xml tree =
+  let tree_grammar =
+    tree_lift
+      (fun _ c -> match c with
+         | [ #res as r ] -> Ok r
+         | [ `Include _ ] -> Error "lonely include"
+         | [ `All_prop _ ; `Include is ] -> Ok (`All_prop is)
+         | _ -> Error "broken")
+      (name "propfind")
+      ((tree_lift
+          (fun _ c -> is_empty c >>| fun () -> `Propname)
+          (name "propname") any)
+       ||| (tree_lift
+              (fun _ c -> non_empty c >>| fun () -> `Props c)
+              (name "prop") (any >>= extract_name))
+       ||| (tree_lift
+              (fun _ c -> is_empty c >>| fun () -> `All_prop [])
+              (name "allprop") any)
+       ||| (tree_lift
+              (fun _ c -> non_empty c >>| fun () -> `Include c)
+              (name "include") (any >>= extract_name)))
+  in
+  run tree_grammar tree
 
 let pp_propupdate fmt update =
   List.iter (function

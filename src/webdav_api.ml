@@ -3,6 +3,7 @@ open Lwt.Infix
 module Fs = Webdav_fs
 
 type state = Webdav_fs.Fs.t
+type tree = Webdav_xml.tree
 
 let parse_depth = function
   | None -> Ok `Infinity
@@ -23,29 +24,28 @@ let process_properties fs prefix url f =
         (Cohttp.Code.string_of_version `HTTP_1_1)
         (Cohttp.Code.string_of_status res)
     in
-    let open Tyxml.Xml in
     let ps = List.map (fun (code, props) -> 
-      node "propstat" [
-        node "prop" props ; node "status" [ pcdata (status code) ] ])
+      `Node ([], "propstat", [
+        `Node ([], "prop", props ) ; `Node ([], "status", [ `Pcdata (status code) ] ) ]))
       propstats
     in
     let tree =
-      node "response"
-        ( node "href" [ pcdata (prefix ^ "/" ^ url) ] :: ps )
+      `Node ([], "response",
+        `Node ([], "href", [ `Pcdata (prefix ^ "/" ^ url) ]) :: ps )
     in
-    Printf.printf "response %s\n" (Webdav_xml.tyxml_to_body tree); 
     `Single_response tree
 
 let process_property_leaf fs prefix req url =
   let f = match req with
-   | `Propname -> (fun m -> [`OK, List.map ( fun k -> Tyxml.Xml.node k [] ) @@ List.map fst (Webdav_xml.M.bindings m)])
+   | `Propname -> (fun m -> [`OK, List.map ( fun k -> `Node ([], k, []) ) @@ List.map fst (Webdav_xml.M.bindings m)])
    | `All_prop includes -> (fun m -> [`OK, Webdav_xml.props_to_tree m]) (* TODO: finish this *)
    | `Props ps -> (fun m -> Webdav_xml.find_props ps m)
   in process_properties fs prefix url f
 
 let dav_ns = Tyxml.Xml.string_attrib "xmlns" (Tyxml_xml.W.return "DAV:")
+let dav_ns2 = ("xmlns", "DAV:")
 
-let multistatus nodes = Tyxml.Xml.node ~a:[ dav_ns ] "multistatus" nodes
+let multistatus nodes = `Node ([ dav_ns2 ], "multistatus", nodes)
 
 let process_files fs prefix url req els =
   Lwt_list.map_s (process_property_leaf fs prefix req) (url :: els) >|= fun answers ->
@@ -55,7 +55,7 @@ let process_files fs prefix url req els =
       | `Not_found -> acc
       | `Single_response node -> node :: acc) [] answers
   in
-  `Response (Webdav_xml.tyxml_to_body (multistatus nodes))
+  `Response (multistatus nodes)
 
 let propfind fs url prefix req =
   Fs.stat fs url >>= function
@@ -71,15 +71,13 @@ let propfind fs url prefix req =
     | `Not_found -> `Property_not_found
     | `Single_response t ->
       let outer =
-        Tyxml.Xml.(node ~a:[ dav_ns ] "multistatus" [ t ])
+        `Node ([ dav_ns2 ], "multistatus", [ t ])
       in
-      `Response (Webdav_xml.tyxml_to_body outer)
+      `Response outer
 
-let error_xml element =
-  Tyxml.Xml.(node ~a:[ dav_ns ] "error" [ node element [] ])
-  |> Webdav_xml.tyxml_to_body
+let error_xml element = `Node ([ dav_ns2 ], "error", [ `Node ([], element, []) ])
 
-let propfind state ~prefix ~name ~body ~depth =
+let propfind state ~prefix ~name tree ~depth =
   match parse_depth depth with
   | Error `Bad_request -> Lwt.return (Error `Bad_request)
   | Ok `Infinity ->
@@ -87,9 +85,9 @@ let propfind state ~prefix ~name ~body ~depth =
     Lwt.return (Error (`Forbidden body))
   | Ok d ->
     (* TODO actually deal with depth d (`Zero or `One) *)
-    match Webdav_xml.parse_propfind_xml body with
-    | None -> Lwt.return (Error `Property_not_found)
-    | Some req ->
+    match Webdav_xml.parse_propfind_xml tree with
+    | Error _ -> Lwt.return (Error `Property_not_found)
+    | Ok req ->
       propfind state name prefix req >|= function
       | `Response body -> Ok (state, body)
       | `Property_not_found -> Error `Property_not_found
@@ -159,7 +157,7 @@ let proppatch state ~prefix ~name ~body =
         Tyxml.Xml.(node "response"
                      (node "href" [ pcdata (prefix ^ "/" ^ name) ] :: propstats))
       in
-      let status = multistatus [ nodes ] in
+      let status = Tyxml.Xml.node "multistatus" [ nodes ] in
       Ok (state, Webdav_xml.tyxml_to_body status)
 
 let body_to_props body default_props = 
