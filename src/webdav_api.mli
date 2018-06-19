@@ -1,6 +1,8 @@
 
 type state = Webdav_fs.Fs.t
 
+val dav_ns : Tyxml.Xml.attrib
+
 val mkcol : ?now:Ptime.t -> state -> name:string -> body:string ->
   (state, [ `Bad_request | `Conflict | `Forbidden of string ])
     result Lwt.t

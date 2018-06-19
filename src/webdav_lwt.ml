@@ -219,6 +219,12 @@ class handler prefix fs = object(self)
     | `Other "PROPPATCH" -> self#process_proppatch rd'
     | _ -> assert false
 
+  method cannot_create rd =
+    let xml = Tyxml.Xml.(node ~a:[Webdav_api.dav_ns] "error" [node "resource-must-be-null" []]) in
+    let err = Webdav.tyxml_to_body xml in
+    let rd' = { rd with Wm.Rd.resp_body = `String err } in
+    Wm.continue () rd' 
+
   method create_collection rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     let body' = match rd.Wm.Rd.meth with
