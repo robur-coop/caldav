@@ -11,8 +11,8 @@ val mkcol : ?now:Ptime.t -> state -> string -> tree option ->
 val propfind : state -> prefix:string -> name:string -> tree -> depth:string option ->
   (state * tree, [ `Bad_request | `Forbidden of tree | `Property_not_found ]) result Lwt.t
 
-val proppatch : state -> prefix:string -> name:string -> body:string ->
-  (state * string, [ `Bad_request ]) result Lwt.t
+val proppatch : state -> prefix:string -> name:string -> tree ->
+  (state * tree, [ `Bad_request ]) result Lwt.t
 
 (*
 val delete : state -> string -> state

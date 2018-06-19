@@ -132,9 +132,9 @@ let update_properties ?validate_key fs id updates =
             (Cohttp.Code.string_of_version `HTTP_1_1)
             (Cohttp.Code.string_of_status status)
         in
-        Tyxml.Xml.(node "propstat" [
-            node "prop" [node name []] ;
-            node "status" [ pcdata status_code ] ]))
+        `Node ([], "propstat", [
+          `Node ([], "prop", [ `Node ([], name, []) ] );
+          `Node ([], "status", [ `Pcdata status_code ] ) ]))
       xs in
   (match map' with
   | None -> Lwt.return (Ok ())
@@ -142,10 +142,10 @@ let update_properties ?validate_key fs id updates =
     | Error e -> Error e
     | Ok () -> Ok propstats
 
-let proppatch state ~prefix ~name ~body =
+let proppatch state ~prefix ~name body =
   match Webdav_xml.parse_propupdate_xml body with
-  | None -> Lwt.return (Error `Bad_request)
-  | Some updates ->
+  | Error _ -> Lwt.return (Error `Bad_request)
+  | Ok updates ->
     let validate_key = function
       | "resourcetype" -> Error `Forbidden
       | _ -> Ok ()
@@ -154,11 +154,11 @@ let proppatch state ~prefix ~name ~body =
     | Error _      -> Error `Bad_request
     | Ok propstats ->
       let nodes =
-        Tyxml.Xml.(node "response"
-                     (node "href" [ pcdata (prefix ^ "/" ^ name) ] :: propstats))
+        `Node ([], "response", 
+          `Node ([], "href", [ `Pcdata (prefix ^ "/" ^ name) ]) :: propstats)
       in
-      let status = Tyxml.Xml.node "multistatus" [ nodes ] in
-      Ok (state, Webdav_xml.tyxml_to_body status)
+      let status = multistatus [ nodes ] in
+      Ok (state, status)
 
 let body_to_props body default_props = 
   match body with

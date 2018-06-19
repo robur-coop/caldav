@@ -210,31 +210,26 @@ let exactly_one = function
 let prop_parser f =
   tree_lift (fun _ c -> Ok c) (name "prop") (any >>= f)
 
-let set_parser =
+let set_parser : tree -> ([>`Set of (string * string) list * string * tree list] list, string) result =
   tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
     (fun _ c -> exactly_one c >>| List.map (fun k -> `Set k))
     (name "set")
     (prop_parser extract_name_value)
 
-let remove_parser =
+let remove_parser : tree -> ([>`Remove of string] list, string) result =
   tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
     (fun _ c -> exactly_one c >>| List.map (fun k -> `Remove k))
     (name "remove")
     (prop_parser extract_name)
 
-let parse_propupdate_xml str =
+let parse_propupdate_xml tree =
   let propupdate =
     tree_lift
       (fun _ lol -> Ok (List.flatten lol))
       (name "propertyupdate")
       (set_parser ||| remove_parser)
   in
-  match string_to_tree str with
-  | None -> None
-  | Some tree ->
-    match run propupdate tree with
-    | Ok x -> Some x
-    | Error e -> None
+  run propupdate tree
 
 let parse_mkcol_xml tree =
   let mkcol =

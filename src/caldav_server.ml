@@ -210,9 +210,12 @@ class handler prefix fs = object(self)
   method private process_proppatch rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "PROPPATCH:%s\n" body;
-    Webdav_api.proppatch fs ~prefix ~name:(self#id rd) ~body >>= function
-    | Ok (_, answer) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String answer }
-    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    match Webdav_xml.string_to_tree body with
+    | None -> Wm.respond (to_status `Bad_request) rd
+    | Some tree ->
+      Webdav_api.proppatch fs ~prefix ~name:(self#id rd) tree >>= function
+      | Ok (_, b) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Webdav_xml.tree_to_string b) }
+      | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
   method process_property rd =
     let replace_header h = Cohttp.Header.replace h "Content-Type" "application/xml" in
