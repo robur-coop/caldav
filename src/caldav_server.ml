@@ -234,11 +234,14 @@ class handler prefix fs = object(self)
     match body' with
     | Error _ -> Wm.continue `Conflict rd
     | Ok body'' -> 
-      Webdav_api.mkcol fs ~name:(self#id rd) ~body:body'' >>= function
-      | Ok _ -> Wm.continue `Created rd
-      | Error (`Forbidden b) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String b }
-      | Error `Conflict -> Wm.continue `Conflict rd
-      | Error `Bad_request -> Wm.continue `Conflict rd
+      match Webdav_xml.string_to_tree body'' with
+      | None when body'' <> "" -> Wm.continue `Conflict rd
+      | tree ->
+        Webdav_api.mkcol fs (self#id rd) tree >>= function
+        | Ok _ -> Wm.continue `Created rd
+        | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String (Webdav_xml.tree_to_string t) }
+        | Error `Conflict -> Wm.continue `Conflict rd
+        | Error `Bad_request -> Wm.continue `Conflict rd
 
   method delete_resource rd =
     Fs.destroy fs (self#id rd) >>= fun res ->

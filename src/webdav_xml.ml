@@ -30,6 +30,8 @@ let tree_to_tyxml t =
   | `Pcdata str -> Tyxml.Xml.pcdata (Tyxml_xml.W.return str) :: tail
   in List.hd @@ tree_fold f [] [t]
 
+let tree_to_string t = tyxml_to_body @@ tree_to_tyxml t
+
 let props_to_tree m =
   M.fold (fun k (a, v) acc -> 
     let a' = List.map attrib_to_tyxml a in 
@@ -247,19 +249,14 @@ let parse_propupdate_xml str =
     | Ok x -> Some x
     | Error e -> None
 
-let parse_mkcol_xml str =
+let parse_mkcol_xml tree =
   let mkcol =
     tree_lift
       (fun _ lol -> Ok (List.flatten lol))
       (name "mkcol")
       set_parser
   in
-  match string_to_tree str with
-  | None -> None
-  | Some tree ->
-    match run mkcol tree with
-    | Ok x -> Some x
-    | Error e -> None
+  run mkcol tree
 
 let get_prop p map = M.find_opt p map
 

@@ -163,10 +163,12 @@ let proppatch state ~prefix ~name ~body =
       Ok (state, Webdav_xml.tyxml_to_body status)
 
 let body_to_props body default_props = 
-  if body = "" then Ok default_props else
-  match Webdav_xml.parse_mkcol_xml body with
-  | None -> Error `Bad_request
-  | Some set_props ->
+  match body with
+  | None -> Ok default_props
+  | Some body' -> 
+  match Webdav_xml.parse_mkcol_xml body' with
+  | Error _ -> Error `Bad_request
+  | Ok set_props ->
     match apply_updates (Some default_props) set_props with
     | None, errs ->
       let propstats =
@@ -176,17 +178,17 @@ let body_to_props body default_props =
                 (Cohttp.Code.string_of_version `HTTP_1_1)
                 (Cohttp.Code.string_of_status status)
             in
-            Tyxml.Xml.(node "propstat" [
-                node "prop" [node name []] ;
-                node "status" [ pcdata status_code ] ]))
-          errs
+            `Node ([], "propstat", [
+              `Node ([], "prop", [`Node ([], name, [])]) ;
+              `Node ([], "status", [`Pcdata status_code ])
+            ])) errs
       in
-      let xml = Tyxml.Xml.node "mkcol-response" propstats in
-      Error (`Forbidden (Webdav_xml.tyxml_to_body xml))
+      let xml = `Node ([], "mkcol-response", propstats) in
+      Error (`Forbidden xml)
     | Some map, _ -> Ok map
 
 (* assumption: name is a relative path! *)
-let mkcol ?(now = Ptime_clock.now ()) state ~name ~body =
+let mkcol ?(now = Ptime_clock.now ()) state name body =
   (* TODO: move to caller *)
   let name' = if Astring.String.is_suffix ~affix:"/" name then name else name ^ "/" in
   Printf.printf "mkcol: DDD%sDDD\n%!" name' ;
