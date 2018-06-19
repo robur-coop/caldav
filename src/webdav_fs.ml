@@ -28,16 +28,16 @@ let get_properties fs name =
 let get_property_map fs name =
   get_properties fs name >|= function
   | Error _ -> None
-  | Ok data -> match Webdav.string_to_tree Cstruct.(to_string @@ concat data) with
+  | Ok data -> match Webdav_xml.string_to_tree Cstruct.(to_string @@ concat data) with
                | None -> None
-               | Some t -> Some (Webdav.prop_tree_to_map t)
+               | Some t -> Some (Webdav_xml.prop_tree_to_map t)
 
 let write_property_map fs name map =
-  let data = Webdav.props_to_string map in
+  let data = Webdav_xml.props_to_string map in
   let name' =
     if Astring.String.is_suffix ~affix:"/" name
     then name
-    else match Webdav.get_prop "resourcetype" map with
+    else match Webdav_xml.get_prop "resourcetype" map with
       | Some (_, c) when List.exists (function `Node (_, "collection", _) -> true | _ -> false) c -> name ^ "/"
       | _ -> name in
   let filename = file_to_propertyfile name' in

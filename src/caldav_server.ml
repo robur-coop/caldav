@@ -16,8 +16,8 @@ let to_status x = Cohttp.Code.code_of_status x
 
 let create_properties name content_type is_dir length =
   Printf.printf "Creating properties!!! %s \n" name;
-  Webdav.create_properties ~content_type
-    is_dir (Webdav.ptime_to_http_date (Ptime_clock.now ())) length name
+  Webdav_xml.create_properties ~content_type
+    is_dir (Webdav_xml.ptime_to_http_date (Ptime_clock.now ())) length name
 
 let etag str = Digest.to_hex @@ Digest.string str
 
@@ -25,7 +25,7 @@ let get_last_modified_prop fs file =
   Fs.get_property_map fs file >|= function
   | None -> Error `Invalid_xml
   | Some map ->
-    match Webdav.get_prop "getlastmodified" map with
+    match Webdav_xml.get_prop "getlastmodified" map with
     | Some (_, [ `Pcdata last_modified ]) -> Ok last_modified
     | _ -> Error `Unknown_prop
 
@@ -86,8 +86,8 @@ let create_dir_rec fs name =
 
 let calendar_to_collection data =
   if data = "" then Ok "" else
-  match Webdav.string_to_tree data with
-  | Some (`Node (a, "mkcalendar", c)) -> Ok (Webdav.tyxml_to_body (Webdav.tree_to_tyxml (`Node (a, "mkcol", c))))
+  match Webdav_xml.string_to_tree data with
+  | Some (`Node (a, "mkcalendar", c)) -> Ok (Webdav_xml.tyxml_to_body (Webdav_xml.tree_to_tyxml (`Node (a, "mkcol", c))))
   | _ -> Error `Bad_request
 
 (** A resource for querying an individual item in the database by id via GET,
@@ -153,7 +153,7 @@ class handler prefix fs = object(self)
         Wm.continue (`String data) rd
     | false ->
       Fs.read fs file >>== fun (data, props) ->
-      let ct = match Webdav.get_prop "getcontenttype" props with
+      let ct = match Webdav_xml.get_prop "getcontenttype" props with
         | Some (_, [ `Pcdata ct ]) -> ct
         | _ -> "text/calendar" in
       let rd =
@@ -221,7 +221,7 @@ class handler prefix fs = object(self)
 
   method cannot_create rd =
     let xml = Tyxml.Xml.(node ~a:[Webdav_api.dav_ns] "error" [node "resource-must-be-null" []]) in
-    let err = Webdav.tyxml_to_body xml in
+    let err = Webdav_xml.tyxml_to_body xml in
     let rd' = { rd with Wm.Rd.resp_body = `String err } in
     Wm.continue () rd' 
 

@@ -16,7 +16,7 @@ let process_properties fs prefix url f =
   Fs.get_property_map fs url >|= function
   | None -> `Not_found
   | Some map ->
-    Printf.printf "read map %s\n" (Webdav.props_to_string map) ;
+    Printf.printf "read map %s\n" (Webdav_xml.props_to_string map) ;
     let propstats = f map in
     let status res =
       Format.sprintf "%s %s"
@@ -33,14 +33,14 @@ let process_properties fs prefix url f =
       node "response"
         ( node "href" [ pcdata (prefix ^ "/" ^ url) ] :: ps )
     in
-    Printf.printf "response %s\n" (Webdav.tyxml_to_body tree); 
+    Printf.printf "response %s\n" (Webdav_xml.tyxml_to_body tree); 
     `Single_response tree
 
 let process_property_leaf fs prefix req url =
   let f = match req with
-   | `Propname -> (fun m -> [`OK, List.map ( fun k -> Tyxml.Xml.node k [] ) @@ List.map fst (Webdav.M.bindings m)])
-   | `All_prop includes -> (fun m -> [`OK, Webdav.props_to_tree m]) (* TODO: finish this *)
-   | `Props ps -> (fun m -> Webdav.find_props ps m)
+   | `Propname -> (fun m -> [`OK, List.map ( fun k -> Tyxml.Xml.node k [] ) @@ List.map fst (Webdav_xml.M.bindings m)])
+   | `All_prop includes -> (fun m -> [`OK, Webdav_xml.props_to_tree m]) (* TODO: finish this *)
+   | `Props ps -> (fun m -> Webdav_xml.find_props ps m)
   in process_properties fs prefix url f
 
 let dav_ns = Tyxml.Xml.string_attrib "xmlns" (Tyxml_xml.W.return "DAV:")
@@ -55,7 +55,7 @@ let process_files fs prefix url req els =
       | `Not_found -> acc
       | `Single_response node -> node :: acc) [] answers
   in
-  `Response (Webdav.tyxml_to_body (multistatus nodes))
+  `Response (Webdav_xml.tyxml_to_body (multistatus nodes))
 
 let propfind fs url prefix req =
   Fs.stat fs url >>= function
@@ -73,11 +73,11 @@ let propfind fs url prefix req =
       let outer =
         Tyxml.Xml.(node ~a:[ dav_ns ] "multistatus" [ t ])
       in
-      `Response (Webdav.tyxml_to_body outer)
+      `Response (Webdav_xml.tyxml_to_body outer)
 
 let error_xml element =
   Tyxml.Xml.(node ~a:[ dav_ns ] "error" [ node element [] ])
-  |> Webdav.tyxml_to_body
+  |> Webdav_xml.tyxml_to_body
 
 let propfind state ~prefix ~name ~body ~depth =
   match parse_depth depth with
@@ -87,7 +87,7 @@ let propfind state ~prefix ~name ~body ~depth =
     Lwt.return (Error (`Forbidden body))
   | Ok d ->
     (* TODO actually deal with depth d (`Zero or `One) *)
-    match Webdav.parse_propfind_xml body with
+    match Webdav_xml.parse_propfind_xml body with
     | None -> Lwt.return (Error `Property_not_found)
     | Some req ->
       propfind state name prefix req >|= function
@@ -99,8 +99,8 @@ let apply_updates ?(validate_key = fun _ -> Ok ()) m updates =
     | Error e -> None, (k, e)
     | Ok () ->
       (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
-      let map = Webdav.M.add k v m in
-      Printf.printf "map after set %s %s\n" k (Webdav.props_to_string map) ;
+      let map = Webdav_xml.M.add k v m in
+      Printf.printf "map after set %s %s\n" k (Webdav_xml.props_to_string map) ;
       Some map, (k, `OK)
   in
   (* if an update did not apply, m will be None! *)
@@ -109,8 +109,8 @@ let apply_updates ?(validate_key = fun _ -> Ok ()) m updates =
     | None, `Remove k   -> None, (k, `Failed_dependency) :: propstats
     | Some m, `Set (a, k, v) -> let (m, p) = set_prop k (a, v) m in (m, p :: propstats)
     | Some m, `Remove k ->
-      let map = Webdav.M.remove k m in
-      Printf.printf "map after remove %s %s\n" k (Webdav.props_to_string map) ;
+      let map = Webdav_xml.M.remove k m in
+      Printf.printf "map after remove %s %s\n" k (Webdav_xml.props_to_string map) ;
       Some map, (k, `OK) :: propstats
   in
   match List.fold_left apply (m, []) updates with
@@ -145,7 +145,7 @@ let update_properties ?validate_key fs id updates =
     | Ok () -> Ok propstats
 
 let proppatch state ~prefix ~name ~body =
-  match Webdav.parse_propupdate_xml body with
+  match Webdav_xml.parse_propupdate_xml body with
   | None -> Lwt.return (Error `Bad_request)
   | Some updates ->
     let validate_key = function
@@ -160,11 +160,11 @@ let proppatch state ~prefix ~name ~body =
                      (node "href" [ pcdata (prefix ^ "/" ^ name) ] :: propstats))
       in
       let status = multistatus [ nodes ] in
-      Ok (state, Webdav.tyxml_to_body status)
+      Ok (state, Webdav_xml.tyxml_to_body status)
 
 let body_to_props body default_props = 
   if body = "" then Ok default_props else
-  match Webdav.parse_mkcol_xml body with
+  match Webdav_xml.parse_mkcol_xml body with
   | None -> Error `Bad_request
   | Some set_props ->
     match apply_updates (Some default_props) set_props with
@@ -182,7 +182,7 @@ let body_to_props body default_props =
           errs
       in
       let xml = Tyxml.Xml.node "mkcol-response" propstats in
-      Error (`Forbidden (Webdav.tyxml_to_body xml))
+      Error (`Forbidden (Webdav_xml.tyxml_to_body xml))
     | Some map, _ -> Ok map
 
 (* assumption: name is a relative path! *)
@@ -206,8 +206,8 @@ let mkcol ?(now = Ptime_clock.now ()) state ~name ~body =
     | Error _ -> Lwt.return (Error `Conflict)
     | Ok () ->
       let default_props =
-        Webdav.create_properties ~content_type:"text/directory"
-          true (Webdav.ptime_to_http_date now) 0 name
+        Webdav_xml.create_properties ~content_type:"text/directory"
+          true (Webdav_xml.ptime_to_http_date now) 0 name
       in
       match body_to_props body default_props with
       | Error e -> Lwt.return (Error e)
