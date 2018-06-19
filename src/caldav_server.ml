@@ -21,14 +21,6 @@ let create_properties name content_type is_dir length =
 
 let etag str = Digest.to_hex @@ Digest.string str
 
-let get_last_modified_prop fs file =
-  Fs.get_property_map fs file >|= function
-  | None -> Error `Invalid_xml
-  | Some map ->
-    match Webdav_xml.get_prop "getlastmodified" map with
-    | Some (_, [ `Pcdata last_modified ]) -> Ok last_modified
-    | _ -> Error `Unknown_prop
-
 (* assumption: path is a directory - otherwise we return none *)
 (* out: ( name * typ * last_modified ) list - non-recursive *)
 let list_dir fs dir =
@@ -112,7 +104,6 @@ class handler prefix fs = object(self)
       Wm.continue false rd
     | Ok cal ->
       let ics = Icalendar.to_ics cal in
-      create_dir_rec fs name >>= fun () ->
       let props = create_properties name content_type false (String.length ics) in 
       Fs.write fs name (Cstruct.of_string ics) props >>= fun _ ->
       let etag = etag ics in

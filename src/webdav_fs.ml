@@ -66,6 +66,27 @@ let isdir fs name =
   Fs.stat fs name >>|= fun stat ->
   Ok stat.Mirage_fs.directory
 
+(* property getlastmodified does not exist for directories *)
+let get_last_modified_prop fs file =
+  get_property_map fs file >|= function
+  | None -> Error `Invalid_xml
+  | Some map ->
+    match Webdav_xml.get_prop "getlastmodified" map with
+    | Some (_, [ `Pcdata last_modified ]) -> Ok last_modified
+    | _ -> Error `Unknown_prop
+
+let last_modified fs name =
+  isdir fs name >>== fun is_dir ->
+  if is_dir 
+  then listdir fs name >>== fun files ->
+       Lwt_list.map_p (get_last_modified_prop fs) files >>= fun last_modifieds ->
+       let oks = List.filter (function Ok _ -> true | _ -> false) last_modifieds in
+       let max_mtime a (Ok b) = match Ptime.of_rfc3339 b with 
+       | Error _ -> a
+       | Ok (ts, _, _) -> if Ptime.is_later ~than:a ts then ts else a in
+       Lwt.return (Ok (Webdav_xml.ptime_to_http_date (List.fold_left max_mtime Ptime.epoch oks)))
+  else get_last_modified_prop fs name
+
 let mkdir fs name = Fs.mkdir fs name
 
 let write fs name data property =
