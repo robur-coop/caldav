@@ -159,10 +159,10 @@ class handler prefix fs = object(self)
       Wm.continue (`String (Cstruct.to_string data)) rd
 
   method allowed_methods rd =
-    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"] rd
+    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL" ] rd
 
   method known_methods rd =
-    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"] rd
+    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL" ] rd
 
   method charsets_provided rd =
     Wm.continue [
@@ -211,6 +211,14 @@ class handler prefix fs = object(self)
     match rd'.Wm.Rd.meth with
     | `Other "PROPFIND" -> self#process_propfind rd'
     | `Other "PROPPATCH" -> self#process_proppatch rd'
+
+  method create_collection rd =
+    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    Webdav_api.mkcol fs ~name:(self#id rd) ~body >>= function
+    | Ok _ -> Wm.continue `Created rd
+    | Error (`Forbidden l) -> Wm.continue `Forbidden rd
+    | Error `Conflict -> Wm.continue `Conflict rd
+    | Error `Bad_request -> Wm.continue `Conflict rd
 
   method delete_resource rd =
     Fs.destroy fs (self#id rd) >>= fun res ->

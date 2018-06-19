@@ -1,4 +1,3 @@
-- GET on collection - what is the desired return
 - which XML properties are supported (see webdav.ml:create_properties)?  which can be modified by a client?
 - do we implement the right HTTP error codes?
 - caldav collection properties (RFC 4791 Sec 5.2)
