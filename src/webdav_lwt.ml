@@ -84,6 +84,11 @@ let create_dir_rec fs name =
     () in 
   Lwt_list.iter_s create_dir directories
 
+let calendar_to_collection data =
+  match Webdav.string_to_tree data with
+  | Some (`Node (a, "mkcalendar", c)) -> Ok (Webdav.tyxml_to_body (Webdav.tree_to_tyxml (`Node (a, "mkcol", c))))
+  | _ -> Error `Bad_request
+
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
 class handler prefix fs = object(self)
@@ -159,10 +164,10 @@ class handler prefix fs = object(self)
       Wm.continue (`String (Cstruct.to_string data)) rd
 
   method allowed_methods rd =
-    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL" ] rd
+    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL"; `Other "MKCALENDAR" ] rd
 
   method known_methods rd =
-    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL" ] rd
+    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL"; `Other "MKCALENDAR" ] rd
 
   method charsets_provided rd =
     Wm.continue [
@@ -211,14 +216,22 @@ class handler prefix fs = object(self)
     match rd'.Wm.Rd.meth with
     | `Other "PROPFIND" -> self#process_propfind rd'
     | `Other "PROPPATCH" -> self#process_proppatch rd'
+    | _ -> assert false
 
   method create_collection rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
-    Webdav_api.mkcol fs ~name:(self#id rd) ~body >>= function
-    | Ok _ -> Wm.continue `Created rd
-    | Error (`Forbidden l) -> Wm.continue `Forbidden rd
-    | Error `Conflict -> Wm.continue `Conflict rd
-    | Error `Bad_request -> Wm.continue `Conflict rd
+    let body' = match rd.Wm.Rd.meth with
+    | `Other "MKCALENDAR" -> calendar_to_collection body
+    | `Other "MKCOL" -> Ok body 
+    | _ -> assert false in
+    match body' with
+    | Error _ -> Wm.continue `Conflict rd
+    | Ok body'' -> 
+      Webdav_api.mkcol fs ~name:(self#id rd) ~body:body'' >>= function
+      | Ok _ -> Wm.continue `Created rd
+      | Error (`Forbidden b) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String b }
+      | Error `Conflict -> Wm.continue `Conflict rd
+      | Error `Bad_request -> Wm.continue `Conflict rd
 
   method delete_resource rd =
     Fs.destroy fs (self#id rd) >>= fun res ->
@@ -260,7 +273,7 @@ class handler prefix fs = object(self)
       Wm.continue result rd
 
   method finish_request rd =
-    let add_headers h = Cohttp.Header.add_list h [ ("DAV", "1") ] in
+    let add_headers h = Cohttp.Header.add_list h [ ("DAV", "1, extended-mkcol") ] in
     let rd = Wm.Rd.with_resp_headers add_headers rd in
     Printf.printf "returning %s\n%!"
       (Cohttp.Header.to_string rd.Wm.Rd.resp_headers) ;

@@ -191,7 +191,7 @@ let mkcol ?(now = Ptime_clock.now ()) state ~name ~body =
       | Some set_props ->
         match apply_updates (Some props) set_props with
         | None, errs ->
-          let body =
+          let propstats =
             List.map (fun (name, status) ->
                 let status_code =
                   Format.sprintf "%s %s"
@@ -203,7 +203,8 @@ let mkcol ?(now = Ptime_clock.now ()) state ~name ~body =
                     node "status" [ pcdata status_code ] ]))
               errs
           in
-          Lwt.return (Error (`Forbidden body))
+          let xml = Tyxml.Xml.node "mkcol-response" propstats in
+          Lwt.return (Error (`Forbidden (Webdav.tyxml_to_body xml)))
         | Some map, _ ->
           Fs.write_property_map state name map >|= function
           | Ok _ -> Ok state

@@ -2,7 +2,7 @@
 type state = Webdav_fs.Fs.t
 
 val mkcol : ?now:Ptime.t -> state -> name:string -> body:string ->
-  (state, [ `Bad_request | `Conflict | `Forbidden of Tyxml.Xml.elt list ])
+  (state, [ `Bad_request | `Conflict | `Forbidden of string ])
     result Lwt.t
 
 (* TODO remove cohttp and tyxml dependencies!? *)
