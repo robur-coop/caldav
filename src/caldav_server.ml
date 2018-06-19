@@ -226,8 +226,8 @@ class handler prefix fs = object(self)
     | _ -> assert false
 
   method cannot_create rd =
-    let xml = Tyxml.Xml.(node ~a:[Webdav_api.dav_ns] "error" [node "resource-must-be-null" []]) in
-    let err = Webdav_xml.tyxml_to_body xml in
+    let xml = `Node ([Webdav_api.dav_ns], "error", [`Node ([], "resource-must-be-null", [])]) in
+    let err = Webdav_xml.tree_to_string xml in
     let rd' = { rd with Wm.Rd.resp_body = `String err } in
     Wm.continue () rd' 
 

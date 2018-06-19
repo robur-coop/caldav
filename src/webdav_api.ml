@@ -42,10 +42,9 @@ let process_property_leaf fs prefix req url =
    | `Props ps -> (fun m -> Webdav_xml.find_props ps m)
   in process_properties fs prefix url f
 
-let dav_ns = Tyxml.Xml.string_attrib "xmlns" (Tyxml_xml.W.return "DAV:")
-let dav_ns2 = ("xmlns", "DAV:")
+let dav_ns = ("xmlns", "DAV:")
 
-let multistatus nodes = `Node ([ dav_ns2 ], "multistatus", nodes)
+let multistatus nodes = `Node ([ dav_ns ], "multistatus", nodes)
 
 let process_files fs prefix url req els =
   Lwt_list.map_s (process_property_leaf fs prefix req) (url :: els) >|= fun answers ->
@@ -71,11 +70,11 @@ let propfind fs url prefix req =
     | `Not_found -> `Property_not_found
     | `Single_response t ->
       let outer =
-        `Node ([ dav_ns2 ], "multistatus", [ t ])
+        `Node ([ dav_ns ], "multistatus", [ t ])
       in
       `Response outer
 
-let error_xml element = `Node ([ dav_ns2 ], "error", [ `Node ([], element, []) ])
+let error_xml element = `Node ([ dav_ns ], "error", [ `Node ([], element, []) ])
 
 let propfind state ~prefix ~name tree ~depth =
   match parse_depth depth with
