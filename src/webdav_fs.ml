@@ -67,25 +67,49 @@ let isdir fs name =
   Ok stat.Mirage_fs.directory
 
 (* property getlastmodified does not exist for directories *)
-let get_last_modified_prop fs file =
+let last_modified_as_ptime fs file =
+  Printf.printf "last_modified_as_ptime for %s\n" file ;
   get_property_map fs file >|= function
   | None -> Error `Invalid_xml
   | Some map ->
     match Webdav_xml.get_prop "getlastmodified" map with
-    | Some (_, [ `Pcdata last_modified ]) -> Ok last_modified
+    | Some (_, [ `Pcdata last_modified ]) ->
+      begin match Ptime.of_rfc3339 last_modified with
+        | Error _ -> Error `Invalid_date
+        | Ok (ts, _, _) -> Ok ts
+      end
     | _ -> Error `Unknown_prop
 
+
+let last_modified_of_dir fs dir =
+  Printf.printf "last_modified_of_dir %s\n" dir ;
+  listdir fs dir >>== fun files ->
+  Printf.printf "last_modified_of_dir found %d files\n" (List.length files) ;
+  Lwt_list.map_p (fun filename ->
+      last_modified_as_ptime fs (dir ^ "/" ^ filename))
+    files >|= fun last_modifieds ->
+  let oks = List.filter (function Ok _ -> true | _ -> false) last_modifieds in
+  Printf.printf "last_modified_of_dir: found %d last_modified\n" (List.length oks) ;
+  let max_mtime a (Ok b) =
+    Printf.printf "max_mtime a %s b %s, is_later %b\n"
+      (Ptime.to_rfc3339 a) (Ptime.to_rfc3339 b)
+      (Ptime.is_later ~than:a b) ;
+    if Ptime.is_later ~than:a b then b else a in
+  Ok (List.fold_left max_mtime Ptime.epoch oks)
+
+let open_fs_error x =
+  (x : ('a, Fs.error) result Lwt.t :> ('a, [> Fs.error ]) result Lwt.t)
+
 let last_modified fs name =
-  isdir fs name >>== fun is_dir ->
-  if is_dir 
-  then listdir fs name >>== fun files ->
-       Lwt_list.map_p (get_last_modified_prop fs) files >>= fun last_modifieds ->
-       let oks = List.filter (function Ok _ -> true | _ -> false) last_modifieds in
-       let max_mtime a (Ok b) = match Ptime.of_rfc3339 b with 
-       | Error _ -> a
-       | Ok (ts, _, _) -> if Ptime.is_later ~than:a ts then ts else a in
-       Lwt.return (Ok (Webdav_xml.ptime_to_http_date (List.fold_left max_mtime Ptime.epoch oks)))
-  else get_last_modified_prop fs name
+  Printf.printf "last-modified for %s\n" name ;
+  open_fs_error (isdir fs name) >>== fun is_dir ->
+  Printf.printf "is_dir %b\n" is_dir ;
+  begin
+    if is_dir
+    then open_fs_error @@ last_modified_of_dir fs name
+    else last_modified_as_ptime fs name
+  end >>|= fun ptime ->
+  Ok (Webdav_xml.ptime_to_http_date ptime)
 
 let mkdir fs name = Fs.mkdir fs name
 

@@ -17,7 +17,7 @@ let to_status x = Cohttp.Code.code_of_status x
 let create_properties name content_type is_dir length =
   Printf.printf "Creating properties!!! %s \n" name;
   Webdav_xml.create_properties ~content_type
-    is_dir (Webdav_xml.ptime_to_http_date (Ptime_clock.now ())) length name
+    is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length name
 
 let etag str = Digest.to_hex @@ Digest.string str
 
@@ -27,7 +27,7 @@ let list_dir fs dir =
   let list_file file =
     (* TODO: figure out whether _file_ is a file or a directory *)
     let full_filename = dir ^ file in
-    get_last_modified_prop fs full_filename >>= function
+    Fs.last_modified fs full_filename >>= function
     | Error _ -> assert false
     | Ok last_modified ->
       Fs.isdir fs full_filename >|= function
@@ -37,28 +37,40 @@ let list_dir fs dir =
   | Error e -> assert false
   | Ok files -> Lwt_list.map_p list_file files
 
-let directory_listing prefix files =
+let directory_as_html prefix fs dir =
+  list_dir fs dir >|= fun files ->
   let print_file (file, is_dir, last_modified) =
     Printf.sprintf "<tr><td><a href=\"%s/%s\">%s</a></td><td>%s</td><td>%s</td></tr>"
       prefix file file (if is_dir then "directory" else "text/calendar") last_modified in
   String.concat "\n" (List.map print_file files)
 
-let collate_directory fs files =
-  let extract_components (filename, is_dir, _) =
-    Fs.read fs filename >|= function
+let directory_as_ics fs dir =
+  let calendar_components filename =
+    Fs.read fs (dir ^ "/" ^ filename) >|= function
     | Error _ -> Printf.printf "error while reading file!\n" ; []
     | Ok (data, _props) ->
       match Icalendar.parse (Cstruct.to_string data) with
       | Ok calendar -> snd calendar
       | Error e -> Printf.printf "error %s while parsing ics\n" e ; []
   in
-  (* TODO: hardcoded calprops, put them elsewhere *)
-  let calprops = [
-    `Prodid ([], "-//ROBUR.IO//EN") ;
-    `Version ([], "2.0")
-  ] in
-  Lwt_list.map_p extract_components files >|= fun components ->
-  Icalendar.to_ics (calprops, List.flatten components)
+  Fs.listdir fs dir >>= function
+  | Error _ -> assert false (* previously checked that directory exists *)
+  | Ok files ->
+    (* TODO: hardcoded calprops, put them elsewhere *)
+    Fs.get_property_map fs dir >>= function
+    | None -> assert false (* invariant: each file and directory has a property map *)
+    | Some props ->
+      let name =
+        match Webdav_xml.M.find_opt "displayname" props with
+        | Some (_, [ `Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), [], name) ]
+        | _ -> []
+      in
+      let calprops = [
+        `Prodid ([], "-//ROBUR.IO//EN") ;
+        `Version ([], "2.0")
+      ] @ name in
+      Lwt_list.map_p calendar_components files >|= fun components ->
+      Icalendar.to_ics (calprops, List.flatten components)
 
 let create_dir_rec fs name =
   let segments = Astring.String.cuts ~sep:"/" name in
@@ -135,12 +147,11 @@ class handler prefix fs = object(self)
     | true ->
       (* TODO: append / to name! *)
       Printf.printf "is a directory\n" ;
-      list_dir fs file >>= fun files ->
       if gecko then
-        let listing = directory_listing prefix files in
+        directory_as_html prefix fs file >>= fun listing ->
         Wm.continue (`String listing) rd
       else
-        collate_directory fs files >>= fun data ->
+        directory_as_ics fs file >>= fun data ->
         Wm.continue (`String data) rd
     | false ->
       Fs.read fs file >>== fun (data, props) ->
@@ -220,7 +231,7 @@ class handler prefix fs = object(self)
     let xml = `Node ([Webdav_api.dav_ns], "error", [`Node ([], "resource-must-be-null", [])]) in
     let err = Webdav_xml.tree_to_string xml in
     let rd' = { rd with Wm.Rd.resp_body = `String err } in
-    Wm.continue () rd' 
+    Wm.continue () rd'
 
   method create_collection rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
@@ -251,27 +262,26 @@ class handler prefix fs = object(self)
 
   method last_modified rd =
     let file = self#id rd in
-    Printf.printf "last modified in webmachine %s\n" file;
     let to_lwt_option = function
     | Error _ -> Lwt.return None
     | Ok x -> Lwt.return (Some x) in
-    get_last_modified_prop fs file >>= to_lwt_option >>= fun res ->
+    Fs.last_modified fs file >>= to_lwt_option >>= fun res ->
     Wm.continue res rd
-    
+
   method generate_etag rd =
     let file = self#id rd in
     Fs.isdir fs file >>= function
     | Error _ -> Wm.continue None rd
     | Ok is_dir ->
-      (get_last_modified_prop fs (self#id rd) >|= function
+      Printf.printf "generating etag for %s, is_dir %b\n" file is_dir ;
+      (Fs.last_modified fs (self#id rd) >|= function
       | Error _ -> rd
       | Ok lm ->
         let add_headers h = Cohttp.Header.add_list h [ ("Last-Modified", lm) ] in
         Wm.Rd.with_resp_headers add_headers rd) >>= fun rd ->
       (if is_dir
       then
-        list_dir fs file >>= fun files ->
-        collate_directory fs files >|= fun data ->
+        directory_as_ics fs file >|= fun data ->
         Some (etag data)
       else
         Fs.read fs file >|= function
