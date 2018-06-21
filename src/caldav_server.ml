@@ -169,7 +169,6 @@ class handler prefix fs = object(self)
     ] rd
 
   method resource_exists rd =
-    (* Printf.printf "RESOURCE exists %s \n" (self#id rd); *)
     Fs.exists fs (self#id rd) >>= fun v ->
     Wm.continue v rd
 
@@ -311,20 +310,21 @@ let initialise_fs fs =
       | h :: t -> [] :: (List.map (fun a -> h :: a) (prefixes t)) in
     let directories = prefixes segments in
     let create_dir path =
-      let filename = String.concat "/" path in
-      let props = create_properties filename "text/directory" true 0 in
-      Fs.mkdir fs (Webdav_fs.dir_from_string filename) props >|= fun _ ->
-      () in 
-    Lwt_list.iter_s create_dir directories
+      if path = [] then
+        Lwt.return_unit
+      else
+        let filename = String.concat "/" path in
+        let props = create_properties filename "text/directory" true 0 in
+        Fs.mkdir fs (Webdav_fs.dir_from_string filename) props >|= fun _ ->
+        ()
+    in
+    Lwt_list.iter_s create_dir (directories @ [ segments ])
   in
-  let create_file name data =
-    let props = create_properties name "application/json" false (String.length data) in
-    Fs.write fs (Webdav_fs.file_from_string name) (Cstruct.of_string data) props
-  in
+  let props = create_properties "/" "text/directory" true 0 in
+  Fs.write_property_map fs (`Dir []) props >>= fun _ ->
   create_dir_rec fs "users" >>= fun _ ->
   create_dir_rec fs "__uids__/10000000-0000-0000-0000-000000000001/calendar/" >>= fun _ ->
-  create_file "1" "{\"name\":\"item 1\"}" >>= fun _ ->
-  create_file "2" "{\"name\":\"item 2\"}" >>= fun _ ->
+  Format.printf "FS is:\n%a\n" Mirage_fs_mem.pp fs ;
   Lwt.return_unit
 
 let main () =
