@@ -4,14 +4,14 @@ type tree = Webdav_xml.tree
 
 val dav_ns : string * string
 
-val mkcol : ?now:Ptime.t -> state -> string -> tree option ->
+val mkcol : ?now:Ptime.t -> state -> Webdav_fs.dir -> tree option ->
   (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
     result Lwt.t
 
-val propfind : state -> prefix:string -> name:string -> tree -> depth:string option ->
+val propfind : state -> prefix:string -> name:Webdav_fs.file_or_dir -> tree -> depth:string option ->
   (state * tree, [ `Bad_request | `Forbidden of tree | `Property_not_found ]) result Lwt.t
 
-val proppatch : state -> prefix:string -> name:string -> tree ->
+val proppatch : state -> prefix:string -> name:Webdav_fs.file_or_dir -> tree ->
   (state * tree, [ `Bad_request ]) result Lwt.t
 
 (*
