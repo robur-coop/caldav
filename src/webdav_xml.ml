@@ -49,19 +49,14 @@ let find_props ps m =
 let create_properties ?(content_type = "text/html") ?(language = "en") is_dir timestamp length filename =
   let rtype = if is_dir then [ `Node ([], "collection", []) ] else [] in
   let filename = if filename = "" then "hinz und kunz" else filename in
-  let map =
-    if is_dir then
-      M.empty
-    else
-      M.add "getlastmodified" ([], [ `Pcdata timestamp ]) M.empty
-  in
   M.add "creationdate" ([], [ `Pcdata timestamp ]) @@
   M.add "displayname" ([], [ `Pcdata filename ]) @@
   M.add "getcontentlanguage" ([], [ `Pcdata language ]) @@
   M.add "getcontenttype" ([], [ `Pcdata content_type ]) @@
+  M.add "getlastmodified" ([], [ `Pcdata timestamp ]) @@
   M.add "getcontentlength" ([], [ `Pcdata (string_of_int length) ]) @@
   (* M.add "lockdiscovery" *)
-  M.add "resourcetype" ([], rtype) map
+  M.add "resourcetype" ([], rtype) M.empty
   (* M.add "supportedlock" *)
 
 let rec pp_tree fmt = function

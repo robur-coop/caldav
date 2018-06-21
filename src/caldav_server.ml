@@ -252,7 +252,9 @@ class handler prefix fs = object(self)
         | Error `Bad_request -> Wm.continue `Conflict rd
 
   method delete_resource rd =
+    Format.printf "deleting %s in FS %a\n" (self#id rd) Mirage_fs_mem.pp fs ;
     Fs.destroy fs (self#id rd) >>= fun res ->
+    Format.printf "deleted - FS now: %a\n" Mirage_fs_mem.pp fs ;
     let deleted, resp_body =
       match res with
       | Ok () -> true, `String "{\"status\":\"ok\"}"

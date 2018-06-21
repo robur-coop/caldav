@@ -181,6 +181,7 @@ let body_to_props body default_props =
             ])) errs
       in
       let xml = `Node ([], "mkcol-response", propstats) in
+      Printf.printf "forbidden from body_to_props!\n" ;
       Error (`Forbidden xml)
     | Some map, _ -> Ok map
 

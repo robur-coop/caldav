@@ -87,15 +87,18 @@ let last_modified_of_dir fs dir =
   Printf.printf "last_modified_of_dir found %d files\n" (List.length files) ;
   Lwt_list.map_p (fun filename ->
       last_modified_as_ptime fs (dir ^ "/" ^ filename))
-    files >|= fun last_modifieds ->
+    files >>= fun last_modifieds ->
   let oks = List.filter (function Ok _ -> true | _ -> false) last_modifieds in
   Printf.printf "last_modified_of_dir: found %d last_modified\n" (List.length oks) ;
   let max_mtime a (Ok b) =
     Printf.printf "max_mtime a %s b %s, is_later %b\n"
       (Ptime.to_rfc3339 a) (Ptime.to_rfc3339 b)
       (Ptime.is_later ~than:a b) ;
-    if Ptime.is_later ~than:a b then b else a in
-  Ok (List.fold_left max_mtime Ptime.epoch oks)
+    if Ptime.is_later ~than:a b then b else a
+  in
+  last_modified_as_ptime fs dir >|= function
+  | Ok start -> Ok (List.fold_left max_mtime start oks)
+  | Error _ -> assert false (* getlastmodified property is ensured on creation *)
 
 let open_fs_error x =
   (x : ('a, Fs.error) result Lwt.t :> ('a, [> Fs.error ]) result Lwt.t)
@@ -117,7 +120,17 @@ let write fs name data property =
   Fs.write fs name 0 data >>== fun () ->
   write_property_map fs name property
 
-let destroy fs name = Fs.destroy fs name
+let destroy fs name =
+  open_fs_error (isdir fs name) >>== fun isdir ->
+  let name' =
+    if isdir && not (has_trailing_slash name)
+    then name ^ "/"
+    else name
+  in
+  let props = file_to_propertyfile name' in
+  Fs.destroy fs props >>== fun () ->
+  Fs.destroy fs name'
+
 let connect () = Fs.connect ""
 
 let pp_error = Fs.pp_error
