@@ -214,30 +214,29 @@ let caldav_ns = "urn:ietf:params:xml:ns:caldav"
 
 type comp_inferred = [ `Comp of String.t * [ `Allcomp | `Allprop | `Prop of String.t * bool ] list ]
 
-type comp = Comp of String.t * comp list 
-| Allcomp | Allprop | Prop of String.t * bool 
-| Bla of comp
+type comp = [ `Comp of String.t * comp list | `Allcomp | `Allprop | `Prop of String.t * bool ]
 
-let rec comp_parser : tree -> (comp, string) result =
+let rec comp_parser tree : (comp, string) result =
   tree_lift
-    (fun (`Node (a, _, _)) c -> match List.assoc_opt "name" a with 
-    | None -> Error "Expected name in comp"
-    | Some name -> Ok (Comp (name, c)))
+    (fun (`Node (a, _, _)) c ->
+       match List.assoc_opt "name" a with
+       | None -> Error "Expected name in comp"
+       | Some name -> Ok (`Comp (name, c)))
     (name_ns "comp" caldav_ns)
-    ( fun tree -> match (( tree_lift (fun _ c -> is_empty c >>| fun () -> Allprop) (name_ns "allprop" caldav_ns) any)
- ||| ( tree_lift (fun (`Node (a, n, _)) c ->
-         let name = List.assoc_opt "name" a 
-         and novalue = match List.assoc_opt "novalue" a with
-         | Some "yes" -> true
-         | _ -> false in
-         match name with
-         | None -> Error "No name in prop"
-         | Some name' -> is_empty c >>| fun () -> (Prop (name', novalue))
-        ) (name_ns "prop" caldav_ns) any)
- ||| ( tree_lift (fun _ c -> is_empty c >>| fun () -> Allcomp) (name_ns "allcomp" caldav_ns) any)) tree
- with 
- | Ok x -> Ok x
- | Error _ -> Error "recursive call does not work")
+    ((tree_lift (fun _ c -> is_empty c >>| fun () -> `Allprop) (name_ns "allprop" caldav_ns) any)
+     ||| (tree_lift
+            (fun (`Node (a, _, _)) c ->
+               let name = List.assoc_opt "name" a
+               and novalue = match List.assoc_opt "novalue" a with
+                 | Some "yes" -> true
+                 | _ -> false in
+               match name with
+               | None -> Error "No name in prop"
+               | Some name' -> is_empty c >>| fun () -> (`Prop (name', novalue)))
+            (name_ns "prop" caldav_ns) any)
+     ||| (tree_lift (fun _ c -> is_empty c >>| fun () -> `Allcomp) (name_ns "allcomp" caldav_ns) any)
+     ||| comp_parser)
+    tree
 
 (*
 let rec test =
