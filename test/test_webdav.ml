@@ -231,6 +231,7 @@ let webdav_api_tests = [
 let tests = [
   "Read propfind", parse_propfind_xml_tests ;
   "Read propertyupdate", parse_propupdate_xml_tests ;
+  "Report tests", report_tests ;
   "Webdav API", webdav_api_tests
 ]
 
