@@ -282,11 +282,14 @@ class handler prefix fs = object(self)
       Wm.continue result rd'
 
   method finish_request rd =
-    let add_headers h = Cohttp.Header.add_list h [ ("DAV", "1, extended-mkcol") ] in
-    let rd = Wm.Rd.with_resp_headers add_headers rd in
+    let rd' = if rd.Wm.Rd.meth = `OPTIONS then
+      let add_headers h = Cohttp.Header.add_list h [ ("DAV", "1, extended-mkcol") ] in
+      Wm.Rd.with_resp_headers add_headers rd
+    else
+      rd in
     Printf.printf "returning %s\n%!"
-      (Cohttp.Header.to_string rd.Wm.Rd.resp_headers) ;
-    Wm.continue () rd
+      (Cohttp.Header.to_string rd'.Wm.Rd.resp_headers) ;
+    Wm.continue () rd'
 
   method private id rd =
     let url = Uri.path (rd.Wm.Rd.uri) in
