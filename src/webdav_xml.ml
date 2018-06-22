@@ -120,14 +120,14 @@ let tree_lift f node_p children_p =
        in
        f node ch')
 
-let name string = function
+let name str = function
   | (`Node (_, name, _) as node) ->
-    if String.equal name string then
+    if String.equal name str then
       Ok node
     else
-      Error ("expected " ^ string ^ ", but found " ^ name)
+      Error ("expected " ^ str ^ ", but found " ^ name)
   | _ ->
-    Error ("expected " ^ string ^ ", but got pcdata")
+    Error ("expected " ^ str ^ ", but got pcdata")
 
 let any tree = Ok tree
 
@@ -173,6 +173,20 @@ type res = [
   | `Props of string list
 ]
 
+let prop_parser : tree -> ([ res | `Include of string list ], string) result =
+  ((tree_lift
+      (fun _ c -> is_empty c >>| fun () -> `Propname)
+      (name "propname") any)
+   ||| (tree_lift
+          (fun _ c -> non_empty c >>| fun () -> `Props c)
+          (name "prop") (any >>= extract_name))
+   ||| (tree_lift
+          (fun _ c -> is_empty c >>| fun () -> `All_prop [])
+          (name "allprop") any)
+   ||| (tree_lift
+          (fun _ c -> non_empty c >>| fun () -> `Include c)
+          (name "include") (any >>= extract_name)))
+
 let parse_propfind_xml tree =
   let tree_grammar =
     tree_lift
@@ -182,20 +196,23 @@ let parse_propfind_xml tree =
          | [ `All_prop _ ; `Include is ] -> Ok (`All_prop is)
          | _ -> Error "broken")
       (name "propfind")
-      ((tree_lift
-          (fun _ c -> is_empty c >>| fun () -> `Propname)
-          (name "propname") any)
-       ||| (tree_lift
-              (fun _ c -> non_empty c >>| fun () -> `Props c)
-              (name "prop") (any >>= extract_name))
-       ||| (tree_lift
-              (fun _ c -> is_empty c >>| fun () -> `All_prop [])
-              (name "allprop") any)
-       ||| (tree_lift
-              (fun _ c -> non_empty c >>| fun () -> `Include c)
-              (name "include") (any >>= extract_name)))
+      prop_parser
   in
   run tree_grammar tree
+
+let parse_calendar_query_xml tree =
+  let tree_grammar =
+    tree_lift
+      (fun _ c -> match c with
+         | [ #res as r ] -> Ok r
+         | [ `Include _ ] -> Error "lonely include"
+         | [ `All_prop _ ; `Include is ] -> Ok (`All_prop is)
+         | _ -> Error "broken")
+      (name "calendar-query")
+      (prop_parser)
+  in
+  let _ = run tree_grammar tree in 
+  Ok "hallo"
 
 let pp_propupdate fmt update =
   List.iter (function

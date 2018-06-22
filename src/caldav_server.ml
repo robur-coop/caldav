@@ -158,10 +158,10 @@ class handler prefix fs = object(self)
       Wm.continue (`String (Cstruct.to_string data)) rd
 
   method allowed_methods rd =
-    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL"; `Other "MKCALENDAR" ] rd
+    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL"; `Other "MKCALENDAR" ; `Other "REPORT" ] rd
 
   method known_methods rd =
-    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL"; `Other "MKCALENDAR" ] rd
+    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL"; `Other "MKCALENDAR" ; `Other "REPORT" ] rd
 
   method charsets_provided rd =
     Wm.continue [
@@ -214,6 +214,9 @@ class handler prefix fs = object(self)
       | `Other "PROPFIND" -> self#process_propfind rd' f_or_d
       | `Other "PROPPATCH" -> self#process_proppatch rd' f_or_d
       | _ -> assert false
+
+  method report rd =
+    Wm.continue `Multistatus rd
 
   method cannot_create rd =
     let xml = `Node ([Webdav_api.dav_ns], "error", [`Node ([], "resource-must-be-null", [])]) in
