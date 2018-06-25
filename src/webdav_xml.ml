@@ -132,7 +132,7 @@ let name str = function
 let name_ns name namespace = function
   | (`Node (attr, n, _) as node) ->
     if String.equal name n then
-      match List.assoc_opt "ns" attr with
+      match List.assoc_opt "xmlns" attr with
       | Some ns when String.equal ns namespace -> Ok node
       | _ -> Error ("expected namespace " ^ namespace)
     else
@@ -183,7 +183,7 @@ type res = [
   | `Props of string list
 ]
 
-let prop_parser : tree -> ([ res | `Include of string list ], string) result =
+let prop_parser : tree -> ([> res | `Include of string list ], string) result =
   ((tree_lift
       (fun _ c -> is_empty c >>| fun () -> `Propname)
       (name "propname") any)
@@ -212,9 +212,14 @@ let parse_propfind_xml tree =
 
 let caldav_ns = "urn:ietf:params:xml:ns:caldav"
 
-type comp_inferred = [ `Comp of String.t * [ `Allcomp | `Allprop | `Prop of String.t * bool ] list ]
+(* TODO this actually belongs to CalDAV! this is Webdav_xml module! *)
+type comp = [ `Comp of string * comp list | `Allcomp | `Allprop | `Prop of string * bool ]
 
-type comp = [ `Comp of String.t * comp list | `Allcomp | `Allprop | `Prop of String.t * bool ]
+let rec pp_comp ppf = function
+  | `Prop (name, value) -> Fmt.pf ppf "prop %s, value %b" name value
+  | `Allprop -> Fmt.string ppf "all properties"
+  | `Allcomp -> Fmt.string ppf "all components"
+  | `Comp (name, comps) -> Fmt.pf ppf "component %s, %a" name Fmt.(list ~sep:(unit ", ") pp_comp) comps
 
 let rec comp_parser tree : (comp, string) result =
   tree_lift
@@ -226,11 +231,11 @@ let rec comp_parser tree : (comp, string) result =
     ((tree_lift (fun _ c -> is_empty c >>| fun () -> `Allprop) (name_ns "allprop" caldav_ns) any)
      ||| (tree_lift
             (fun (`Node (a, _, _)) c ->
-               let name = List.assoc_opt "name" a
-               and novalue = match List.assoc_opt "novalue" a with
+               let novalue = match List.assoc_opt "novalue" a with
                  | Some "yes" -> true
-                 | _ -> false in
-               match name with
+                 | _ -> false
+               in
+               match List.assoc_opt "name" a with
                | None -> Error "No name in prop"
                | Some name' -> is_empty c >>| fun () -> (`Prop (name', novalue)))
             (name_ns "prop" caldav_ns) any)
@@ -238,37 +243,35 @@ let rec comp_parser tree : (comp, string) result =
      ||| comp_parser)
     tree
 
-(*
-let rec test =
-  let alternative a b =
-    (fun tree ->
-       match a tree with
-       | Error _ -> b tree
-       | Ok x    -> Ok x) in
-  alternative 
-  (fun tree -> Error "tree1") 
-  (fun tree -> ignore(test (`Pcdata "hi")); Error "ups" ) 
+let calendar_data_parser =
+  tree_lift (fun _ c -> Ok (`Calendar_data c))
+    (name_ns "calendar-data" caldav_ns)
+    comp_parser
 
-let rec test =
-  (fun tree ->
-     match (fun tree -> Error "tree1") tree with
-     | Error _ -> ((fun tree -> ignore(test (`Pcdata "hi")); Error "ups" ) ) tree
-     | Ok x    -> Ok x)
-*)
+type calendar_data = [
+  | `All_prop of string list
+  | `Calendar_data of comp list
+  | `Propname
+  | `Props of string list
+]
+
+let pp_calendar_data ppf = function
+  | #res as r -> pp_prop ppf r
+  | `Calendar_data xs -> Fmt.pf ppf "calendar data %a" Fmt.(list ~sep:(unit ", ") pp_comp) xs
 
 let parse_calendar_query_xml tree =
   let tree_grammar =
     tree_lift
       (fun _ c -> match c with
          | [ #res as r ] -> Ok r
+         | [ `Calendar_data x ] -> Ok (`Calendar_data x)
          | [ `Include _ ] -> Error "lonely include"
          | [ `All_prop _ ; `Include is ] -> Ok (`All_prop is)
          | _ -> Error "broken")
-      (name "calendar-query")
-      (prop_parser)
+      (name_ns "calendar-query" caldav_ns)
+      (prop_parser ||| calendar_data_parser)
   in
-  let _ = run tree_grammar tree in 
-  Ok "hallo"
+  run tree_grammar tree
 
 let pp_propupdate fmt update =
   List.iter (function

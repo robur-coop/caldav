@@ -84,9 +84,9 @@ let parse_propfind_xml_tests = [
 
 let calendar_query =
   let module M = struct
-    type t = string
-    let pp = Fmt.string
-    let equal = String.equal
+    type t = Webdav_xml.calendar_data
+    let pp = Webdav_xml.pp_calendar_data
+    let equal a b = compare a b = 0
   end in
   (module M : Alcotest.TESTABLE with type t = M.t)
 
@@ -117,8 +117,9 @@ let parse_simple_report_query () =
      </D:prop>
    </C:calendar-query>
 |_} in
-  let expected = Ok "Not implemented yet" in
-  Alcotest.(check (result calendar_query string) __LOC__ expected (Webdav_xml.parse_calendar_query_xml (tree xml)))
+  let expected = Ok (`Props [ "getetag" ; "calendar-data" ]) in
+  Alcotest.(check (result calendar_query string) __LOC__ expected
+              (Webdav_xml.parse_calendar_query_xml (tree xml)))
 
 let report_tests = [
   "Parse simple report query", `Quick, parse_simple_report_query;
