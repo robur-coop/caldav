@@ -1,7 +1,8 @@
+open Webdav_xml
 
 let header = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
 
-let tree xml = match Webdav_xml.string_to_tree xml with Some t -> t | None -> Alcotest.fail "Invalid xml."
+let tree xml = match string_to_tree xml with Some t -> t | None -> Alcotest.fail "Invalid xml."
 
 let prop =
   let module M = struct
@@ -96,28 +97,10 @@ let parse_simple_report_query () =
                  xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:prop>
        <D:getetag/>
-       <C:calendar-data>
-         <C:comp name="VCALENDAR">
-           <C:prop name="VERSION"/>
-           <C:comp name="VEVENT">
-             <C:prop name="SUMMARY"/>
-             <C:prop name="UID"/>
-             <C:prop name="DTSTART"/>
-             <C:prop name="DTEND"/>
-             <C:prop name="DURATION"/>
-             <C:prop name="RRULE"/>
-             <C:prop name="RDATE"/>
-             <C:prop name="EXRULE"/>
-             <C:prop name="EXDATE"/>
-             <C:prop name="RECURRENCE-ID"/>
-           </C:comp>
-           <C:comp name="VTIMEZONE"/>
-         </C:comp>
-       </C:calendar-data>
      </D:prop>
    </C:calendar-query>
 |_} in
-  let expected = Ok (`Props [ "getetag" ; "calendar-data" ]) in
+  let expected = Ok (`Proplist [ `Prop "getetag" ; `Prop "calendar-data" ]) in
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Webdav_xml.parse_calendar_query_xml (tree xml)))
 
@@ -127,7 +110,7 @@ let report_tests = [
 
 let propupdate =
   let module M = struct
-    type t = [ `Remove of string | `Set of ((string * string) list * string * Webdav_xml.tree list) ] list
+    type t = [ `Remove of string | `Set of (Webdav_xml.attribute list * string * Webdav_xml.tree list) ] list
     let pp = Webdav_xml.pp_propupdate
     let equal a b = compare a b = 0
   end in
@@ -152,12 +135,10 @@ let proppatch () =
       </D:propertyupdate>|}
   in
   Alcotest.(check (result propupdate str_err) __LOC__
-              (Ok [`Set (["xmlns", "http://ns.example.com/standards/z39.50/"],
+              (Ok [`Set ([],
                            "Authors",
-                           [`Node (["xmlns", "http://ns.example.com/standards/z39.50/"],
-                                   "Author", [ `Pcdata "Jim Whitehead"]) ;
-                            `Node (["xmlns", "http://ns.example.com/standards/z39.50/"],
-                                   "Author", [ `Pcdata "Roy Fielding" ]) ]) ;
+                           [Node ("http://ns.example.com/standards/z39.50/", "Author", [], [ Pcdata "Jim Whitehead"]) ;
+                            Node ("http://ns.example.com/standards/z39.50/", "Author", [], [ Pcdata "Roy Fielding" ]) ]) ;
                      `Remove "Copyright-Owner" ])
     (Webdav_xml.parse_propupdate_xml (tree xml)))
 

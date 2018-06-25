@@ -48,7 +48,7 @@ let propfilename =
     | filename :: path -> `File (List.rev path @ [ filename ^ ext ])
     | [] -> assert false (* no file without a name *)
 
-type propmap = ((string * string) list * Webdav_xml.tree list) Webdav_xml.M.t
+type propmap = (Webdav_xml.attribute list * Webdav_xml.tree list) Webdav_xml.M.t
 
 let get_properties fs f_or_d =
   let propfile = to_string (propfilename f_or_d) in
@@ -124,7 +124,7 @@ let last_modified_as_ptime fs f_or_d =
     Error `Invalid_xml
   | Some map ->
     match Webdav_xml.get_prop "getlastmodified" map with
-    | Some (_, [ `Pcdata last_modified ]) ->
+    | Some (_, [ Webdav_xml.Pcdata last_modified ]) ->
       begin match Ptime.of_rfc3339 last_modified with
         | Error _ ->
           Printf.printf "invalid data!\n" ;

@@ -2,6 +2,8 @@ open Lwt.Infix
 
 module Fs = Webdav_fs
 
+module Xml = Webdav_xml
+
 type state = Webdav_fs.Fs.t
 type tree = Webdav_xml.tree
 
@@ -13,11 +15,11 @@ let parse_depth = function
   | _ -> Error `Bad_request
 
 let process_properties fs prefix f_or_d f =
-  Printf.printf "processing properties of %s\n" (Webdav_fs.to_string f_or_d) ;
+  Printf.printf "processing properties of %s\n" (Fs.to_string f_or_d) ;
   Fs.get_property_map fs f_or_d >|= function
   | None -> `Not_found
   | Some map ->
-    Printf.printf "read map %s\n" (Webdav_xml.props_to_string map) ;
+    Printf.printf "read map %s\n" (Xml.props_to_string map) ;
     let propstats = f map in
     let status res =
       Format.sprintf "%s %s"
@@ -25,28 +27,27 @@ let process_properties fs prefix f_or_d f =
         (Cohttp.Code.string_of_status res)
     in
     let ps = List.map (fun (code, props) ->
-      `Node ([], "propstat", [
-        `Node ([], "prop", props ) ; `Node ([], "status", [ `Pcdata (status code) ] ) ]))
+      Xml.node "propstat" [
+        Xml.node "prop" props ;
+        Xml.node "status" [ Xml.Pcdata (status code) ] ])
       propstats
     in
     let tree =
-      `Node ([], "response",
-        `Node ([], "href", [ `Pcdata (prefix ^ "/" ^ (Webdav_fs.to_string f_or_d)) ]) :: ps )
+      Xml.node "response"
+        (Xml.node "href" [ Xml.Pcdata (prefix ^ "/" ^ (Fs.to_string f_or_d)) ] :: ps)
     in
     `Single_response tree
 
 let process_property_leaf fs prefix req f_or_d =
   let f = match req with
-   | `Propname -> (fun m -> [`OK, List.map ( fun k -> `Node ([], k, []) ) @@ List.map fst (Webdav_xml.M.bindings m)])
-   | `All_prop includes -> (fun m -> [`OK, Webdav_xml.props_to_tree m]) (* TODO: finish this *)
-   | `Props ps -> (fun m -> Webdav_xml.find_props ps m)
+   | `Propname -> (fun m -> [`OK, List.map ( fun k -> Xml.node k []) @@ List.map fst (Xml.M.bindings m)])
+   | `All_prop includes -> (fun m -> [`OK, Xml.props_to_tree m]) (* TODO: finish this *)
+   | `Props ps -> (fun m -> Xml.find_props ps m)
   in process_properties fs prefix f_or_d f
 
-let dav_ns = ("xmlns", "DAV:")
+let multistatus nodes = Xml.node ~ns:Xml.dav_ns "multistatus" nodes
 
-let multistatus nodes = `Node ([ dav_ns ], "multistatus", nodes)
-
-let error_xml element = `Node ([ dav_ns ], "error", [ `Node ([], element, []) ])
+let error_xml element = Xml.node ~ns:Xml.dav_ns "error" [ Xml.node element [] ]
 
 let propfind fs f_or_d prefix req depth =
   let process_files fs prefix dir req els =
@@ -70,7 +71,7 @@ let propfind fs f_or_d prefix req depth =
       | `Not_found -> Error `Property_not_found
       | `Single_response t ->
         let outer =
-          `Node ([ dav_ns ], "multistatus", [ t ])
+          Xml.node ~ns:Xml.dav_ns "multistatus" [ t ]
         in
         Ok outer
     end
@@ -83,7 +84,7 @@ let propfind state ~prefix ~name tree ~depth =
   match parse_depth depth with
   | Error `Bad_request -> Lwt.return (Error `Bad_request)
   | Ok depth ->
-    match Webdav_xml.parse_propfind_xml tree with
+    match Xml.parse_propfind_xml tree with
     | Error _ -> Lwt.return (Error `Property_not_found)
     | Ok req ->
       propfind state name prefix req depth >|= function
@@ -95,8 +96,8 @@ let apply_updates ?(validate_key = fun _ -> Ok ()) m updates =
     | Error e -> None, (k, e)
     | Ok () ->
       (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
-      let map = Webdav_xml.M.add k v m in
-      Printf.printf "map after set %s %s\n" k (Webdav_xml.props_to_string map) ;
+      let map = Xml.M.add k v m in
+      Printf.printf "map after set %s %s\n" k (Xml.props_to_string map) ;
       Some map, (k, `OK)
   in
   (* if an update did not apply, m will be None! *)
@@ -105,8 +106,8 @@ let apply_updates ?(validate_key = fun _ -> Ok ()) m updates =
     | None, `Remove k   -> None, (k, `Failed_dependency) :: propstats
     | Some m, `Set (a, k, v) -> let (m, p) = set_prop k (a, v) m in (m, p :: propstats)
     | Some m, `Remove k ->
-      let map = Webdav_xml.M.remove k m in
-      Printf.printf "map after remove %s %s\n" k (Webdav_xml.props_to_string map) ;
+      let map = Xml.M.remove k m in
+      Printf.printf "map after remove %s %s\n" k (Xml.props_to_string map) ;
       Some map, (k, `OK) :: propstats
   in
   match List.fold_left apply (m, []) updates with
@@ -130,9 +131,9 @@ let update_properties ?validate_key fs f_or_d updates =
             (Cohttp.Code.string_of_version `HTTP_1_1)
             (Cohttp.Code.string_of_status status)
         in
-        `Node ([], "propstat", [
-          `Node ([], "prop", [ `Node ([], name, []) ] );
-          `Node ([], "status", [ `Pcdata status_code ] ) ]))
+        Xml.node "propstat" [
+          Xml.node "prop" [ Xml.node name [] ] ;
+          Xml.node "status" [ Xml.Pcdata status_code ] ])
       xs in
   (match map' with
   | None -> Lwt.return (Ok ())
@@ -141,7 +142,7 @@ let update_properties ?validate_key fs f_or_d updates =
     | Ok () -> Ok propstats
 
 let proppatch state ~prefix ~name body =
-  match Webdav_xml.parse_propupdate_xml body with
+  match Xml.parse_propupdate_xml body with
   | Error _ -> Lwt.return (Error `Bad_request)
   | Ok updates ->
     let validate_key = function
@@ -152,8 +153,8 @@ let proppatch state ~prefix ~name body =
     | Error _      -> Error `Bad_request
     | Ok propstats ->
       let nodes =
-        `Node ([], "response",
-          `Node ([], "href", [ `Pcdata (prefix ^ "/" ^ (Webdav_fs.to_string name)) ]) :: propstats)
+        Xml.node "response"
+          (Xml.node "href" [ Xml.Pcdata (prefix ^ "/" ^ (Fs.to_string name)) ] :: propstats)
       in
       let status = multistatus [ nodes ] in
       Ok (state, status)
@@ -162,7 +163,7 @@ let body_to_props body default_props =
   match body with
   | None -> Ok default_props
   | Some body' -> 
-  match Webdav_xml.parse_mkcol_xml body' with
+  match Xml.parse_mkcol_xml body' with
   | Error _ -> Error `Bad_request
   | Ok set_props ->
     match apply_updates (Some default_props) set_props with
@@ -174,12 +175,12 @@ let body_to_props body default_props =
                 (Cohttp.Code.string_of_version `HTTP_1_1)
                 (Cohttp.Code.string_of_status status)
             in
-            `Node ([], "propstat", [
-              `Node ([], "prop", [`Node ([], name, [])]) ;
-              `Node ([], "status", [`Pcdata status_code ])
-            ])) errs
+            Xml.node "propstat" [
+              Xml.node "prop" [ Xml.node name [] ] ;
+              Xml.node "status" [ Xml.Pcdata status_code ] ])
+          errs
       in
-      let xml = `Node ([], "mkcol-response", propstats) in
+      let xml = Xml.node "mkcol-response" propstats in
       Printf.printf "forbidden from body_to_props!\n" ;
       Error (`Forbidden xml)
     | Some map, _ -> Ok map
@@ -192,13 +193,13 @@ let mkcol ?(now = Ptime_clock.now ()) state (`Dir dir) body =
     | _ :: tl -> `Dir (List.rev tl)
     | [] -> `Dir []
   in
-  Fs.exists state (Webdav_fs.to_string parent) >>= function
+  Fs.exists state (Fs.to_string parent) >>= function
   | false -> Lwt.return (Error `Conflict)
   | true ->
     let default_props =
-      Webdav_xml.create_properties ~content_type:"text/directory"
+      Xml.create_properties ~content_type:"text/directory"
         true (Ptime.to_rfc3339 now) 0
-        (Webdav_fs.to_string (`Dir dir))
+        (Fs.to_string (`Dir dir))
     in
     match body_to_props body default_props with
     | Error e -> Lwt.return (Error e)

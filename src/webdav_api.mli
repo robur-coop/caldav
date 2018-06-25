@@ -2,8 +2,6 @@
 type state = Webdav_fs.Fs.t
 type tree = Webdav_xml.tree
 
-val dav_ns : string * string
-
 val mkcol : ?now:Ptime.t -> state -> Webdav_fs.dir -> tree option ->
   (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
     result Lwt.t
