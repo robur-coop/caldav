@@ -41,8 +41,15 @@ let rec tree_fold_left f s forest = match forest with
   | [] -> s
 *)
 
-(* apply_variables <map> <Tyxml> -> <list of trees> *)
 
+let new_identifier map =
+  let taken s = M.exists (fun _ v -> String.equal v s) map in
+  let rec gen i = 
+    let id = String.make 1 (char_of_int i) in
+    if taken id then gen (succ i) else id in
+  gen 0x41 
+
+(* apply_variables <map> <Tyxml> -> <list of trees> *)
 let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
   | Node (ns, n, a, c) ->
     let ns_map' = List.fold_left (fun m ((ns, key), value) ->
@@ -56,17 +63,23 @@ let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
         else
           m) ns_map a
     in
-    let unapply ns name = match M.find_opt ns ns_map' with
-      | None when ns = "" -> name
-      | None -> ns ^ "F:F" ^ name (* TODO unclear whether this is valid XML *)
+    let unapply ns name m = match M.find_opt ns m with
+      | None when ns = "" -> (m, name, []) (* node has no namespace *)
+      | None ->
+        let id = new_identifier m in
+        (M.add ns id m, id ^ ":" ^ name, [(id, ns)])
+      (* TODO unclear whether this is valid XML *)
       (* <"http://foo.com":foo/> ~~> <F:foo xmlns:F="http://foo.com"/> ?? *)
-      | Some "" -> name
-      | Some short -> short ^ ":" ^ name
+      | Some "" -> (m, name, [])
+      | Some short -> (m, short ^ ":" ^ name, [])
     in
-    let n' = unapply ns n in
-    let a' = List.map (fun ((ns, n), value) -> (("", unapply ns n), value)) a in
-    let c' = List.map (tree_unapply_namespaces ~ns_map:ns_map') c in
-    node ~a:a' n' c'
+    let (ns_map'', n', new_ns) = unapply ns n ns_map' in
+    let (ns_map''', a', new_ns') = List.fold_left (fun (m, attributes, new_ns) ((ns, n), value) -> 
+      let (m', name, new_ns') = unapply ns n m in
+      m', (("", name), value) :: attributes, new_ns' @ new_ns) (ns_map'', [], new_ns) a in
+    let c' = List.map (tree_unapply_namespaces ~ns_map:ns_map''') c in
+    let a'' = List.map (fun (id, ns) -> (("", "xmlns:" ^ id), ns)) new_ns' in
+    node ~a:(a' @ a'') n' c'
   | Pcdata data -> Pcdata data
 
 let tyxml_to_body t =
