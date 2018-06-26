@@ -9,6 +9,69 @@ type tree =
   | Pcdata of string
   | Node of namespace * name * attribute list * tree list
 
+(* TODO this actually belongs to CalDAV! this is Webdav_xml module! *)
+type comp = [ `Comp of string * comp list | `Allcomp | `Allprop | `Prop of string * bool ]
+
+type calendar_data = [
+  | `All_props
+  | `Proplist of [ `Calendar_data of comp list | `Prop of fqname ] list
+  | `Propname
+]
+
+type param_filter = [ `Param_filter of string * [ `Is_not_defined | `Text_match of string list * string * bool ] list ]
+
+type prop_filter = [ `Prop_filter of
+      string *
+      [ `Exists
+       | `Is_not_defined
+       | `Range of (string * string) * param_filter list 
+       | `Text of (string list * string * bool) * param_filter list ] ]
+
+type comp_filter = [`Comp_filter of
+      string *
+      [`Exists
+       | `Is_not_defined
+       | `Prop_or_comp of
+           [`Comp_filter of 'a
+            | `Prop_filter of
+                string *
+                [ `Exists
+                | `Is_not_defined
+                | `Range of (string * string) * param_filter list
+                | `Text of (string list * string * bool) * param_filter list ] ]
+           list
+       | `Range of
+           (string * string) *
+           [`Comp_filter of 'a
+            | `Prop_filter of
+                string *
+                [ `Exists
+                | `Is_not_defined
+                | `Range of (string * string) * param_filter list
+                | `Text of (string list * string * bool) * param_filter list ] ]
+           list ]
+      as 'a
+  | `Is_not_defined
+  | `Prop_filter of
+      string *
+      [ `Exists
+      | `Is_not_defined
+      | `Range of (string * string) * param_filter list
+      | `Text of (string list * string * bool) * param_filter list ]
+  | `Timerange of string * string ]
+
+(*
+type comp_filter = [`Comp_filter of
+      string *
+      [`Exists
+       | `Is_not_defined
+       | `Prop_or_comp of [ comp_filter | prop_filter ] list
+       | `Range of (string * string) * [ comp_filter | prop_filter ] list ]
+      ]
+
+type calendar_query = calendar_data option * filter
+
+*) 
 let pp_fqname = Fmt.(pair ~sep:(unit ":") string string)
 
 let pp_attrib = Fmt.(pair ~sep:(unit "=") pp_fqname string) 
@@ -290,9 +353,6 @@ let parse_propfind_xml tree =
   in
   run tree_grammar tree
 
-(* TODO this actually belongs to CalDAV! this is Webdav_xml module! *)
-type comp = [ `Comp of string * comp list | `Allcomp | `Allprop | `Prop of string * bool ]
-
 let rec pp_comp ppf = function
   | `Prop (name, value) -> Fmt.pf ppf "prop %s, value %b" name value
   | `Allprop -> Fmt.string ppf "all properties"
@@ -343,12 +403,6 @@ let extract_and_tag_prop = function
   | Node (ns, name, _, _) -> Ok (`Prop (ns, name))
   | Pcdata _ -> Error "expected node"
 
-type calendar_data = [
-  | `All_props
-  | `Proplist of [ `Calendar_data of comp list | `Prop of fqname ] list
-  | `Propname
-]
-
 let pp_proplist_element ppf = function
   | `Calendar_data xs -> Fmt.pf ppf "calendar data %a" Fmt.(list ~sep:(unit ", ") pp_comp) xs
   | `Prop n -> Fmt.pf ppf "property %a" pp_fqname n
@@ -358,7 +412,7 @@ let pp_calendar_data ppf = function
   | `Propname -> Fmt.string ppf "property name"
   | `Proplist xs -> Fmt.pf ppf "proplist (%a)" Fmt.(list ~sep:(unit ", ") pp_proplist_element) xs
 
-let report_prop_parser : tree -> (calendar_data, string) result =
+let report_prop_parser : tree -> ([> calendar_data], string) result =
   (tree_lift
      (fun _ c -> is_empty c >>| fun () -> `Propname)
      (name_ns "propname" dav_ns) any)
@@ -369,22 +423,6 @@ let report_prop_parser : tree -> (calendar_data, string) result =
          (fun _ c -> non_empty c >>| fun () -> `Proplist c)
          (name_ns "prop" dav_ns)
          (calendar_data_parser ||| (any >>~ extract_and_tag_prop)))
-
-let parse_calendar_query_xml tree =
-  let tree_grammar =
-    tree_lift
-      (fun _ c -> match c with
-         | [ `Propname ] -> Ok `Propname
-         | [ `Proplist x ] -> Ok (`Proplist x)
-         | [ `All_props ] -> Ok `All_props
-         | xs ->
-           Format.printf "got calendar data (%a)@." Fmt.(list ~sep:(unit ", ") pp_calendar_data) xs ;
-           Error "broken1")
-      (name_ns "calendar-query" caldav_ns)
-      report_prop_parser
-  in
-  Format.printf "input tree: (%a)@." pp_tree tree ;
-  run tree_grammar tree
 
 let is_not_defined_parser =
   tree_lift
@@ -410,7 +448,7 @@ let text_match_parser =
     (name_ns "text-match" caldav_ns >>~ extract_attributes)
     extract_pcdata
 
-let param_filter_parser =
+let param_filter_parser : tree -> ([> param_filter ], string) result =
   tree_lift
     (fun a c -> match find_attribute "name" a with
        | None -> Error "Attribute \"name\" required"
@@ -426,20 +464,66 @@ let time_range_parser: tree -> ([> `Timerange of string * string ], string) resu
     (name_ns "time-range" caldav_ns >>~ extract_attributes)
     (any)
 
-let all_param_filters lst = if List.for_all (function `Param_filter _ -> true | _ -> false) lst then Ok () else Error "Only param-filters allowed."
-
-let prop_filter_parser =
+let all_param_filters lst : (param_filter list, string) result = 
+  List.fold_left (fun acc elem -> match acc, elem with
+   | Ok items, `Param_filter f -> Ok (`Param_filter f :: items)
+   | _ -> Error "Only param-filters allowed.") (Ok []) lst
+ 
+let prop_filter_parser : tree -> ([> prop_filter ], string) result =
   tree_lift
     (fun a c -> match find_attribute "name" a with 
       | None -> Error "Attribute \"name\" required."
       | Some n -> match c with
         | [] -> Ok (`Prop_filter (n, `Exists))
         | [ `Is_not_defined ] -> Ok (`Prop_filter (n, `Is_not_defined))
-        | `Timerange t :: pfs -> all_param_filters pfs >>| fun () -> `Prop_filter (n, `Range (t, pfs))
-        | `Text_match t :: pfs -> all_param_filters pfs >>| fun () -> `Prop_filter (n, `Text (t, pfs))
+        | `Timerange t :: pfs -> all_param_filters pfs >>| fun pfs' -> `Prop_filter (n, `Range (t, pfs'))
+        | `Text_match t :: pfs -> all_param_filters pfs >>| fun pfs' -> `Prop_filter (n, `Text (t, pfs'))
         | _ -> Error "Invalid prop-filter.")
     (name_ns "prop-filter" caldav_ns >>~ extract_attributes)
-    (is_not_defined_parser ||| (time_range_parser ||| text_match_parser ||| param_filter_parser))
+    (is_not_defined_parser ||| time_range_parser ||| text_match_parser ||| param_filter_parser)
+
+let all_prop_or_comp_filters lst = 
+  List.fold_left (fun acc elem -> match acc, elem with
+   | Ok items, `Prop_filter f -> Ok (`Prop_filter f :: items)
+   | Ok items, `Comp_filter f -> Ok (`Comp_filter f :: items)
+   | _ -> Error "Only prop- or comp-filters allowed.") (Ok []) lst
+
+let rec comp_filter_parser tree : (comp_filter, string) result =
+  tree_lift 
+    (fun a c -> match find_attribute "name" a with
+      | None -> Error "Attribute \"name\" required."
+      | Some n -> match c with
+        | [] -> Ok (`Comp_filter (n, `Exists))
+        | [`Is_not_defined ] -> Ok (`Comp_filter (n, `Is_not_defined))
+        | `Timerange t :: pfs -> all_prop_or_comp_filters pfs >>| fun pfs' -> `Comp_filter (n, `Range (t, pfs'))
+        | pfs -> all_prop_or_comp_filters pfs >>| fun pfs' -> `Comp_filter (n, `Prop_or_comp pfs'))
+    (name_ns "comp-filter" caldav_ns >>~ extract_attributes)
+    (is_not_defined_parser ||| time_range_parser ||| prop_filter_parser ||| comp_filter_parser)
+    tree
+
+let filter_parser = 
+  tree_lift 
+    (fun _ c -> Ok (`Filter c))
+    (name_ns "filter" caldav_ns)
+    (comp_filter_parser)
+
+let parse_calendar_query_xml tree =
+  let tree_grammar =
+    tree_lift
+      (fun _ c -> let prop, rest = match c with
+         | `Propname :: xs -> Some `Propname, xs
+         | `Proplist x :: xs -> Some (`Proplist x), xs
+         | `All_props :: xs -> Some `All_props, xs
+         | xs -> None, xs
+       in
+       match rest with
+         | `Filter f :: xs -> Ok (prop, f)
+         | xs -> Error "broken1")
+      (name_ns "calendar-query" caldav_ns)
+      (report_prop_parser ||| filter_parser)
+  in
+  Format.printf "input tree: (%a)@." pp_tree tree ;
+  run tree_grammar tree
 
 let pp_propupdate fmt update =
   List.iter (function
