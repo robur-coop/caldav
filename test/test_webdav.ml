@@ -104,9 +104,43 @@ let parse_simple_report_query () =
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
+let parse_simple_report_query_with_calendar_data () =
+  let xml = header ^ {_|
+   <C:calendar-query xmlns:D="DAV:"
+                 xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <D:getetag/>
+       <C:calendar-data>
+         <C:comp name="VCALENDAR">
+           <C:prop name="VERSION"/>
+           <C:comp name="VEVENT">
+             <C:prop name="SUMMARY"/>
+             <C:prop name="UID"/>
+             <C:prop name="DTSTART"/>
+             <C:prop name="DTEND"/>
+             <C:prop name="DURATION"/>
+             <C:prop name="RRULE"/>
+             <C:prop name="RDATE"/>
+             <C:prop name="EXRULE"/>
+             <C:prop name="EXDATE"/>
+             <C:prop name="RECURRENCE-ID"/>
+           </C:comp>
+           <C:comp name="VTIMEZONE"/>
+         </C:comp>
+       </C:calendar-data>
+     </D:prop>
+   </C:calendar-query>
+|_} in
+  let expected = Ok (
+  `Proplist [ `Prop ( Xml.dav_ns, "getetag") ; `Calendar_data [ `Comp ("VCALENDAR", [`Prop ("VERSION", false) ; `Comp ("VEVENT", [`Prop ("SUMMARY", false) ; `Prop ("UID", false); `Prop ("DTSTART", false); `Prop ("DTEND", false); `Prop ("DURATION", false); `Prop ("RRULE", false); `Prop ("RDATE", false); `Prop ("EXRULE", false); `Prop ("EXDATE", false); `Prop ("RECURRENCE-ID", false)]); `Comp ("VTIMEZONE", [])])]]) in
+  Alcotest.(check (result calendar_query string) __LOC__ expected
+              (Xml.parse_calendar_query_xml (tree xml)))
+
 let report_tests = [
   "Parse simple report query", `Quick, parse_simple_report_query;
+  "Parse simple report query with calendar data", `Quick, parse_simple_report_query_with_calendar_data;
 ]
+
 
 let propupdate =
   let module M = struct
