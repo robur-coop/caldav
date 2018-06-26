@@ -2,6 +2,7 @@ open Cohttp_lwt_unix
 open Lwt.Infix
 
 module Fs = Webdav_fs
+module Xml = Webdav_xml
 
 (* Apply the [Webmachine.Make] functor to the Lwt_unix-based IO module
  * exported by cohttp. For added convenience, include the [Rd] module
@@ -16,7 +17,7 @@ let to_status x = Cohttp.Code.code_of_status x
 
 let create_properties name content_type is_dir length =
   Printf.printf "Creating properties!!! %s \n" name;
-  Webdav_xml.create_properties ~content_type
+  Xml.create_properties ~content_type
     is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length name
 
 let etag str = Digest.to_hex @@ Digest.string str
@@ -66,8 +67,8 @@ let directory_as_ics fs (`Dir dir) =
     | None -> assert false (* invariant: each file and directory has a property map *)
     | Some props ->
       let name =
-        match Webdav_xml.M.find_opt "displayname" props with
-        | Some (_, [ `Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), [], name) ]
+        match Xml.get_prop (Xml.dav_ns, "displayname") props with
+        | Some (_, [ Xml.Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), [], name) ]
         | _ -> []
       in
       let calprops = [
@@ -79,8 +80,8 @@ let directory_as_ics fs (`Dir dir) =
 
 let calendar_to_collection data =
   if data = "" then Ok "" else
-  match Webdav_xml.string_to_tree data with
-  | Some (`Node (a, "mkcalendar", c)) -> Ok (Webdav_xml.tyxml_to_body (Webdav_xml.tree_to_tyxml (`Node (a, "mkcol", c))))
+  match Xml.string_to_tree data with
+  | Some (Xml.Node (ns, "mkcalendar", a, c)) when ns = Xml.dav_ns -> Ok (Xml.tyxml_to_body (Xml.tree_to_tyxml (Xml.node ~ns:Xml.dav_ns ~a "mkcol" c)))
   | _ -> Error `Bad_request
 
 (** A resource for querying an individual item in the database by id via GET,
@@ -146,8 +147,8 @@ class handler prefix fs = object(self)
         Wm.continue (`String data) rd
     | `File f ->
       Fs.read fs (`File f) >>== fun (data, props) ->
-      let ct = match Webdav_xml.get_prop "getcontenttype" props with
-        | Some (_, [ `Pcdata ct ]) -> ct
+      let ct = match Xml.get_prop (Xml.dav_ns, "getcontenttype") props with
+        | Some (_, [ Xml.Pcdata ct ]) -> ct
         | _ -> "text/calendar" in
       let rd =
         Wm.Rd.with_resp_headers (fun header ->
@@ -185,23 +186,23 @@ class handler prefix fs = object(self)
   method private process_propfind rd name =
     let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
-    match Webdav_xml.string_to_tree body with
+    match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
       Webdav_api.propfind fs ~prefix ~name tree ~depth >>= function
-      | Ok (_, b) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Webdav_xml.tree_to_string b) }
+      | Ok (_, b) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Property_not_found -> Wm.continue `Property_not_found rd
-      | Error (`Forbidden b) -> Wm.respond ~body:(`String (Webdav_xml.tree_to_string b)) (to_status `Forbidden) rd
+      | Error (`Forbidden b) -> Wm.respond ~body:(`String (Xml.tree_to_string b)) (to_status `Forbidden) rd
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
   method private process_proppatch rd name =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "PROPPATCH:%s\n" body;
-    match Webdav_xml.string_to_tree body with
+    match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
       Webdav_api.proppatch fs ~prefix ~name tree >>= function
-      | Ok (_, b) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Webdav_xml.tree_to_string b) }
+      | Ok (_, b) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
   method process_property rd =
@@ -219,8 +220,8 @@ class handler prefix fs = object(self)
     Wm.continue `Multistatus rd
 
   method cannot_create rd =
-    let xml = `Node ([Webdav_api.dav_ns], "error", [`Node ([], "resource-must-be-null", [])]) in
-    let err = Webdav_xml.tree_to_string xml in
+    let xml = Xml.node ~ns:Xml.dav_ns "error" [Xml.node ~ns:Xml.dav_ns "resource-must-be-null" []] in
+    let err = Xml.tree_to_string xml in
     let rd' = { rd with Wm.Rd.resp_body = `String err } in
     Wm.continue () rd'
 
@@ -233,13 +234,13 @@ class handler prefix fs = object(self)
     match body' with
     | Error _ -> Wm.continue `Conflict rd
     | Ok body'' -> 
-      match Webdav_xml.string_to_tree body'' with
+      match Xml.string_to_tree body'' with
       | None when body'' <> "" -> Wm.continue `Conflict rd
       | tree ->
         let dir = Webdav_fs.dir_from_string (self#id rd) in
         Webdav_api.mkcol fs dir tree >>= function
         | Ok _ -> Wm.continue `Created rd
-        | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String (Webdav_xml.tree_to_string t) }
+        | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string t) }
         | Error `Conflict -> Wm.continue `Conflict rd
         | Error `Bad_request -> Wm.continue `Conflict rd
 

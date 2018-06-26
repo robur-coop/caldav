@@ -1,13 +1,13 @@
-open Webdav_xml
+module Xml = Webdav_xml
 
 let header = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
 
-let tree xml = match string_to_tree xml with Some t -> t | None -> Alcotest.fail "Invalid xml."
+let tree xml = match Xml.string_to_tree xml with Some t -> t | None -> Alcotest.fail "Invalid xml."
 
 let prop =
   let module M = struct
-    type t = [ `All_prop of string list | `Props of string list | `Propname ]
-    let pp = Webdav_xml.pp_prop
+    type t = Xml.res
+    let pp = Xml.pp_prop
     let equal a b = compare a b = 0
   end in
   (module M : Alcotest.TESTABLE with type t = M.t)
@@ -23,30 +23,30 @@ let str_err =
 let empty_propfind () =
   let xml = header ^ "<propfind/>" in
   Alcotest.(check (result prop str_err) "parsing <propfind/>"
-              (Error "broken") (Webdav_xml.parse_propfind_xml (tree xml)))
+              (Error "broken") (Xml.parse_propfind_xml (tree xml)))
 
 let propname () =
   let xml = header ^ "<propfind><propname/></propfind>" in
   Alcotest.(check (result prop str_err) "parsing <propfind><propname/></propfind>"
-              (Ok `Propname) (Webdav_xml.parse_propfind_xml (tree xml)))
+              (Ok `Propname) (Xml.parse_propfind_xml (tree xml)))
 
 let two_propname () =
   let xml = header ^ "<propfind><propname/><propname/></propfind>" in
   Alcotest.(check (result prop str_err) "parsing <propfind><propname/><propname/></propfind>"
-              (Error "broken") (Webdav_xml.parse_propfind_xml (tree xml)))
+              (Error "broken") (Xml.parse_propfind_xml (tree xml)))
 
 let allprop () =
   let xml = header ^ "<propfind><allprop/></propfind>" in
   Alcotest.(check (result prop str_err) "parsing <propfind><allprop/></propfind>"
-              (Ok (`All_prop [])) (Webdav_xml.parse_propfind_xml (tree xml)))
+              (Ok (`All_prop [])) (Xml.parse_propfind_xml (tree xml)))
 
 let allprop_include () =
   let xml = header ^ "<propfind><allprop/><include><foo/><bar/></include></propfind>" in
   Alcotest.(check (result prop str_err) "parsing all prop with includes"
-              (Ok (`All_prop ["foo";"bar"])) (Webdav_xml.parse_propfind_xml (tree xml)))
+              (Ok (`All_prop ["foo";"bar"])) (Xml.parse_propfind_xml (tree xml)))
 
 let invalid_xml () =
-  let error_tree xml = match Webdav_xml.string_to_tree xml with 
+  let error_tree xml = match Xml.string_to_tree xml with 
     | Some _ -> () 
     | None -> invalid_arg "Invalid xml" in
   Alcotest.(check_raises "parsing header only" (Invalid_argument "Invalid xml")
@@ -60,19 +60,19 @@ let invalid_xml () =
   let xml = header ^ "<propname/>" in
   Alcotest.(check (result prop str_err) "missing propfind"
               (Error "expected propfind, but found propname") 
-              (Webdav_xml.parse_propfind_xml (tree xml))) ;
+              (Xml.parse_propfind_xml (tree xml))) ;
   let xml = header ^ "<propfind/>" in
   Alcotest.(check (result prop str_err) "empty propfind"
               (Error "broken") 
-              (Webdav_xml.parse_propfind_xml (tree xml))) ;
+              (Xml.parse_propfind_xml (tree xml))) ;
   let xml = header ^ "<propfind><foo/></propfind>" in
   Alcotest.(check (result prop str_err) "unexpected element foo"
               (Error "broken") 
-              (Webdav_xml.parse_propfind_xml (tree xml))) ;
+              (Xml.parse_propfind_xml (tree xml))) ;
   let xml = header ^ "<propfind><prop><foo><bar/></foo></prop></propfind>" in
   Alcotest.(check (result prop str_err) "non-flat property list"
-              (Ok (`Props [ "foo" ]))
-              (Webdav_xml.parse_propfind_xml (tree xml)))
+              (Ok (`Props [ ("", "foo") ]))
+              (Xml.parse_propfind_xml (tree xml)))
 
 let parse_propfind_xml_tests = [
   "Empty", `Quick, empty_propfind ;
@@ -85,8 +85,8 @@ let parse_propfind_xml_tests = [
 
 let calendar_query =
   let module M = struct
-    type t = Webdav_xml.calendar_data
-    let pp = Webdav_xml.pp_calendar_data
+    type t = Xml.calendar_data
+    let pp = Xml.pp_calendar_data
     let equal a b = compare a b = 0
   end in
   (module M : Alcotest.TESTABLE with type t = M.t)
@@ -100,9 +100,9 @@ let parse_simple_report_query () =
      </D:prop>
    </C:calendar-query>
 |_} in
-  let expected = Ok (`Proplist [ `Prop "getetag" ; `Prop "calendar-data" ]) in
+  let expected = Ok (`Proplist [ `Prop (Xml.dav_ns, "getetag") ]) in
   Alcotest.(check (result calendar_query string) __LOC__ expected
-              (Webdav_xml.parse_calendar_query_xml (tree xml)))
+              (Xml.parse_calendar_query_xml (tree xml)))
 
 let report_tests = [
   "Parse simple report query", `Quick, parse_simple_report_query;
@@ -110,8 +110,8 @@ let report_tests = [
 
 let propupdate =
   let module M = struct
-    type t = [ `Remove of string | `Set of (Webdav_xml.attribute list * string * Webdav_xml.tree list) ] list
-    let pp = Webdav_xml.pp_propupdate
+    type t = [ `Remove of Xml.fqname | `Set of (Xml.attribute list * Xml.fqname * Xml.tree list) ] list
+    let pp = Xml.pp_propupdate
     let equal a b = compare a b = 0
   end in
   (module M : Alcotest.TESTABLE with type t = M.t)
@@ -136,11 +136,11 @@ let proppatch () =
   in
   Alcotest.(check (result propupdate str_err) __LOC__
               (Ok [`Set ([],
-                           "Authors",
+                           ("http://ns.example.com/standards/z39.50/", "Authors"),
                            [Node ("http://ns.example.com/standards/z39.50/", "Author", [], [ Pcdata "Jim Whitehead"]) ;
                             Node ("http://ns.example.com/standards/z39.50/", "Author", [], [ Pcdata "Roy Fielding" ]) ]) ;
-                     `Remove "Copyright-Owner" ])
-    (Webdav_xml.parse_propupdate_xml (tree xml)))
+                     `Remove ("http://ns.example.com/standards/z39.50/", "Copyright-Owner") ])
+    (Xml.parse_propupdate_xml (tree xml)))
 
 let parse_propupdate_xml_tests = [
   "propertyupdate RFC example", `Quick, proppatch
@@ -156,7 +156,7 @@ let state_testable =
 
 let err_testable =
   let module M = struct
-    type t = [ `Bad_request | `Conflict | `Forbidden of Webdav_xml.tree ]
+    type t = [ `Bad_request | `Conflict | `Forbidden of Xml.tree ]
     let pp ppf = function
       | `Bad_request -> Fmt.string ppf "bad request"
       | `Conflict -> Fmt.string ppf "conflict"
@@ -165,7 +165,7 @@ let err_testable =
       | `Bad_request, `Bad_request -> true
       | `Conflict, `Conflict -> true
       | `Forbidden x, `Forbidden y ->
-        let to_string a = Webdav_xml.tree_to_string a
+        let to_string a = Xml.tree_to_string a
         in
         String.equal (to_string x) (to_string y)
       | _ -> false
@@ -194,7 +194,7 @@ let mkcol_success () =
       let now = Ptime.v (1, 0L) in
       Mirage_fs_mem.connect "" >>= fun res_fs ->
       let content = {_|<?xml version="1.0" encoding="utf-8" ?>
-<prop><resourcetype><collection></collection><special-resource xmlns="http://example.com/ns/"></special-resource></resourcetype><getlastmodified>1970-01-02T00:00:00-00:00</getlastmodified><getcontenttype>text/directory</getcontenttype><getcontentlength>0</getcontentlength><getcontentlanguage>en</getcontentlanguage><displayname>Special Resource</displayname><creationdate>1970-01-02T00:00:00-00:00</creationdate></prop>|_}
+<A:prop xmlns:A="DAV:"><A:resourcetype><A:collection></A:collection><B:special-resource xmlns:B="http://example.com/ns/"></B:special-resource></A:resourcetype><A:getlastmodified>1970-01-02T00:00:00-00:00</A:getlastmodified><A:getcontenttype>text/directory</A:getcontenttype><A:getcontentlength>0</A:getcontentlength><A:getcontentlanguage>en</A:getcontentlanguage><A:displayname>Special Resource</A:displayname><A:creationdate>1970-01-02T00:00:00-00:00</A:creationdate></A:prop>|_}
       in
       Mirage_fs_mem.write res_fs "home/special/.prop.xml" 0
         (Cstruct.of_string content) >>= fun _ ->

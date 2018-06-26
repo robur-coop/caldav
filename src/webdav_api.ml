@@ -40,14 +40,14 @@ let process_properties fs prefix f_or_d f =
 
 let process_property_leaf fs prefix req f_or_d =
   let f = match req with
-   | `Propname -> (fun m -> [`OK, List.map ( fun k -> Xml.node k []) @@ List.map fst (Xml.M.bindings m)])
+   | `Propname -> (fun m -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings m)])
    | `All_prop includes -> (fun m -> [`OK, Xml.props_to_tree m]) (* TODO: finish this *)
    | `Props ps -> (fun m -> Xml.find_props ps m)
   in process_properties fs prefix f_or_d f
 
 let multistatus nodes = Xml.node ~ns:Xml.dav_ns "multistatus" nodes
 
-let error_xml element = Xml.node ~ns:Xml.dav_ns "error" [ Xml.node element [] ]
+let error_xml element = Xml.node ~ns:Xml.dav_ns "error" [ Xml.node ~ns:Xml.dav_ns element [] ]
 
 let propfind fs f_or_d prefix req depth =
   let process_files fs prefix dir req els =
@@ -96,8 +96,8 @@ let apply_updates ?(validate_key = fun _ -> Ok ()) m updates =
     | Error e -> None, (k, e)
     | Ok () ->
       (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
-      let map = Xml.M.add k v m in
-      Printf.printf "map after set %s %s\n" k (Xml.props_to_string map) ;
+      let map = Xml.PairMap.add k v m in
+      Format.printf "map after set %a %s\n" Xml.pp_fqname k (Xml.props_to_string map) ;
       Some map, (k, `OK)
   in
   (* if an update did not apply, m will be None! *)
@@ -106,8 +106,8 @@ let apply_updates ?(validate_key = fun _ -> Ok ()) m updates =
     | None, `Remove k   -> None, (k, `Failed_dependency) :: propstats
     | Some m, `Set (a, k, v) -> let (m, p) = set_prop k (a, v) m in (m, p :: propstats)
     | Some m, `Remove k ->
-      let map = Xml.M.remove k m in
-      Printf.printf "map after remove %s %s\n" k (Xml.props_to_string map) ;
+      let map = Xml.PairMap.remove k m in
+      Format.printf "map after remove %a %s\n" Xml.pp_fqname k (Xml.props_to_string map) ;
       Some map, (k, `OK) :: propstats
   in
   match List.fold_left apply (m, []) updates with
@@ -125,15 +125,15 @@ let update_properties ?validate_key fs f_or_d updates =
   Fs.get_property_map fs f_or_d >>= fun map ->
   let map', xs = apply_updates ?validate_key map updates in
   let propstats =
-    List.map (fun (name, status) ->
+    List.map (fun ((ns, name), status) ->
         let status_code =
           Format.sprintf "%s %s"
             (Cohttp.Code.string_of_version `HTTP_1_1)
             (Cohttp.Code.string_of_status status)
         in
-        Xml.node "propstat" [
-          Xml.node "prop" [ Xml.node name [] ] ;
-          Xml.node "status" [ Xml.Pcdata status_code ] ])
+        Xml.node ~ns:Xml.dav_ns "propstat" [
+          Xml.node ~ns:Xml.dav_ns "prop" [ Xml.node ~ns name [] ] ;
+          Xml.node ~ns:Xml.dav_ns "status" [ Xml.Pcdata status_code ] ])
       xs in
   (match map' with
   | None -> Lwt.return (Ok ())
@@ -145,16 +145,18 @@ let proppatch state ~prefix ~name body =
   match Xml.parse_propupdate_xml body with
   | Error _ -> Lwt.return (Error `Bad_request)
   | Ok updates ->
-    let validate_key = function
-      | "resourcetype" -> Error `Forbidden
-      | _ -> Ok ()
+    let validate_key (ns, k) = 
+      if ns = Xml.dav_ns then match k with
+        | "resourcetype" -> Error `Forbidden
+        | _ -> Ok ()
+      else Ok ()
     in
     update_properties ~validate_key state name updates >|= function
     | Error _      -> Error `Bad_request
     | Ok propstats ->
       let nodes =
-        Xml.node "response"
-          (Xml.node "href" [ Xml.Pcdata (prefix ^ "/" ^ (Fs.to_string name)) ] :: propstats)
+        Xml.node ~ns:Xml.dav_ns "response"
+          (Xml.node ~ns:Xml.dav_ns "href" [ Xml.Pcdata (prefix ^ "/" ^ (Fs.to_string name)) ] :: propstats)
       in
       let status = multistatus [ nodes ] in
       Ok (state, status)
@@ -169,18 +171,18 @@ let body_to_props body default_props =
     match apply_updates (Some default_props) set_props with
     | None, errs ->
       let propstats =
-        List.map (fun (name, status) ->
+        List.map (fun ((ns, name), status) ->
             let status_code =
               Format.sprintf "%s %s"
                 (Cohttp.Code.string_of_version `HTTP_1_1)
                 (Cohttp.Code.string_of_status status)
             in
-            Xml.node "propstat" [
-              Xml.node "prop" [ Xml.node name [] ] ;
-              Xml.node "status" [ Xml.Pcdata status_code ] ])
+            Xml.node ~ns:Xml.dav_ns "propstat" [
+              Xml.node ~ns:Xml.dav_ns "prop" [ Xml.node ~ns name [] ] ;
+              Xml.node ~ns:Xml.dav_ns "status" [ Xml.Pcdata status_code ] ])
           errs
       in
-      let xml = Xml.node "mkcol-response" propstats in
+      let xml = Xml.node ~ns:Xml.dav_ns "mkcol-response" propstats in
       Printf.printf "forbidden from body_to_props!\n" ;
       Error (`Forbidden xml)
     | Some map, _ -> Ok map

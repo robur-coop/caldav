@@ -2,11 +2,24 @@ module M = Map.Make(String)
 
 type namespace = string
 type name = string
-type attribute = (string * string) * string
+type fqname = namespace * name
+type attribute = fqname * string
 
 type tree =
   | Pcdata of string
   | Node of namespace * name * attribute list * tree list
+
+let pp_fqname = Fmt.(pair ~sep:(unit ":") string string)
+
+let pp_attrib = Fmt.(pair ~sep:(unit "=") pp_fqname string) 
+
+let rec pp_tree fmt = function
+  | Pcdata str -> Fmt.string fmt str
+  | Node (namespace, name, attributes, children) ->
+    Fmt.pf fmt "(%s:%s (%a), (%a))"
+      namespace name
+      Fmt.(list ~sep:(unit ", ") pp_attrib) attributes
+      Fmt.(list ~sep:(unit ", ") pp_tree) children
 
 let node ?(ns = "") name ?(a = []) children = Node (ns, name, a, children)
 
@@ -65,11 +78,10 @@ let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
     in
     let unapply ns name m = match M.find_opt ns m with
       | None when ns = "" -> (m, name, []) (* node has no namespace *)
+      | None when ns = Xmlm.ns_xml -> (m, "xml:" ^ name, [])
       | None ->
         let id = new_identifier m in
         (M.add ns id m, id ^ ":" ^ name, [(id, ns)])
-      (* TODO unclear whether this is valid XML *)
-      (* <"http://foo.com":foo/> ~~> <F:foo xmlns:F="http://foo.com"/> ?? *)
       | Some "" -> (m, name, [])
       | Some short -> (m, short ^ ":" ^ name, [])
     in
@@ -100,53 +112,49 @@ let tree_to_tyxml t =
 
 let tree_to_string t = tyxml_to_body @@ tree_to_tyxml t
 
+module PairMap = Map.Make (struct
+  type t = string * string
+  let compare (a1, a2) (b1, b2) = match String.compare a1 b1 with
+    | 0 -> String.compare a2 b2
+    | x -> x
+  end)
+ 
 let props_to_tree m =
-  M.fold (fun k (a, v) acc -> node ~a k v :: acc) m []
+  PairMap.fold (fun (ns, k) (a, v) acc -> 
+    node ~ns ~a k v :: acc) m []
 
 let props_to_string m =
   let c = props_to_tree m in
-  tree_to_string (node "prop" c)
+  tree_to_string (node ~ns:dav_ns "prop" c)
 
 let find_props ps m =
   let (found, not_found) =
-    List.fold_left (fun (s, f) k -> match M.find_opt k m with
-    | None        -> (s, node k [] :: f)
-    | Some (a, v) -> (node ~a k v :: s, f)) ([], []) ps
+    List.fold_left (fun (s, f) (ns, k) -> match PairMap.find_opt (ns, k) m with
+    | None        -> (s, node ~ns k [] :: f)
+    | Some (a, v) -> (node ~ns ~a k v :: s, f)) ([], []) ps
   in
   [(`OK, found) ; (`Forbidden, not_found)]
 
 let create_properties ?(content_type = "text/html") ?(language = "en") is_dir timestamp length filename =
-  let rtype = if is_dir then [ node "collection" [] ] else [] in
+  let rtype = if is_dir then [ node ~ns:dav_ns "collection" [] ] else [] in
   let filename = if filename = "" then "hinz und kunz" else filename in
-  M.add "creationdate" ([], [ Pcdata timestamp ]) @@
-  M.add "displayname" ([], [ Pcdata filename ]) @@
-  M.add "getcontentlanguage" ([], [ Pcdata language ]) @@
-  M.add "getcontenttype" ([], [ Pcdata content_type ]) @@
-  M.add "getlastmodified" ([], [ Pcdata timestamp ]) @@
-  M.add "getcontentlength" ([], [ Pcdata (string_of_int length) ]) @@
-  (* M.add "lockdiscovery" *)
-  M.add "resourcetype" ([], rtype) M.empty
-  (* M.add "supportedlock" *)
-
-let pp_attrib fmt attribute =
-  Fmt.(pair ~sep:(unit "=") (pair ~sep:(unit ":") string string) string) fmt
-    attribute
-
-let rec pp_tree fmt = function
-  | Pcdata str -> Fmt.string fmt str
-  | Node (namespace, name, attributes, children) ->
-    Fmt.pf fmt "(%s:%s (%a), (%a))"
-      namespace name
-      Fmt.(list ~sep:(unit ", ") pp_attrib) attributes
-      Fmt.(list ~sep:(unit ", ") pp_tree) children
+  PairMap.add (dav_ns, "creationdate") ([], [ Pcdata timestamp ]) @@
+  PairMap.add (dav_ns, "displayname") ([], [ Pcdata filename ]) @@
+  PairMap.add (dav_ns, "getcontentlanguage") ([], [ Pcdata language ]) @@
+  PairMap.add (dav_ns, "getcontenttype") ([], [ Pcdata content_type ]) @@
+  PairMap.add (dav_ns, "getlastmodified") ([], [ Pcdata timestamp ]) @@
+  PairMap.add (dav_ns, "getcontentlength") ([], [ Pcdata (string_of_int length) ]) @@
+  (* PairMap.add "lockdiscovery" *)
+  PairMap.add (dav_ns, "resourcetype") ([], rtype) PairMap.empty
+  (* PairMap.add "supportedlock" *)
 
 let prop_tree_to_map t =
   match t with
   | Node (_, "prop", _, children) ->
     List.fold_left (fun m c -> match c with
-        | Node (_, k, a, v) -> M.add k (a, v) m
+        | Node (ns, k, a, v) -> PairMap.add (ns, k) (a, v) m
         | Pcdata _ -> assert false)
-      M.empty children
+      PairMap.empty children
   | _ -> assert false
 
 let string_to_tree str =
@@ -162,7 +170,7 @@ let string_to_tree str =
 let rec pp_prop fmt = function
   | `Propname -> Fmt.string fmt "Propname"
   | `All_prop xs -> Fmt.pf fmt "All prop %a" Fmt.(list ~sep:(unit ",@ ") string) xs
-  | `Props xs -> Fmt.pf fmt "Props %a" Fmt.(list ~sep:(unit ",@ ") string) xs
+  | `Props xs -> Fmt.pf fmt "Props %a" Fmt.(list ~sep:(unit ",@ ") pp_fqname) xs
 
 let rec filter_map f = function
   | []    -> []
@@ -216,9 +224,12 @@ let extract_name = function
   | Node (_, n, _, _) -> Ok n
   | Pcdata _          -> Error "couldn't extract name from pcdata"
 
-(* TODO care about namespace (but more complex, needs refactoring of property map) *)
+let extract_ns_name = function
+  | Node (ns, n, _, _) -> Ok (ns, n)
+  | Pcdata _          -> Error "couldn't extract name from pcdata"
+
 let extract_name_value = function
-  | Node (ns, n, a, c) -> Ok (a, n, c)
+  | Node (ns, n, a, c) -> Ok (a, (ns, n), c)
   | Pcdata _           -> Error "couldn't extract name and value from pcdata"
 
 let leaf_node = function
@@ -241,7 +252,7 @@ let run p tree = p tree
 type res = [
   | `All_prop of string list
   | `Propname
-  | `Props of string list
+  | `Props of fqname list
 ]
 
 let propfind_prop_parser : tree -> ([> res | `Include of string list ], string) result =
@@ -250,7 +261,7 @@ let propfind_prop_parser : tree -> ([> res | `Include of string list ], string) 
       (name "propname") any)
    ||| (tree_lift
           (fun _ c -> non_empty c >>| fun () -> `Props c)
-          (name "prop") (any >>= extract_name))
+          (name "prop") (any >>= extract_ns_name))
    ||| (tree_lift
           (fun _ c -> is_empty c >>| fun () -> `All_prop [])
           (name "allprop") any)
@@ -321,18 +332,18 @@ let any_in_ns ns = function
   | Pcdata _ -> Error "expected a node"
 
 let extract_and_tag_prop = function
-  | Node (_, name, _, _) -> Ok (`Prop name)
+  | Node (ns, name, _, _) -> Ok (`Prop (ns, name))
   | Pcdata _ -> Error "expected node"
 
 type calendar_data = [
   | `All_props
-  | `Proplist of [ `Calendar_data of comp list | `Prop of string ] list
+  | `Proplist of [ `Calendar_data of comp list | `Prop of fqname ] list
   | `Propname
 ]
 
 let pp_proplist_element ppf = function
   | `Calendar_data xs -> Fmt.pf ppf "calendar data %a" Fmt.(list ~sep:(unit ", ") pp_comp) xs
-  | `Prop s -> Fmt.pf ppf "property %s" s
+  | `Prop n -> Fmt.pf ppf "property %a" pp_fqname n
 
 let pp_calendar_data ppf = function
   | `All_props -> Fmt.string ppf "all properties"
@@ -349,7 +360,7 @@ let report_prop_parser : tree -> (calendar_data, string) result =
   ||| (tree_lift
          (fun _ c -> non_empty c >>| fun () -> `Proplist c)
          (name_ns "prop" dav_ns)
-         ((any_in_ns dav_ns >>= extract_and_tag_prop) ||| calendar_data_parser))
+         (calendar_data_parser ||| (any >>= extract_and_tag_prop)))
 
 let parse_calendar_query_xml tree =
   let tree_grammar =
@@ -369,8 +380,8 @@ let parse_calendar_query_xml tree =
 
 let pp_propupdate fmt update =
   List.iter (function
-      | `Set (a, k, v) -> Fmt.pf fmt "Set %a %s %a" Fmt.(list ~sep:(unit ",") pp_attrib) a k (Fmt.list pp_tree) v
-      | `Remove k   -> Fmt.pf fmt "Remove %s" k
+      | `Set (a, k, v) -> Fmt.pf fmt "Set %a %a %a" Fmt.(list ~sep:(unit ",") pp_attrib) a pp_fqname k (Fmt.list pp_tree) v
+      | `Remove k   -> Fmt.pf fmt "Remove %a" pp_fqname k
     ) update
 
 let exactly_one = function
@@ -380,17 +391,17 @@ let exactly_one = function
 let proppatch_prop_parser f =
   tree_lift (fun _ c -> Ok c) (name "prop") (any >>= f)
 
-let set_parser : tree -> ([>`Set of attribute list * string * tree list] list, string) result =
+let set_parser : tree -> ([>`Set of attribute list * fqname * tree list] list, string) result =
   tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
     (fun _ c -> exactly_one c >>| List.map (fun k -> `Set k))
     (name "set")
     (proppatch_prop_parser extract_name_value)
 
-let remove_parser : tree -> ([>`Remove of string] list, string) result =
+let remove_parser : tree -> ([>`Remove of fqname] list, string) result =
   tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
     (fun _ c -> exactly_one c >>| List.map (fun k -> `Remove k))
     (name "remove")
-    (proppatch_prop_parser extract_name)
+    (proppatch_prop_parser extract_ns_name)
 
 let parse_propupdate_xml tree =
   let propupdate =
@@ -410,7 +421,7 @@ let parse_mkcol_xml tree =
   in
   run mkcol tree
 
-let get_prop p map = M.find_opt p map
+let get_prop p map = PairMap.find_opt p map
 
 let ptime_to_http_date ptime =
   let (y, m, d), ((hh, mm, ss), _)  = Ptime.to_date_time ptime

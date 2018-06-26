@@ -123,7 +123,7 @@ let last_modified_as_ptime fs f_or_d =
     Printf.printf "invalid XML!\n" ;
     Error `Invalid_xml
   | Some map ->
-    match Webdav_xml.get_prop "getlastmodified" map with
+    match Webdav_xml.get_prop (Webdav_xml.dav_ns, "getlastmodified") map with
     | Some (_, [ Webdav_xml.Pcdata last_modified ]) ->
       begin match Ptime.of_rfc3339 last_modified with
         | Error _ ->
