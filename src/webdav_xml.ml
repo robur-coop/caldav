@@ -215,7 +215,7 @@ let alternative a b =
      | Error _ -> b tree
      | Ok x    -> Ok x)
 
-let (>>=) p f =
+let (>>~) p f =
   (fun tree -> match p tree with
      | Ok x    -> f x
      | Error e -> Error e)
@@ -232,12 +232,20 @@ let extract_name_value = function
   | Node (ns, n, a, c) -> Ok (a, (ns, n), c)
   | Pcdata _           -> Error "couldn't extract name and value from pcdata"
 
+let extract_pcdata = function
+  | Pcdata str -> Ok str
+  | Node _ -> Error "Expected PCDATA"
+
+let extract_attributes = function
+  | Node (_, _, a, _) -> Ok a
+  | Pcdata _ -> Error "Expected Node with attributes, got PCDATA"
+
 let leaf_node = function
   | Node (_, _, _, []) as n -> Ok n
   | _                       -> Error "not a leaf"
 
 let (|||) = alternative
-let (>>|) = Rresult.R.Infix.(>>|)
+open Rresult.R.Infix
 
 let is_empty = function
   | [] -> Ok ()
@@ -261,13 +269,13 @@ let propfind_prop_parser : tree -> ([> res | `Include of string list ], string) 
       (name "propname") any)
    ||| (tree_lift
           (fun _ c -> non_empty c >>| fun () -> `Props c)
-          (name "prop") (any >>= extract_ns_name))
+          (name "prop") (any >>~ extract_ns_name))
    ||| (tree_lift
           (fun _ c -> is_empty c >>| fun () -> `All_prop [])
           (name "allprop") any)
    ||| (tree_lift
           (fun _ c -> non_empty c >>| fun () -> `Include c)
-          (name "include") (any >>= extract_name)))
+          (name "include") (any >>~ extract_name)))
 
 let parse_propfind_xml tree =
   let tree_grammar =
@@ -360,7 +368,7 @@ let report_prop_parser : tree -> (calendar_data, string) result =
   ||| (tree_lift
          (fun _ c -> non_empty c >>| fun () -> `Proplist c)
          (name_ns "prop" dav_ns)
-         (calendar_data_parser ||| (any >>= extract_and_tag_prop)))
+         (calendar_data_parser ||| (any >>~ extract_and_tag_prop)))
 
 let parse_calendar_query_xml tree =
   let tree_grammar =
@@ -378,6 +386,61 @@ let parse_calendar_query_xml tree =
   Format.printf "input tree: (%a)@." pp_tree tree ;
   run tree_grammar tree
 
+let is_not_defined_parser =
+  tree_lift
+    (fun _ c -> is_empty c >>| fun () -> `Is_not_defined)
+    (name_ns "is-not-defined" caldav_ns)
+    any
+
+let text_match_parser =
+  tree_lift
+    (fun a c -> 
+      let collation = 
+      match find_attribute "collation" a with
+      | None -> "i;ascii-casemap"
+      | Some v -> v 
+      in
+      let negate =
+      match find_attribute "negate-condition" a with
+      | Some "yes" -> true
+      | _ -> false
+      in 
+      Ok (`Text_match (c, collation, negate))
+    )
+    (name_ns "text-match" caldav_ns >>~ extract_attributes)
+    extract_pcdata
+
+let param_filter_parser =
+  tree_lift
+    (fun a c -> match find_attribute "name" a with
+       | None -> Error "Attribute \"name\" required"
+       | Some n -> Ok (`Param_filter (n, c)))
+    (name_ns "param-filter" caldav_ns >>~ extract_attributes)
+    (is_not_defined_parser ||| text_match_parser)
+
+let time_range_parser: tree -> ([> `Timerange of string * string ], string) result =
+  tree_lift
+    (fun a c -> is_empty c >>= fun () -> match find_attribute "start" a, find_attribute "end" a with
+     | None, _ | _, None -> Error "Missing attribute \"start\" or \"end\""
+     | Some s, Some e -> Ok (`Timerange (s, e)))
+    (name_ns "time-range" caldav_ns >>~ extract_attributes)
+    (any)
+
+let all_param_filters lst = if List.for_all (function `Param_filter _ -> true | _ -> false) lst then Ok () else Error "Only param-filters allowed."
+
+let prop_filter_parser =
+  tree_lift
+    (fun a c -> match find_attribute "name" a with 
+      | None -> Error "Attribute \"name\" required."
+      | Some n -> match c with
+        | [] -> Ok (`Prop_filter (n, `Exists))
+        | [ `Is_not_defined ] -> Ok (`Prop_filter (n, `Is_not_defined))
+        | `Timerange t :: pfs -> all_param_filters pfs >>| fun () -> `Prop_filter (n, `Range (t, pfs))
+        | `Text_match t :: pfs -> all_param_filters pfs >>| fun () -> `Prop_filter (n, `Text (t, pfs))
+        | _ -> Error "Invalid prop-filter.")
+    (name_ns "prop-filter" caldav_ns >>~ extract_attributes)
+    (is_not_defined_parser ||| (time_range_parser ||| text_match_parser ||| param_filter_parser))
+
 let pp_propupdate fmt update =
   List.iter (function
       | `Set (a, k, v) -> Fmt.pf fmt "Set %a %a %a" Fmt.(list ~sep:(unit ",") pp_attrib) a pp_fqname k (Fmt.list pp_tree) v
@@ -389,7 +452,7 @@ let exactly_one = function
   | _     -> Error "expected exactly one child"
 
 let proppatch_prop_parser f =
-  tree_lift (fun _ c -> Ok c) (name "prop") (any >>= f)
+  tree_lift (fun _ c -> Ok c) (name "prop") (any >>~ f)
 
 let set_parser : tree -> ([>`Set of attribute list * fqname * tree list] list, string) result =
   tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
