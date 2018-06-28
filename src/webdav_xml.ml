@@ -223,15 +223,6 @@ let tree_lift f node_p children_p =
        in
        f node ch')
 
-let name str = function
-  | (Node (_, name, _, _) as node) ->
-    if String.equal name str then
-      Ok node
-    else
-      Error ("expected " ^ str ^ ", but found " ^ name)
-  | _ ->
-    Error ("expected " ^ str ^ ", but got pcdata")
-
 let name_ns name namespace = function
   | (Node (ns, n, _, _) as node) ->
     if String.equal name n && String.equal ns namespace then
@@ -299,16 +290,16 @@ type res = [
 let propfind_prop_parser : tree -> ([> res | `Include of string list ], string) result =
   ((tree_lift
       (fun _ c -> is_empty c >>| fun () -> `Propname)
-      (name "propname") any)
+      (name_ns "propname" dav_ns) any)
    ||| (tree_lift
           (fun _ c -> non_empty c >>| fun () -> `Props c)
-          (name "prop") (any >>~ extract_ns_name))
+          (name_ns "prop" dav_ns) (any >>~ extract_ns_name))
    ||| (tree_lift
           (fun _ c -> is_empty c >>| fun () -> `All_prop [])
-          (name "allprop") any)
+          (name_ns "allprop" dav_ns) any)
    ||| (tree_lift
           (fun _ c -> non_empty c >>| fun () -> `Include c)
-          (name "include") (any >>~ extract_name)))
+          (name_ns "include" dav_ns) (any >>~ extract_name)))
 
 let parse_propfind_xml tree =
   let tree_grammar =
@@ -318,7 +309,7 @@ let parse_propfind_xml tree =
          | [ `Include _ ] -> Error "lonely include"
          | [ `All_prop _ ; `Include is ] -> Ok (`All_prop is)
          | _ -> Error "broken")
-      (name "propfind")
+      (name_ns "propfind" dav_ns)
       propfind_prop_parser
   in
   run tree_grammar tree
@@ -336,14 +327,14 @@ let find_attribute name attrs =
 
 let rec comp_parser tree : (comp, string) result =
   tree_lift
-    (fun (Node (_, _, a, _)) c ->
-         match find_attribute "name" a with
-         | None -> Error "Expected name in comp"
-         | Some name -> Ok (`Comp (name, c)))
-    (name_ns "comp" caldav_ns)
+    (fun a c ->
+       match find_attribute "name" a with
+       | None -> Error "Expected name in comp"
+       | Some name -> Ok (`Comp (name, c)))
+    (name_ns "comp" caldav_ns >>~ extract_attributes)
     ((tree_lift (fun _ c -> is_empty c >>| fun () -> `Allprop) (name_ns "allprop" caldav_ns) any)
      ||| (tree_lift
-            (fun (Node (_, _, a, _)) c ->
+            (fun a c ->
                let novalue = match find_attribute "novalue" a with
                  | Some "yes" -> true
                  | _ -> false
@@ -351,7 +342,7 @@ let rec comp_parser tree : (comp, string) result =
                match find_attribute "name" a with
                | None -> Error "No name in prop"
                | Some name' -> is_empty c >>| fun () -> (`Prop (name', novalue)))
-            (name_ns "prop" caldav_ns) any)
+            (name_ns "prop" caldav_ns >>~ extract_attributes) any)
      ||| (tree_lift (fun _ c -> is_empty c >>| fun () -> `Allcomp) (name_ns "allcomp" caldav_ns) any)
      ||| comp_parser)
     tree
@@ -508,25 +499,25 @@ let exactly_one = function
   | _     -> Error "expected exactly one child"
 
 let proppatch_prop_parser f =
-  tree_lift (fun _ c -> Ok c) (name "prop") (any >>~ f)
+  tree_lift (fun _ c -> Ok c) (name_ns "prop" dav_ns) (any >>~ f)
 
 let set_parser : tree -> ([>`Set of attribute list * fqname * tree list] list, string) result =
   tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
     (fun _ c -> exactly_one c >>| List.map (fun k -> `Set k))
-    (name "set")
+    (name_ns "set" dav_ns)
     (proppatch_prop_parser extract_name_value)
 
 let remove_parser : tree -> ([>`Remove of fqname] list, string) result =
   tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
     (fun _ c -> exactly_one c >>| List.map (fun k -> `Remove k))
-    (name "remove")
+    (name_ns "remove" dav_ns)
     (proppatch_prop_parser extract_ns_name)
 
 let parse_propupdate_xml tree =
   let propupdate =
     tree_lift
       (fun _ lol -> Ok (List.flatten lol))
-      (name "propertyupdate")
+      (name_ns "propertyupdate" dav_ns)
       (set_parser ||| remove_parser)
   in
   run propupdate tree
@@ -535,7 +526,7 @@ let parse_mkcol_xml tree =
   let mkcol =
     tree_lift
       (fun _ lol -> Ok (List.flatten lol))
-      (name "mkcol")
+      (name_ns "mkcol" dav_ns)
       set_parser
   in
   run mkcol tree
