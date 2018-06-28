@@ -48,7 +48,7 @@ let propfilename =
     | filename :: path -> `File (List.rev path @ [ filename ^ ext ])
     | [] -> assert false (* no file without a name *)
 
-type propmap = (Webdav_xml.attribute list * Webdav_xml.tree list) Webdav_xml.M.t
+type propmap = (Webdav_xml.attribute list * Webdav_xml.tree list) Webdav_xml.PairMap.t
 
 let get_properties fs f_or_d =
   let propfile = to_string (propfilename f_or_d) in
