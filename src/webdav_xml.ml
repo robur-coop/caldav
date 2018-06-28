@@ -1,3 +1,5 @@
+open Rresult.R.Infix
+
 module M = Map.Make(String)
 
 type namespace = string
@@ -10,41 +12,42 @@ type tree =
   | Node of namespace * name * attribute list * tree list
 
 (* TODO this actually belongs to CalDAV! this is Webdav_xml module! *)
-type comp = [ `Comp of string * comp list | `Allcomp | `Allprop | `Prop of string * bool ]
+type comp = [ `Allcomp | `Comp of component list ]
+and prop = [ `Allprop | `Prop of (string * bool) list ]
+and component = string * prop * comp
 
 type calendar_data = [
   | `All_props
-  | `Proplist of [ `Calendar_data of comp list | `Prop of fqname ] list
+  | `Proplist of [ `Calendar_data of component list | `Prop of fqname ] list
   | `Propname
 ]
 
-type param_filter = [ `Param_filter of string * [ `Is_not_defined | `Text_match of string list * string * bool ] list ]
+(* TODO remove tag, remove list from first element of Text_match *)
+type param_filter =
+  [ `Param_filter of string * [ `Is_not_defined | `Text_match of string list * string * bool ] list ]
+
+type timerange = string * string
 
 type prop_filter =
-  [ `Prop_filter of
-      string *
-      [ `Exists
-      | `Is_not_defined
-      | `Range of (string * string) * param_filter list
-      | `Text of (string list * string * bool) * param_filter list ]
-  ]
+  string *
+  [ `Exists
+  | `Is_not_defined
+  | `Range of (string * string) * param_filter list
+  | `Text of (string list * string * bool) * param_filter list ]
 
-type comp_filter =
-  [ `Comp_filter of
-      string *
-      [ `Exists
-      | `Is_not_defined
-      | `Prop_or_comp of prop_filter list * comp_filter list
-      | `Prop_or_comp_with_range of (string * string) * prop_filter list * comp_filter list ]
-  ]
+(* TODO maybe add tag, make filter section more clear in the parse tree *)
+type comp_filter = [
+  | `Is_not_defined
+  | `Is_defined
+  | `Comp_filter of timerange option * prop_filter list * component_filter list
+]
+and component_filter = string * comp_filter
 
-(*
-type calendar_query = calendar_data option * filter
-*)
+type calendar_query = calendar_data option * component_filter
 
 let pp_fqname = Fmt.(pair ~sep:(unit ":") string string)
 
-let pp_attrib = Fmt.(pair ~sep:(unit "=") pp_fqname string) 
+let pp_attrib = Fmt.(pair ~sep:(unit "=") pp_fqname string)
 
 let rec pp_tree fmt = function
   | Pcdata str -> Fmt.string fmt str
@@ -53,6 +56,63 @@ let rec pp_tree fmt = function
       namespace name
       Fmt.(list ~sep:(unit ", ") pp_attrib) attributes
       Fmt.(list ~sep:(unit ", ") pp_tree) children
+
+let pp_prop ppf = function
+  | `Prop props -> Fmt.pf ppf "props %a" Fmt.(list ~sep:(unit ", ") (pair ~sep:(unit ":") string bool)) props
+  | `Allprop -> Fmt.string ppf "all properties"
+
+let rec pp_comp ppf = function
+  | `Allcomp -> Fmt.string ppf "all components"
+  | `Comp comps -> Fmt.pf ppf "comps %a" Fmt.(list ~sep:(unit ", ") pp_component) comps
+and pp_component ppf (name, prop, comp) =
+  Fmt.pf ppf "component %s %a %a" name pp_prop prop pp_comp comp
+
+let pp_proplist_element ppf = function
+  | `Calendar_data xs -> Fmt.pf ppf "calendar data %a" Fmt.(list ~sep:(unit ", ") pp_component) xs
+  | `Prop n -> Fmt.pf ppf "property %a" pp_fqname n
+
+let pp_calendar_data ppf = function
+  | `All_props -> Fmt.string ppf "all properties"
+  | `Propname -> Fmt.string ppf "property name"
+  | `Proplist xs -> Fmt.pf ppf "proplist (%a)" Fmt.(list ~sep:(unit ", ") pp_proplist_element) xs
+
+let pp_text_match ppf (xs, str, b) =
+  Fmt.pf ppf "text match %a %s %b"
+    Fmt.(list ~sep:(unit ",") string) xs str b
+
+let pp_param_filter ppf (`Param_filter (name, e)) =
+  let pp_param_f ppf = function
+    | `Is_not_defined -> Fmt.string ppf "not defined"
+    | `Text_match tm -> pp_text_match ppf tm
+  in
+  Fmt.pf ppf "param filter %s: %a" name Fmt.(list ~sep:(unit ",") pp_param_f) e
+
+let pp_timerange = Fmt.(pair ~sep:(unit " until: ") string string)
+
+let pp_prop_filter ppf (name, e) =
+  match e with
+  | `Exists -> Fmt.pf ppf "prop filter: %s exists" name
+  | `Is_not_defined -> Fmt.pf ppf "prop filter: %s is not defined" name
+  | `Range (tr, params) -> Fmt.pf ppf "prop filter range: %s %a %a" name
+                              pp_timerange tr Fmt.(list ~sep:(unit ",") pp_param_filter) params
+  | `Text (tm, params) -> Fmt.pf ppf "prop filter text: %a %a"
+                            pp_text_match tm Fmt.(list ~sep:(unit ",") pp_param_filter) params
+
+let rec pp_comp_filter ppf = function
+  | `Is_not_defined -> Fmt.string ppf "is not defined"
+  | `Is_defined -> Fmt.string ppf "is defined"
+  | `Comp_filter (tr_opt, props, comps) ->
+    Fmt.pf ppf "comp filter %a %a %a"
+      Fmt.(option ~none:(unit "none") pp_timerange) tr_opt
+      Fmt.(list ~sep:(unit ",") pp_prop_filter) props
+      Fmt.(list ~sep:(unit ",") pp_component_filter) comps
+and pp_component_filter : component_filter Fmt.t = fun ppf (name, f) ->
+  Fmt.pf ppf "component filter %s: %a" name pp_comp_filter f
+
+let pp_calendar_query ppf (data_opt, filter) =
+  Fmt.pf ppf "calendar query %a filter: %a"
+    Fmt.(option ~none:(unit "none") pp_calendar_data) data_opt
+    pp_component_filter filter
 
 let node ?(ns = "") name ?(a = []) children = Node (ns, name, a, children)
 
@@ -151,9 +211,9 @@ module PairMap = Map.Make (struct
     | 0 -> String.compare a2 b2
     | x -> x
   end)
- 
+
 let props_to_tree m =
-  PairMap.fold (fun (ns, k) (a, v) acc -> 
+  PairMap.fold (fun (ns, k) (a, v) acc ->
     node ~ns ~a k v :: acc) m []
 
 let props_to_string m =
@@ -214,14 +274,12 @@ let rec filter_map f = function
 
 let tree_lift f node_p children_p =
   (fun tree ->
-     match node_p tree with
-     | Error e -> Error e
-     | Ok node ->
-       let ch' = match tree with
-         | Node (_, _, _, ch) -> filter_map children_p ch
-         | Pcdata _           -> []
-       in
-       f node ch')
+     node_p tree >>= fun node ->
+     let ch' = match tree with
+       | Node (_, _, _, ch) -> filter_map children_p ch
+       | Pcdata _           -> []
+     in
+     f node ch')
 
 let name_ns name namespace = function
   | (Node (ns, n, _, _) as node) ->
@@ -269,7 +327,6 @@ let leaf_node = function
   | _                       -> Error "not a leaf"
 
 let (|||) = alternative
-open Rresult.R.Infix
 
 let is_empty = function
   | [] -> Ok ()
@@ -287,7 +344,7 @@ type res = [
   | `Props of fqname list
 ]
 
-let propfind_prop_parser : tree -> ([> res | `Include of string list ], string) result =
+let propfind_prop_parser : tree -> ([ res | `Include of string list ], string) result =
   ((tree_lift
       (fun _ c -> is_empty c >>| fun () -> `Propname)
       (name_ns "propname" dav_ns) any)
@@ -314,23 +371,46 @@ let parse_propfind_xml tree =
   in
   run tree_grammar tree
 
-let rec pp_comp ppf = function
-  | `Prop (name, value) -> Fmt.pf ppf "prop %s, value %b" name value
-  | `Allprop -> Fmt.string ppf "all properties"
-  | `Allcomp -> Fmt.string ppf "all components"
-  | `Comp (name, comps) -> Fmt.pf ppf "component %s, %a" name Fmt.(list ~sep:(unit ", ") pp_comp) comps
-
 let find_attribute name attrs =
   match List.filter (fun ((_, n'), _) -> String.equal n' name) attrs with
   | [ (_, v) ] -> Some v
   | _ -> None
 
-let rec comp_parser tree : (comp, string) result =
+let take_drop_while p xs =
+  let a, b =
+    List.fold_left (fun (is_p, not_is_p) e ->
+        if not_is_p = [] then
+          match p e with
+          | None -> (is_p, [ e ])
+          | Some a -> (a :: is_p, [])
+        else
+          (is_p, e :: not_is_p))
+      ([], []) xs
+  in
+  (List.rev a, List.rev b)
+
+let rec comp_parser tree : (component, string) result =
   tree_lift
     (fun a c ->
        match find_attribute "name" a with
        | None -> Error "Expected name in comp"
-       | Some name -> Ok (`Comp (name, c)))
+       | Some name ->
+         let prop, rest = match c with
+           | `Allprop :: xs -> (`Allprop, xs)
+           | xs ->
+             let props, rest' = take_drop_while (function `Prop a -> Some a | _ -> None) xs in
+             `Prop props, rest'
+         in
+         let comp, rest' = match rest with
+           | `Allcomp :: xs -> (`Allcomp, xs)
+           | xs ->
+             let comps, rest'' = take_drop_while (function `Comp a -> Some a | _ -> None) xs in
+             `Comp comps, rest''
+         in
+         if rest' = [] then
+           Ok (name, prop, comp)
+         else
+           Error "broken")
     (name_ns "comp" caldav_ns >>~ extract_attributes)
     ((tree_lift (fun _ c -> is_empty c >>| fun () -> `Allprop) (name_ns "allprop" caldav_ns) any)
      ||| (tree_lift
@@ -344,10 +424,10 @@ let rec comp_parser tree : (comp, string) result =
                | Some name' -> is_empty c >>| fun () -> (`Prop (name', novalue)))
             (name_ns "prop" caldav_ns >>~ extract_attributes) any)
      ||| (tree_lift (fun _ c -> is_empty c >>| fun () -> `Allcomp) (name_ns "allcomp" caldav_ns) any)
-     ||| comp_parser)
+     ||| (comp_parser >>~ fun (s, p, c) -> Ok (`Comp (s, p, c))))
     tree
 
-let calendar_data_parser : tree -> ([> `Calendar_data of comp list ], string) result =
+let calendar_data_parser : tree -> ([> `Calendar_data of component list ], string) result =
   tree_lift (fun _ c -> Ok (`Calendar_data c))
     (name_ns "calendar-data" caldav_ns)
     comp_parser
@@ -364,16 +444,11 @@ let extract_and_tag_prop = function
   | Node (ns, name, _, _) -> Ok (`Prop (ns, name))
   | Pcdata _ -> Error "expected node"
 
-let pp_proplist_element ppf = function
-  | `Calendar_data xs -> Fmt.pf ppf "calendar data %a" Fmt.(list ~sep:(unit ", ") pp_comp) xs
-  | `Prop n -> Fmt.pf ppf "property %a" pp_fqname n
+let exactly_one = function
+  | [ x ] -> Ok x
+  | _     -> Error "expected exactly one child"
 
-let pp_calendar_data ppf = function
-  | `All_props -> Fmt.string ppf "all properties"
-  | `Propname -> Fmt.string ppf "property name"
-  | `Proplist xs -> Fmt.pf ppf "proplist (%a)" Fmt.(list ~sep:(unit ", ") pp_proplist_element) xs
-
-let report_prop_parser : tree -> ([> calendar_data], string) result =
+let report_prop_parser : tree -> (calendar_data, string) result =
   (tree_lift
      (fun _ c -> is_empty c >>| fun () -> `Propname)
      (name_ns "propname" dav_ns) any)
@@ -393,17 +468,17 @@ let is_not_defined_parser =
 
 let text_match_parser =
   tree_lift
-    (fun a c -> 
-      let collation = 
-      match find_attribute "collation" a with
-      | None -> "i;ascii-casemap"
-      | Some v -> v 
+    (fun a c ->
+      let collation =
+        match find_attribute "collation" a with
+        | None -> "i;ascii-casemap"
+        | Some v -> v
       in
       let negate =
-      match find_attribute "negate-condition" a with
-      | Some "yes" -> true
-      | _ -> false
-      in 
+        match find_attribute "negate-condition" a with
+        | Some "yes" -> true
+        | _ -> false
+      in
       Ok (`Text_match (c, collation, negate))
     )
     (name_ns "text-match" caldav_ns >>~ extract_attributes)
@@ -425,20 +500,20 @@ let time_range_parser: tree -> ([> `Timerange of string * string ], string) resu
     (name_ns "time-range" caldav_ns >>~ extract_attributes)
     (any)
 
-let all_param_filters lst : (param_filter list, string) result = 
+let all_param_filters lst : (param_filter list, string) result =
   List.fold_left (fun acc elem -> match acc, elem with
    | Ok items, `Param_filter f -> Ok (`Param_filter f :: items)
    | _ -> Error "Only param-filters allowed.") (Ok []) lst
 
-let prop_filter_parser : tree -> ([> prop_filter ], string) result =
+let prop_filter_parser : tree -> (prop_filter, string) result =
   tree_lift
-    (fun a c -> match find_attribute "name" a with 
+    (fun a c -> match find_attribute "name" a with
       | None -> Error "Attribute \"name\" required."
       | Some n -> match c with
-        | [] -> Ok (`Prop_filter (n, `Exists))
-        | [ `Is_not_defined ] -> Ok (`Prop_filter (n, `Is_not_defined))
-        | `Timerange t :: pfs -> all_param_filters pfs >>| fun pfs' -> `Prop_filter (n, `Range (t, pfs'))
-        | `Text_match t :: pfs -> all_param_filters pfs >>| fun pfs' -> `Prop_filter (n, `Text (t, pfs'))
+        | [] -> Ok (n, `Exists)
+        | [ `Is_not_defined ] -> Ok (n, `Is_not_defined)
+        | `Timerange t :: pfs -> all_param_filters pfs >>| fun pfs' -> (n, `Range (t, pfs'))
+        | `Text_match t :: pfs -> all_param_filters pfs >>| fun pfs' -> (n, `Text (t, pfs'))
         | _ -> Error "Invalid prop-filter.")
     (name_ns "prop-filter" caldav_ns >>~ extract_attributes)
     (is_not_defined_parser ||| time_range_parser ||| text_match_parser ||| param_filter_parser)
@@ -451,39 +526,56 @@ let split_filters lst =
     (Ok ([], [])) lst >>| fun (pflst, cflst) ->
   (List.rev pflst, List.rev cflst)
 
-let rec comp_filter_parser tree : ([> comp_filter ], string) result =
+let rec comp_filter_parser tree : (component_filter, string) result =
   tree_lift
-    (fun a c -> match find_attribute "name" a with
+    (fun a c ->
+       match find_attribute "name" a with
        | None -> Error "Attribute \"name\" required."
-       | Some n -> match c with
-         | [] -> Ok (`Comp_filter (n, `Exists))
-         | [`Is_not_defined ] -> Ok (`Comp_filter (n, `Is_not_defined))
-         | `Timerange t :: pfs -> split_filters pfs >>| fun (pflst, cflst) -> `Comp_filter (n, `Prop_or_comp_with_range (t, pflst, cflst))
-         | pfs -> split_filters pfs >>| fun (pflst, cflst) -> `Comp_filter (n, `Prop_or_comp (pflst, cflst)))
+       | Some n ->
+         let f xs =
+           let prop_filters, rest =
+             take_drop_while (function `Prop_filter a -> Some a | _ -> None) xs
+           in
+           let comp_filters, rest' =
+             take_drop_while (function `Filter a -> Some a | _ -> None) rest
+           in
+           if rest' = [] then Ok (prop_filters, comp_filters) else Error "broken"
+         in
+         match c with
+         | [] -> Ok (n, `Is_defined)
+         | [ `Is_not_defined ] -> Ok (n, `Is_not_defined)
+         | `Timerange (a, b)::xs ->
+           f xs >>= fun (props, comps) ->
+           Ok (n, `Comp_filter (Some (a, b), props, comps))
+         | xs ->
+           f xs >>= fun (props, comps) ->
+           Ok (n, `Comp_filter (None, props, comps)))
     (name_ns "comp-filter" caldav_ns >>~ extract_attributes)
-    (is_not_defined_parser ||| time_range_parser ||| prop_filter_parser ||| comp_filter_parser)
+    (is_not_defined_parser ||| time_range_parser
+     ||| (prop_filter_parser >>~ fun p -> Ok (`Prop_filter p))
+     ||| (comp_filter_parser >>~ fun c -> Ok (`Filter c)))
     tree
 
-let filter_parser = 
-  tree_lift 
-    (fun _ c -> Ok (`Filter c))
+let filter_parser : tree -> (component_filter, string) result =
+  tree_lift
+    (fun _ c -> exactly_one c)
     (name_ns "filter" caldav_ns)
     (comp_filter_parser)
 
-let parse_calendar_query_xml tree =
+let parse_calendar_query_xml tree : (calendar_query, string) result =
   let tree_grammar =
     tree_lift
-      (fun _ c -> let prop, rest = match c with
-         | `Propname :: xs -> Some `Propname, xs
-         | `Proplist x :: xs -> Some (`Proplist x), xs
-         | `All_props :: xs -> Some `All_props, xs
-         | xs -> None, xs
-       in
-       match rest with
+      (fun _ c ->
+         let prop, rest = match c with
+           | `Report r :: xs -> Some r, xs
+           | xs -> None, xs
+         in
+         match rest with
          | `Filter f :: xs -> Ok (prop, f)
-         | xs -> Error "broken1")
+         | xs -> Error "broken")
       (name_ns "calendar-query" caldav_ns)
-      (report_prop_parser ||| filter_parser)
+      ((report_prop_parser >>~ fun p -> Ok (`Report p))
+       ||| (filter_parser >>~ fun f -> Ok (`Filter f)))
   in
   Format.printf "input tree: (%a)@." pp_tree tree ;
   run tree_grammar tree
@@ -493,10 +585,6 @@ let pp_propupdate fmt update =
       | `Set (a, k, v) -> Fmt.pf fmt "Set %a %a %a" Fmt.(list ~sep:(unit ",") pp_attrib) a pp_fqname k (Fmt.list pp_tree) v
       | `Remove k   -> Fmt.pf fmt "Remove %a" pp_fqname k
     ) update
-
-let exactly_one = function
-  | [ x ] -> Ok x
-  | _     -> Error "expected exactly one child"
 
 let proppatch_prop_parser f =
   tree_lift (fun _ c -> Ok c) (name_ns "prop" dav_ns) (any >>~ f)

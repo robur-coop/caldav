@@ -15,63 +15,63 @@ let prop =
 let str_err =
   let module M = struct
     type t = string
-    let pp = Fmt.string 
+    let pp = Fmt.string
     let equal = String.equal
   end in
   (module M : Alcotest.TESTABLE with type t = M.t)
 
 let empty_propfind () =
-  let xml = header ^ "<propfind/>" in
+  let xml = header ^ "<propfind xmlns=\"" ^ Xml.dav_ns ^ "\"/>" in
   Alcotest.(check (result prop str_err) "parsing <propfind/>"
               (Error "broken") (Xml.parse_propfind_xml (tree xml)))
 
 let propname () =
-  let xml = header ^ "<propfind><propname/></propfind>" in
+  let xml = header ^ "<propfind xmlns=\"" ^ Xml.dav_ns ^ "\"><propname/></propfind>" in
   Alcotest.(check (result prop str_err) "parsing <propfind><propname/></propfind>"
               (Ok `Propname) (Xml.parse_propfind_xml (tree xml)))
 
 let two_propname () =
-  let xml = header ^ "<propfind><propname/><propname/></propfind>" in
+  let xml = header ^ "<propfind xmlns=\"" ^ Xml.dav_ns ^ "\"><propname/><propname/></propfind>" in
   Alcotest.(check (result prop str_err) "parsing <propfind><propname/><propname/></propfind>"
               (Error "broken") (Xml.parse_propfind_xml (tree xml)))
 
 let allprop () =
-  let xml = header ^ "<propfind><allprop/></propfind>" in
+  let xml = header ^ "<propfind xmlns=\"" ^ Xml.dav_ns ^ "\"><allprop/></propfind>" in
   Alcotest.(check (result prop str_err) "parsing <propfind><allprop/></propfind>"
               (Ok (`All_prop [])) (Xml.parse_propfind_xml (tree xml)))
 
 let allprop_include () =
-  let xml = header ^ "<propfind><allprop/><include><foo/><bar/></include></propfind>" in
+  let xml = header ^ "<propfind xmlns=\"" ^ Xml.dav_ns ^ "\"><allprop/><include><foo/><bar/></include></propfind>" in
   Alcotest.(check (result prop str_err) "parsing all prop with includes"
               (Ok (`All_prop ["foo";"bar"])) (Xml.parse_propfind_xml (tree xml)))
 
 let invalid_xml () =
-  let error_tree xml = match Xml.string_to_tree xml with 
-    | Some _ -> () 
+  let error_tree xml = match Xml.string_to_tree xml with
+    | Some _ -> ()
     | None -> invalid_arg "Invalid xml" in
   Alcotest.(check_raises "parsing header only" (Invalid_argument "Invalid xml")
               (fun () -> error_tree header));
-  let xml = header ^ "<propfind>" in
+  let xml = header ^ "<propfind xmlns=\"" ^ Xml.dav_ns ^ "\">" in
   Alcotest.(check_raises "hanging paren"
               (Invalid_argument "Invalid xml") (fun () -> error_tree xml)) ;
   let xml = header ^ "<propfind" in
   Alcotest.(check_raises "missing bracket"
               (Invalid_argument "Invalid xml") (fun () -> error_tree xml)) ;
-  let xml = header ^ "<propname/>" in
+  let xml = header ^ "<propname xmlns=\"" ^ Xml.dav_ns ^ "\"/>" in
   Alcotest.(check (result prop str_err) "missing propfind"
-              (Error "expected propfind, but found propname") 
+              (Error "expected propfind, but found propname")
               (Xml.parse_propfind_xml (tree xml))) ;
-  let xml = header ^ "<propfind/>" in
+  let xml = header ^ "<propfind xmlns=\"" ^ Xml.dav_ns ^ "\"/>" in
   Alcotest.(check (result prop str_err) "empty propfind"
-              (Error "broken") 
+              (Error "broken")
               (Xml.parse_propfind_xml (tree xml))) ;
-  let xml = header ^ "<propfind><foo/></propfind>" in
+  let xml = header ^ "<propfind xmlns=\"" ^ Xml.dav_ns ^ "\"><foo/></propfind>" in
   Alcotest.(check (result prop str_err) "unexpected element foo"
-              (Error "broken") 
+              (Error "broken")
               (Xml.parse_propfind_xml (tree xml))) ;
-  let xml = header ^ "<propfind><prop><foo><bar/></foo></prop></propfind>" in
+  let xml = header ^ "<propfind xmlns=\"" ^ Xml.dav_ns ^ "\"><prop><foo><bar/></foo></prop></propfind>" in
   Alcotest.(check (result prop str_err) "non-flat property list"
-              (Ok (`Props [ ("", "foo") ]))
+              (Ok (`Props [ (Xml.dav_ns, "foo") ]))
               (Xml.parse_propfind_xml (tree xml)))
 
 let parse_propfind_xml_tests = [
@@ -85,8 +85,8 @@ let parse_propfind_xml_tests = [
 
 let calendar_query =
   let module M = struct
-    type t = Xml.calendar_data
-    let pp = Xml.pp_calendar_data
+    type t = Xml.calendar_query
+    let pp = Xml.pp_calendar_query
     let equal a b = compare a b = 0
   end in
   (module M : Alcotest.TESTABLE with type t = M.t)
@@ -98,9 +98,11 @@ let parse_simple_report_query () =
      <D:prop>
        <D:getetag/>
      </D:prop>
+     <C:filter><C:comp-filter name="VCALENDAR"/></C:filter>
    </C:calendar-query>
 |_} in
-  let expected = Ok (`Proplist [ `Prop (Xml.dav_ns, "getetag") ]) in
+  let expected = Ok (Some (`Proplist [ `Prop (Xml.dav_ns, "getetag") ]),
+                     ("VCALENDAR", `Is_defined)) in
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
@@ -131,8 +133,26 @@ let parse_simple_report_query_with_calendar_data () =
      </D:prop>
    </C:calendar-query>
 |_} in
-  let expected = Ok (
-  `Proplist [ `Prop ( Xml.dav_ns, "getetag") ; `Calendar_data [ `Comp ("VCALENDAR", [`Prop ("VERSION", false) ; `Comp ("VEVENT", [`Prop ("SUMMARY", false) ; `Prop ("UID", false); `Prop ("DTSTART", false); `Prop ("DTEND", false); `Prop ("DURATION", false); `Prop ("RRULE", false); `Prop ("RDATE", false); `Prop ("EXRULE", false); `Prop ("EXDATE", false); `Prop ("RECURRENCE-ID", false)]); `Comp ("VTIMEZONE", [])])]]) in
+  let expected =
+    Ok (Some (`Proplist [
+        `Prop (Xml.dav_ns, "getetag") ;
+        `Calendar_data [
+          (* "VCALENDAR",
+           `Prop [ ("VERSION", false) ],
+           `Comp ("VEVENT", `Prop [
+               ("SUMMARY", false) ;
+               ("UID", false) ;
+               ("DTSTART", false) ;
+               ("DTEND", false) ;
+               ("DURATION", false) ;
+               ("RRULE", false);
+               ("RDATE", false) ;
+               ("EXRULE", false) ;
+               ("EXDATE", false) ;
+               ("RECURRENCE-ID", false) ], `Comp [] ) ;
+               `Comp ("VTIMEZONE", `Prop [], `Comp [])) *) ] ] ),
+        ("VCALENDAR", `Is_defined))
+  in
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
