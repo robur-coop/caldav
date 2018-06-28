@@ -16,17 +16,22 @@ type comp = [ `Allcomp | `Comp of component list ]
 and prop = [ `Allprop | `Prop of (string * bool) list ]
 and component = string * prop * comp
 
-type calendar_data = [
+type timerange = string * string
+
+type calendar_data =
+  component option *
+  [ `Expand of timerange | `Limit_recurrence_set of timerange ] option *
+  [ `Limit_freebusy_set of timerange ] option
+
+type report_prop = [
   | `All_props
-  | `Proplist of [ `Calendar_data of component list | `Prop of fqname ] list
+  | `Proplist of [ `Calendar_data of calendar_data | `Prop of fqname ] list
   | `Propname
 ]
 
 (* TODO remove tag, remove list from first element of Text_match *)
 type param_filter =
   [ `Param_filter of string * [ `Is_not_defined | `Text_match of string list * string * bool ] list ]
-
-type timerange = string * string
 
 type prop_filter =
   string *
@@ -43,7 +48,7 @@ type comp_filter = [
 ]
 and component_filter = string * comp_filter
 
-type calendar_query = calendar_data option * component_filter
+type calendar_query = report_prop option * component_filter
 
 let pp_fqname = Fmt.(pair ~sep:(unit ":") string string)
 
@@ -427,10 +432,39 @@ let rec comp_parser tree : (component, string) result =
      ||| (comp_parser >>~ fun (s, p, c) -> Ok (`Comp (s, p, c))))
     tree
 
-let calendar_data_parser : tree -> ([> `Calendar_data of component list ], string) result =
-  tree_lift (fun _ c -> Ok (`Calendar_data c))
+let range_parser name : tree -> (timerange, string) result =
+  tree_lift
+    (fun a c -> is_empty c >>= fun () -> match find_attribute "start" a, find_attribute "end" a with
+       | None, _ | _, None -> Error "Missing attribute \"start\" or \"end\""
+       | Some s, Some e -> Ok (s, e))
+    (name_ns name caldav_ns >>~ extract_attributes)
+    (any)
+
+let limit_recurrence_set_parser =
+  range_parser "limit-recurrence-set" >>~ fun d -> Ok (`Limit_recurrence_set d)
+let expand_parser =
+  range_parser "expand" >>~ fun d -> Ok (`Expand d)
+let limit_freebusy_set_parser =
+  range_parser "limit-freebusy-set" >>~ fun d -> Ok (`Limit_freebusy_set d)
+
+let calendar_data_parser : tree -> (calendar_data, string) result =
+  tree_lift (fun _ c ->
+      let component, rest = match c with
+        | `Comp c :: xs -> Some c, xs
+        | xs -> None, xs
+      in
+      let exp_rec, rest' = match rest with
+        | `Expand x :: xs -> Some (`Expand x), xs
+        | `Limit_recurrence_set x :: xs -> Some (`Limit_recurrence_set x), xs
+        | xs -> None, xs
+      in
+      match rest' with
+      | [] -> Ok (component, exp_rec, None)
+      | `Limit_freebusy_set x :: [] -> Ok (component, exp_rec, Some (`Limit_freebusy_set x))
+      | _ -> Error "couldn't parse calendar-data")
     (name_ns "calendar-data" caldav_ns)
-    comp_parser
+    ((comp_parser >>~ fun c -> Ok (`Comp c))
+     ||| expand_parser ||| limit_recurrence_set_parser ||| limit_freebusy_set_parser)
 
 let any_in_ns ns = function
   | Node (ns', _, _, _) as n ->
@@ -448,7 +482,7 @@ let exactly_one = function
   | [ x ] -> Ok x
   | _     -> Error "expected exactly one child"
 
-let report_prop_parser : tree -> (calendar_data, string) result =
+let report_prop_parser : tree -> (report_prop, string) result =
   (tree_lift
      (fun _ c -> is_empty c >>| fun () -> `Propname)
      (name_ns "propname" dav_ns) any)
@@ -458,7 +492,8 @@ let report_prop_parser : tree -> (calendar_data, string) result =
   ||| (tree_lift
          (fun _ c -> non_empty c >>| fun () -> `Proplist c)
          (name_ns "prop" dav_ns)
-         (calendar_data_parser ||| (any >>~ extract_and_tag_prop)))
+         ((calendar_data_parser >>~ fun c -> Ok (`Calendar_data c))
+          ||| (any >>~ extract_and_tag_prop)))
 
 let is_not_defined_parser =
   tree_lift
@@ -492,13 +527,8 @@ let param_filter_parser : tree -> ([> param_filter ], string) result =
     (name_ns "param-filter" caldav_ns >>~ extract_attributes)
     (is_not_defined_parser ||| text_match_parser)
 
-let time_range_parser: tree -> ([> `Timerange of string * string ], string) result =
-  tree_lift
-    (fun a c -> is_empty c >>= fun () -> match find_attribute "start" a, find_attribute "end" a with
-     | None, _ | _, None -> Error "Missing attribute \"start\" or \"end\""
-     | Some s, Some e -> Ok (`Timerange (s, e)))
-    (name_ns "time-range" caldav_ns >>~ extract_attributes)
-    (any)
+let time_range_parser : tree -> ([> `Timerange of timerange ], string) result =
+  range_parser "time-range" >>~ fun d -> Ok (`Timerange d)
 
 let all_param_filters lst : (param_filter list, string) result =
   List.fold_left (fun acc elem -> match acc, elem with

@@ -159,9 +159,92 @@ let parse_simple_report_query_with_calendar_data () =
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
+let parse_report_query_7_8_1 () =
+  let xml = header ^ {|<C:calendar-query xmlns:D="DAV:"
+                 xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <D:getetag/>
+       <C:calendar-data>
+         <C:comp name="VCALENDAR">
+           <C:prop name="VERSION"/>
+           <C:comp name="VEVENT">
+             <C:prop name="SUMMARY"/>
+             <C:prop name="UID"/>
+             <C:prop name="DTSTART"/>
+             <C:prop name="DTEND"/>
+             <C:prop name="DURATION"/>
+             <C:prop name="RRULE"/>
+             <C:prop name="RDATE"/>
+             <C:prop name="EXRULE"/>
+             <C:prop name="EXDATE"/>
+             <C:prop name="RECURRENCE-ID"/>
+           </C:comp>
+           <C:comp name="VTIMEZONE"/>
+         </C:comp>
+       </C:calendar-data>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VEVENT">
+           <C:time-range start="20060104T000000Z"
+                         end="20060105T000000Z"/>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+                          </C:calendar-query>|}
+  and expected =
+    Ok (Some (`Proplist [
+        `Prop (Xml.dav_ns, "getetag") ;
+        `Calendar_data [
+          ("VCALENDAR",
+           `Prop [ ("VERSION", false) ],
+           `Comp [ ("VEVENT",
+                    `Prop [
+                      ("SUMMARY", false) ;
+                      ("UID", false) ;
+                      ("DTSTART", false) ;
+                      ("DTEND", false) ;
+                      ("DURATION", false) ;
+                      ("RRULE", false);
+                      ("RDATE", false) ;
+                      ("EXRULE", false) ;
+                      ("EXDATE", false) ;
+                      ("RECURRENCE-ID", false) ],
+                    `Comp []) ;
+                   ("VTIMEZONE", `Prop [], `Comp []) ]) ] ]),
+        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ("20060104T000000Z", "20060105T000000Z"), [], [])) ])))
+  in
+  Alcotest.(check (result calendar_query string) __LOC__ expected
+              (Xml.parse_calendar_query_xml (tree xml)))
+
+let parse_report_query_7_8_2 () =
+  let xml = header ^ {|<C:calendar-query xmlns:D="DAV:"
+                     xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <C:calendar-data>
+         <C:limit-recurrence-set start="20060103T000000Z"
+                                 end="20060105T000000Z"/>
+       </C:calendar-data>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VEVENT">
+           <C:time-range start="20060103T000000Z"
+                         end="20060105T000000Z"/>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+                          </C:calendar-query>|}
+  and expected = Error "hh"
+  in
+  Alcotest.(check (result calendar_query string) __LOC__ expected
+              (Xml.parse_calendar_query_xml (tree xml)))
+
 let report_tests = [
-  "Parse simple report query", `Quick, parse_simple_report_query;
-  "Parse simple report query with calendar data", `Quick, parse_simple_report_query_with_calendar_data;
+  "Parse simple report query", `Quick, parse_simple_report_query ;
+  "Parse simple report query with calendar data", `Quick, parse_simple_report_query_with_calendar_data ;
+  "Parse report query from section 7.8.1", `Quick, parse_report_query_7_8_1 ;
+  "Parse report query from section 7.8.2", `Quick, parse_report_query_7_8_2
 ]
 
 
