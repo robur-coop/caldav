@@ -518,14 +518,6 @@ let prop_filter_parser : tree -> (prop_filter, string) result =
     (name_ns "prop-filter" caldav_ns >>~ extract_attributes)
     (is_not_defined_parser ||| time_range_parser ||| text_match_parser ||| param_filter_parser)
 
-let split_filters lst =
-  List.fold_left (fun acc elem -> match acc, elem with
-   | Ok (pflst, []), `Prop_filter f -> Ok (`Prop_filter f :: pflst, [])
-   | Ok (pflst, cflst), `Comp_filter f -> Ok (pflst, `Comp_filter f :: cflst)
-   | _ -> Error "Only prop- or comp-filters allowed.")
-    (Ok ([], [])) lst >>| fun (pflst, cflst) ->
-  (List.rev pflst, List.rev cflst)
-
 let rec comp_filter_parser tree : (component_filter, string) result =
   tree_lift
     (fun a c ->
@@ -539,7 +531,7 @@ let rec comp_filter_parser tree : (component_filter, string) result =
            let comp_filters, rest' =
              take_drop_while (function `Filter a -> Some a | _ -> None) rest
            in
-           if rest' = [] then Ok (prop_filters, comp_filters) else Error "broken"
+           if rest' = [] then Ok (prop_filters, comp_filters) else Error "malformed comp-filter "
          in
          match c with
          | [] -> Ok (n, `Is_defined)
@@ -572,7 +564,7 @@ let parse_calendar_query_xml tree : (calendar_query, string) result =
          in
          match rest with
          | `Filter f :: xs -> Ok (prop, f)
-         | xs -> Error "broken")
+         | xs -> Error "wrong input in calendar-query")
       (name_ns "calendar-query" caldav_ns)
       ((report_prop_parser >>~ fun p -> Ok (`Report p))
        ||| (filter_parser >>~ fun f -> Ok (`Filter f)))

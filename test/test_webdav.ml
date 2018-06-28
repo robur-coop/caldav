@@ -131,26 +131,29 @@ let parse_simple_report_query_with_calendar_data () =
          </C:comp>
        </C:calendar-data>
      </D:prop>
+     <C:filter><C:comp-filter name="VCALENDAR"/></C:filter>
    </C:calendar-query>
 |_} in
   let expected =
     Ok (Some (`Proplist [
         `Prop (Xml.dav_ns, "getetag") ;
         `Calendar_data [
-          (* "VCALENDAR",
+          ("VCALENDAR",
            `Prop [ ("VERSION", false) ],
-           `Comp ("VEVENT", `Prop [
-               ("SUMMARY", false) ;
-               ("UID", false) ;
-               ("DTSTART", false) ;
-               ("DTEND", false) ;
-               ("DURATION", false) ;
-               ("RRULE", false);
-               ("RDATE", false) ;
-               ("EXRULE", false) ;
-               ("EXDATE", false) ;
-               ("RECURRENCE-ID", false) ], `Comp [] ) ;
-               `Comp ("VTIMEZONE", `Prop [], `Comp [])) *) ] ] ),
+           `Comp [ ("VEVENT",
+                    `Prop [
+                      ("SUMMARY", false) ;
+                      ("UID", false) ;
+                      ("DTSTART", false) ;
+                      ("DTEND", false) ;
+                      ("DURATION", false) ;
+                      ("RRULE", false);
+                      ("RDATE", false) ;
+                      ("EXRULE", false) ;
+                      ("EXDATE", false) ;
+                      ("RECURRENCE-ID", false) ],
+                    `Comp []) ;
+                   ("VTIMEZONE", `Prop [], `Comp []) ]) ] ]),
         ("VCALENDAR", `Is_defined))
   in
   Alcotest.(check (result calendar_query string) __LOC__ expected
