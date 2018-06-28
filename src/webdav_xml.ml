@@ -20,58 +20,28 @@ type calendar_data = [
 
 type param_filter = [ `Param_filter of string * [ `Is_not_defined | `Text_match of string list * string * bool ] list ]
 
-type prop_filter = [ `Prop_filter of
-      string *
-      [ `Exists
-       | `Is_not_defined
-       | `Range of (string * string) * param_filter list 
-       | `Text of (string list * string * bool) * param_filter list ] ]
-
-type comp_filter = [`Comp_filter of
-      string *
-      [`Exists
-       | `Is_not_defined
-       | `Prop_or_comp of
-           [`Comp_filter of 'a
-            | `Prop_filter of
-                string *
-                [ `Exists
-                | `Is_not_defined
-                | `Range of (string * string) * param_filter list
-                | `Text of (string list * string * bool) * param_filter list ] ]
-           list
-       | `Range of
-           (string * string) *
-           [`Comp_filter of 'a
-            | `Prop_filter of
-                string *
-                [ `Exists
-                | `Is_not_defined
-                | `Range of (string * string) * param_filter list
-                | `Text of (string list * string * bool) * param_filter list ] ]
-           list ]
-      as 'a
-  | `Is_not_defined
-  | `Prop_filter of
+type prop_filter =
+  [ `Prop_filter of
       string *
       [ `Exists
       | `Is_not_defined
       | `Range of (string * string) * param_filter list
       | `Text of (string list * string * bool) * param_filter list ]
-  | `Timerange of string * string ]
+  ]
+
+type comp_filter =
+  [ `Comp_filter of
+      string *
+      [ `Exists
+      | `Is_not_defined
+      | `Prop_or_comp of prop_filter list * comp_filter list
+      | `Prop_or_comp_with_range of (string * string) * prop_filter list * comp_filter list ]
+  ]
 
 (*
-type comp_filter = [`Comp_filter of
-      string *
-      [`Exists
-       | `Is_not_defined
-       | `Prop_or_comp of [ comp_filter | prop_filter ] list
-       | `Range of (string * string) * [ comp_filter | prop_filter ] list ]
-      ]
-
 type calendar_query = calendar_data option * filter
+*)
 
-*) 
 let pp_fqname = Fmt.(pair ~sep:(unit ":") string string)
 
 let pp_attrib = Fmt.(pair ~sep:(unit "=") pp_fqname string) 
@@ -468,7 +438,7 @@ let all_param_filters lst : (param_filter list, string) result =
   List.fold_left (fun acc elem -> match acc, elem with
    | Ok items, `Param_filter f -> Ok (`Param_filter f :: items)
    | _ -> Error "Only param-filters allowed.") (Ok []) lst
- 
+
 let prop_filter_parser : tree -> ([> prop_filter ], string) result =
   tree_lift
     (fun a c -> match find_attribute "name" a with 
@@ -482,21 +452,23 @@ let prop_filter_parser : tree -> ([> prop_filter ], string) result =
     (name_ns "prop-filter" caldav_ns >>~ extract_attributes)
     (is_not_defined_parser ||| time_range_parser ||| text_match_parser ||| param_filter_parser)
 
-let all_prop_or_comp_filters lst = 
+let split_filters lst =
   List.fold_left (fun acc elem -> match acc, elem with
-   | Ok items, `Prop_filter f -> Ok (`Prop_filter f :: items)
-   | Ok items, `Comp_filter f -> Ok (`Comp_filter f :: items)
-   | _ -> Error "Only prop- or comp-filters allowed.") (Ok []) lst
+   | Ok (pflst, []), `Prop_filter f -> Ok (`Prop_filter f :: pflst, [])
+   | Ok (pflst, cflst), `Comp_filter f -> Ok (pflst, `Comp_filter f :: cflst)
+   | _ -> Error "Only prop- or comp-filters allowed.")
+    (Ok ([], [])) lst >>| fun (pflst, cflst) ->
+  (List.rev pflst, List.rev cflst)
 
-let rec comp_filter_parser tree : (comp_filter, string) result =
-  tree_lift 
+let rec comp_filter_parser tree : ([> comp_filter ], string) result =
+  tree_lift
     (fun a c -> match find_attribute "name" a with
-      | None -> Error "Attribute \"name\" required."
-      | Some n -> match c with
-        | [] -> Ok (`Comp_filter (n, `Exists))
-        | [`Is_not_defined ] -> Ok (`Comp_filter (n, `Is_not_defined))
-        | `Timerange t :: pfs -> all_prop_or_comp_filters pfs >>| fun pfs' -> `Comp_filter (n, `Range (t, pfs'))
-        | pfs -> all_prop_or_comp_filters pfs >>| fun pfs' -> `Comp_filter (n, `Prop_or_comp pfs'))
+       | None -> Error "Attribute \"name\" required."
+       | Some n -> match c with
+         | [] -> Ok (`Comp_filter (n, `Exists))
+         | [`Is_not_defined ] -> Ok (`Comp_filter (n, `Is_not_defined))
+         | `Timerange t :: pfs -> split_filters pfs >>| fun (pflst, cflst) -> `Comp_filter (n, `Prop_or_comp_with_range (t, pflst, cflst))
+         | pfs -> split_filters pfs >>| fun (pflst, cflst) -> `Comp_filter (n, `Prop_or_comp (pflst, cflst)))
     (name_ns "comp-filter" caldav_ns >>~ extract_attributes)
     (is_not_defined_parser ||| time_range_parser ||| prop_filter_parser ||| comp_filter_parser)
     tree
