@@ -2,43 +2,55 @@ open Rresult.R.Infix
 
 module M = Map.Make(String)
 
-type namespace = string
-type name = string
-type fqname = namespace * name
-type attribute = fqname * string
+type namespace = string [@@deriving show, eq]
+type name = string [@@deriving show, eq]
+type fqname = namespace * name [@@deriving show, eq]
+type attribute = fqname * string [@@deriving show, eq]
 
 type tree =
   | Pcdata of string
   | Node of namespace * name * attribute list * tree list
+  [@@deriving show, eq]
+
+type propfind = [
+  | `All_prop of string list
+  | `Propname
+  | `Props of fqname list
+] [@@deriving show, eq]
+
+type propupdate = [
+  | `Set of attribute list * fqname * tree list
+  | `Remove of fqname
+] [@@deriving show, eq] 
 
 (* TODO this actually belongs to CalDAV! this is Webdav_xml module! *)
 type comp = [ `Allcomp | `Comp of component list ]
 and prop = [ `Allprop | `Prop of (string * bool) list ]
-and component = string * prop * comp
+and component = string * prop * comp [@@deriving show, eq]
 
-type timerange = string * string
+type timerange = string * string [@@deriving show, eq]
 
 type calendar_data =
   component option *
   [ `Expand of timerange | `Limit_recurrence_set of timerange ] option *
-  [ `Limit_freebusy_set of timerange ] option
+  [ `Limit_freebusy_set of timerange ] option [@@deriving show, eq]
 
 type report_prop = [
   | `All_props
   | `Proplist of [ `Calendar_data of calendar_data | `Prop of fqname ] list
   | `Propname
-]
+] [@@deriving show, eq]
 
 (* TODO remove tag, remove list from first element of Text_match *)
 type param_filter =
-  [ `Param_filter of string * [ `Is_not_defined | `Text_match of string list * string * bool ] list ]
+  [ `Param_filter of string * [ `Is_not_defined | `Text_match of string list * string * bool ] list ] [@@deriving show, eq]
 
 type prop_filter =
   string *
   [ `Exists
   | `Is_not_defined
   | `Range of (string * string) * param_filter list
-  | `Text of (string list * string * bool) * param_filter list ]
+  | `Text of (string list * string * bool) * param_filter list ] [@@deriving show, eq]
 
 (* TODO maybe add tag, make filter section more clear in the parse tree *)
 type comp_filter = [
@@ -46,87 +58,9 @@ type comp_filter = [
   | `Is_defined
   | `Comp_filter of timerange option * prop_filter list * component_filter list
 ]
-and component_filter = string * comp_filter
+and component_filter = string * comp_filter [@@deriving show, eq]
 
-type calendar_query = report_prop option * component_filter
-
-let pp_fqname = Fmt.(pair ~sep:(unit ":") string string)
-
-let pp_attrib = Fmt.(pair ~sep:(unit "=") pp_fqname string)
-
-let rec pp_tree fmt = function
-  | Pcdata str -> Fmt.string fmt str
-  | Node (namespace, name, attributes, children) ->
-    Fmt.pf fmt "(%s:%s (%a), (%a))"
-      namespace name
-      Fmt.(list ~sep:(unit ", ") pp_attrib) attributes
-      Fmt.(list ~sep:(unit ", ") pp_tree) children
-
-let pp_prop ppf = function
-  | `Prop props -> Fmt.pf ppf "props %a" Fmt.(list ~sep:(unit ", ") (pair ~sep:(unit ":") string bool)) props
-  | `Allprop -> Fmt.string ppf "all properties"
-
-let rec pp_comp ppf = function
-  | `Allcomp -> Fmt.string ppf "all components"
-  | `Comp comps -> Fmt.pf ppf "comps %a" Fmt.(list ~sep:(unit ", ") pp_component) comps
-and pp_component ppf (name, prop, comp) =
-  Fmt.pf ppf "component %s %a %a" name pp_prop prop pp_comp comp
-
-let pp_timerange = Fmt.(pair ~sep:(unit " until: ") string string)
-
-let pp_freebusy ppf (`Limit_freebusy_set tr) =
-  Fmt.pf ppf "limit freebusy set %a" pp_timerange tr 
-
-let pp_calendar_data ppf (comp, timerange, freebusy) =
-  let pp_timerange ppf = function
-    | `Expand tr -> Fmt.pf ppf "expand %a" pp_timerange tr 
-    | `Limit_recurrence_set tr -> Fmt.pf ppf "limit-recurrence-set %a" pp_timerange tr in
-  Fmt.pf ppf "calendar data:%a %a %a" (Fmt.option pp_component) comp (Fmt.option pp_timerange) timerange (Fmt.option pp_freebusy) freebusy
-
-let pp_proplist_element ppf = function
-  | `Calendar_data d -> pp_calendar_data ppf d
-  | `Prop n -> Fmt.pf ppf "property %a" pp_fqname n
-
-let pp_report_prop ppf = function
-  | `All_props -> Fmt.string ppf "all properties"
-  | `Propname -> Fmt.string ppf "property name"
-  | `Proplist xs -> Fmt.pf ppf "proplist (%a)" Fmt.(list ~sep:(unit ", ") pp_proplist_element) xs
-
-let pp_text_match ppf (xs, str, b) =
-  Fmt.pf ppf "text match %a %s %b"
-    Fmt.(list ~sep:(unit ",") string) xs str b
-
-let pp_param_filter ppf (`Param_filter (name, e)) =
-  let pp_param_f ppf = function
-    | `Is_not_defined -> Fmt.string ppf "not defined"
-    | `Text_match tm -> pp_text_match ppf tm
-  in
-  Fmt.pf ppf "param filter %s: %a" name Fmt.(list ~sep:(unit ",") pp_param_f) e
-
-let pp_prop_filter ppf (name, e) =
-  match e with
-  | `Exists -> Fmt.pf ppf "prop filter: %s exists" name
-  | `Is_not_defined -> Fmt.pf ppf "prop filter: %s is not defined" name
-  | `Range (tr, params) -> Fmt.pf ppf "prop filter range: %s %a %a" name
-                              pp_timerange tr Fmt.(list ~sep:(unit ",") pp_param_filter) params
-  | `Text (tm, params) -> Fmt.pf ppf "prop filter text: %a %a"
-                            pp_text_match tm Fmt.(list ~sep:(unit ",") pp_param_filter) params
-
-let rec pp_comp_filter ppf = function
-  | `Is_not_defined -> Fmt.string ppf "is not defined"
-  | `Is_defined -> Fmt.string ppf "is defined"
-  | `Comp_filter (tr_opt, props, comps) ->
-    Fmt.pf ppf "comp filter %a %a %a"
-      Fmt.(option ~none:(unit "none") pp_timerange) tr_opt
-      Fmt.(list ~sep:(unit ",") pp_prop_filter) props
-      Fmt.(list ~sep:(unit ",") pp_component_filter) comps
-and pp_component_filter : component_filter Fmt.t = fun ppf (name, f) ->
-  Fmt.pf ppf "component filter %s: %a" name pp_comp_filter f
-
-let pp_calendar_query ppf (data_opt, filter) =
-  Fmt.pf ppf "calendar query %a filter: %a"
-    Fmt.(option ~none:(unit "none") pp_report_prop) data_opt
-    pp_component_filter filter
+type calendar_query = report_prop option * component_filter [@@deriving show, eq]
 
 let node ?(ns = "") name ?(a = []) children = Node (ns, name, a, children)
 
@@ -274,11 +208,6 @@ let string_to_tree str =
     Some (Xmlm.input_tree ~el ~data input)
   with _ -> None
 
-let rec pp_prop fmt = function
-  | `Propname -> Fmt.string fmt "Propname"
-  | `All_prop xs -> Fmt.pf fmt "All prop %a" Fmt.(list ~sep:(unit ",@ ") string) xs
-  | `Props xs -> Fmt.pf fmt "Props %a" Fmt.(list ~sep:(unit ",@ ") pp_fqname) xs
-
 let rec filter_map f = function
   | []    -> []
   | x::xs ->
@@ -352,13 +281,7 @@ let non_empty = function
 
 let run p tree = p tree
 
-type res = [
-  | `All_prop of string list
-  | `Propname
-  | `Props of fqname list
-]
-
-let propfind_prop_parser : tree -> ([ res | `Include of string list ], string) result =
+let propfind_prop_parser : tree -> ([ propfind | `Include of string list ], string) result =
   ((tree_lift
       (fun _ c -> is_empty c >>| fun () -> `Propname)
       (name_ns "propname" dav_ns) any)
@@ -376,7 +299,7 @@ let parse_propfind_xml tree =
   let tree_grammar =
     tree_lift
       (fun _ c -> match c with
-         | [ #res as r ] -> Ok r
+         | [ #propfind as r ] -> Ok r
          | [ `Include _ ] -> Error "lonely include"
          | [ `All_prop _ ; `Include is ] -> Ok (`All_prop is)
          | _ -> Error "broken")
@@ -610,12 +533,6 @@ let parse_calendar_query_xml tree : (calendar_query, string) result =
   in
   Format.printf "input tree: (%a)@." pp_tree tree ;
   run tree_grammar tree
-
-let pp_propupdate fmt update =
-  List.iter (function
-      | `Set (a, k, v) -> Fmt.pf fmt "Set %a %a %a" Fmt.(list ~sep:(unit ",") pp_attrib) a pp_fqname k (Fmt.list pp_tree) v
-      | `Remove k   -> Fmt.pf fmt "Remove %a" pp_fqname k
-    ) update
 
 let proppatch_prop_parser f =
   tree_lift (fun _ c -> Ok c) (name_ns "prop" dav_ns) (any >>~ f)

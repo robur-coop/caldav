@@ -8,8 +8,8 @@ let tree xml = match Xml.string_to_tree xml with Some t -> t | None -> Alcotest.
 
 let prop =
   let module M = struct
-    type t = Xml.res
-    let pp = Xml.pp_prop
+    type t = Xml.propfind
+    let pp = Xml.pp_propfind
     let equal a b = compare a b = 0
   end in
   (module M : Alcotest.TESTABLE with type t = M.t)
@@ -256,7 +256,7 @@ let report_tests = [
 
 let propupdate =
   let module M = struct
-    type t = [ `Remove of Xml.fqname | `Set of (Xml.attribute list * Xml.fqname * Xml.tree list) ] list
+    type t = Xml.propupdate 
     let pp = Xml.pp_propupdate
     let equal a b = compare a b = 0
   end in
@@ -280,7 +280,7 @@ let proppatch () =
        </D:remove>
       </D:propertyupdate>|}
   in
-  Alcotest.(check (result propupdate str_err) __LOC__
+  Alcotest.(check (result (list propupdate) str_err) __LOC__
               (Ok [`Set ([],
                            ("http://ns.example.com/standards/z39.50/", "Authors"),
                            [Node ("http://ns.example.com/standards/z39.50/", "Author", [], [ Pcdata "Jim Whitehead"]) ;
