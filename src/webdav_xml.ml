@@ -72,11 +72,22 @@ let rec pp_comp ppf = function
 and pp_component ppf (name, prop, comp) =
   Fmt.pf ppf "component %s %a %a" name pp_prop prop pp_comp comp
 
+let pp_timerange = Fmt.(pair ~sep:(unit " until: ") string string)
+
+let pp_freebusy ppf (`Limit_freebusy_set tr) =
+  Fmt.pf ppf "limit freebusy set %a" pp_timerange tr 
+
+let pp_calendar_data ppf (comp, timerange, freebusy) =
+  let pp_timerange ppf = function
+    | `Expand tr -> Fmt.pf ppf "expand %a" pp_timerange tr 
+    | `Limit_recurrence_set tr -> Fmt.pf ppf "limit-recurrence-set %a" pp_timerange tr in
+  Fmt.pf ppf "calendar data:%a %a %a" (Fmt.option pp_component) comp (Fmt.option pp_timerange) timerange (Fmt.option pp_freebusy) freebusy
+
 let pp_proplist_element ppf = function
-  | `Calendar_data xs -> Fmt.pf ppf "calendar data %a" Fmt.(list ~sep:(unit ", ") pp_component) xs
+  | `Calendar_data d -> pp_calendar_data ppf d
   | `Prop n -> Fmt.pf ppf "property %a" pp_fqname n
 
-let pp_calendar_data ppf = function
+let pp_report_prop ppf = function
   | `All_props -> Fmt.string ppf "all properties"
   | `Propname -> Fmt.string ppf "property name"
   | `Proplist xs -> Fmt.pf ppf "proplist (%a)" Fmt.(list ~sep:(unit ", ") pp_proplist_element) xs
@@ -91,8 +102,6 @@ let pp_param_filter ppf (`Param_filter (name, e)) =
     | `Text_match tm -> pp_text_match ppf tm
   in
   Fmt.pf ppf "param filter %s: %a" name Fmt.(list ~sep:(unit ",") pp_param_f) e
-
-let pp_timerange = Fmt.(pair ~sep:(unit " until: ") string string)
 
 let pp_prop_filter ppf (name, e) =
   match e with
@@ -116,7 +125,7 @@ and pp_component_filter : component_filter Fmt.t = fun ppf (name, f) ->
 
 let pp_calendar_query ppf (data_opt, filter) =
   Fmt.pf ppf "calendar query %a filter: %a"
-    Fmt.(option ~none:(unit "none") pp_calendar_data) data_opt
+    Fmt.(option ~none:(unit "none") pp_report_prop) data_opt
     pp_component_filter filter
 
 let node ?(ns = "") name ?(a = []) children = Node (ns, name, a, children)

@@ -137,8 +137,8 @@ let parse_simple_report_query_with_calendar_data () =
   let expected =
     Ok (Some (`Proplist [
         `Prop (Xml.dav_ns, "getetag") ;
-        `Calendar_data [
-          ("VCALENDAR",
+        `Calendar_data 
+          (Some ("VCALENDAR",
            `Prop [ ("VERSION", false) ],
            `Comp [ ("VEVENT",
                     `Prop [
@@ -153,7 +153,8 @@ let parse_simple_report_query_with_calendar_data () =
                       ("EXDATE", false) ;
                       ("RECURRENCE-ID", false) ],
                     `Comp []) ;
-                   ("VTIMEZONE", `Prop [], `Comp []) ]) ] ]),
+                   ("VTIMEZONE", `Prop [], `Comp []) ])
+            , None, None) ] ),
         ("VCALENDAR", `Is_defined))
   in
   Alcotest.(check (result calendar_query string) __LOC__ expected
@@ -195,7 +196,7 @@ let parse_report_query_7_8_1 () =
   and expected =
     Ok (Some (`Proplist [
         `Prop (Xml.dav_ns, "getetag") ;
-        `Calendar_data [
+        `Calendar_data (Some 
           ("VCALENDAR",
            `Prop [ ("VERSION", false) ],
            `Comp [ ("VEVENT",
@@ -211,7 +212,7 @@ let parse_report_query_7_8_1 () =
                       ("EXDATE", false) ;
                       ("RECURRENCE-ID", false) ],
                     `Comp []) ;
-                   ("VTIMEZONE", `Prop [], `Comp []) ]) ] ]),
+                   ("VTIMEZONE", `Prop [], `Comp []) ]), None, None) ] ),
         ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ("20060104T000000Z", "20060105T000000Z"), [], [])) ])))
   in
   Alcotest.(check (result calendar_query string) __LOC__ expected
@@ -235,7 +236,10 @@ let parse_report_query_7_8_2 () =
        </C:comp-filter>
      </C:filter>
                           </C:calendar-query>|}
-  and expected = Error "hh"
+  and expected =
+    Ok (Some (`Proplist [
+        `Calendar_data (None, Some (`Limit_recurrence_set ("20060103T000000Z", "20060105T000000Z")), None) ] ),
+        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ("20060103T000000Z", "20060105T000000Z"), [], [])) ])))
   in
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
