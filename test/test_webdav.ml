@@ -246,11 +246,39 @@ let parse_report_query_7_8_2 () =
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
+let parse_report_query_7_8_3 () =
+  let xml = header ^ {|<C:calendar-query xmlns:D="DAV:"
+                     xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <C:calendar-data>
+         <C:expand start="20060103T000000Z"
+                   end="20060105T000000Z"/>
+       </C:calendar-data>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VEVENT">
+           <C:time-range start="20060103T000000Z"
+                         end="20060105T000000Z"/>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+   </C:calendar-query>|}
+  and expected =
+    Ok (Some (`Proplist [
+        `Calendar_data (None, Some (`Expand ("20060103T000000Z", "20060105T000000Z")), None) ] ),
+        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ("20060103T000000Z", "20060105T000000Z"), [], [])) ])))
+  in
+  Alcotest.(check (result calendar_query string) __LOC__ expected
+              (Xml.parse_calendar_query_xml (tree xml)))
+
+
 let report_tests = [
   "Parse simple report query", `Quick, parse_simple_report_query ;
   "Parse simple report query with calendar data", `Quick, parse_simple_report_query_with_calendar_data ;
   "Parse report query from section 7.8.1", `Quick, parse_report_query_7_8_1 ;
-  "Parse report query from section 7.8.2", `Quick, parse_report_query_7_8_2
+  "Parse report query from section 7.8.2", `Quick, parse_report_query_7_8_2 ;
+  "Parse report query from section 7.8.3", `Quick, parse_report_query_7_8_3
 ]
 
 
