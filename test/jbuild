@@ -1,0 +1,8 @@
+(executables
+ ((names (test_webdav))
+  (libraries (caldav alcotest lwt.unix))))
+
+(alias
+ ((name    runtest)
+  (deps    (test_webdav.exe))
+  (action  (run ${<}))))

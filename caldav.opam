@@ -1,0 +1,33 @@
+opam-version: "1.2"
+depends: [
+  "alcotest" {test}
+  "jbuilder" {build}
+  "ppx_deriving" {build}
+  "webmachine"
+  "lwt"
+  "ptime" 
+  "cohttp-lwt-unix"
+  "mirage-fs-mem"
+  "xmlm"
+  "tyxml"
+  "icalendar"
+  "rresult"
+]
+
+build: [
+  [ "ocaml" "pkg/pkg.ml" "build" "--pinned" "%{pinned}%" "--tests" "false" ]
+]
+build-test: [
+  [ "ocaml" "pkg/pkg.ml" "build" "--pinned" "%{pinned}%" "--tests" "true" ]
+  [ "ocaml" "pkg/pkg.ml" "test" ]
+]
+maintainer: [
+  "Stefanie Schirmer @linse"
+]
+authors: [
+  "Stefanie Schirmer @linse"
+  "Hannes Mehnert"
+]
+homepage: "https://github.com/roburio/icalendar"
+bug-reports: "https://github.com/roburio/icalendar/issues"
+dev-repo: "https://github.com/roburio/icalendar.git"

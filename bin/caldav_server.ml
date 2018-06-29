@@ -1,8 +1,9 @@
 open Cohttp_lwt_unix
 open Lwt.Infix
 
-module Fs = Webdav_fs
-module Xml = Webdav_xml
+module Fs = Caldav.Webdav_fs
+module Xml = Caldav.Webdav_xml
+module Dav = Caldav.Webdav_api
 
 (* Apply the [Webmachine.Make] functor to the Lwt_unix-based IO module
  * exported by cohttp. For added convenience, include the [Rd] module
@@ -32,7 +33,7 @@ let list_dir fs (`Dir dir) =
       let is_dir = match f_or_d with
         | `File _ -> false | `Dir _ -> true
       in
-      (Webdav_fs.to_string f_or_d, is_dir, last_modified)
+      (Fs.to_string f_or_d, is_dir, last_modified)
   in
   Fs.listdir fs (`Dir dir) >>= function
   | Error e -> assert false
@@ -48,7 +49,7 @@ let directory_as_html prefix fs (`Dir dir) =
 let directory_as_ics fs (`Dir dir) =
   let calendar_components = function
     | `Dir d ->
-      Printf.printf "calendar components of directory %s\n%!" (Webdav_fs.to_string (`Dir d)) ;
+      Printf.printf "calendar components of directory %s\n%!" (Fs.to_string (`Dir d)) ;
       Lwt.return []
       (* assert false (* CalDAV forbids nested calendars *) *)
     | `File f ->
@@ -93,7 +94,7 @@ class handler prefix fs = object(self)
     Format.printf "write_calendar, fs is: %a\n" Mirage_fs_mem.pp fs ;
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     let name = self#id rd in
-    let file = Webdav_fs.file_from_string name in
+    let file = Fs.file_from_string name in
     let content_type =
       match Cohttp.Header.get rd.Wm.Rd.req_headers "Content-Type" with
       | None -> "text/calendar"
@@ -189,7 +190,7 @@ class handler prefix fs = object(self)
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
-      Webdav_api.propfind fs ~prefix ~name tree ~depth >>= function
+      Dav.propfind fs ~prefix ~name tree ~depth >>= function
       | Ok (_, b) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Property_not_found -> Wm.continue `Property_not_found rd
       | Error (`Forbidden b) -> Wm.respond ~body:(`String (Xml.tree_to_string b)) (to_status `Forbidden) rd
@@ -201,14 +202,14 @@ class handler prefix fs = object(self)
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
-      Webdav_api.proppatch fs ~prefix ~name tree >>= function
+      Dav.proppatch fs ~prefix ~name tree >>= function
       | Ok (_, b) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
   method process_property rd =
     let replace_header h = Cohttp.Header.replace h "Content-Type" "application/xml" in
     let rd' = Wm.Rd.with_resp_headers replace_header rd in
-    Webdav_fs.from_string fs (self#id rd) >>= function
+    Fs.from_string fs (self#id rd) >>= function
     | Error _ -> Wm.respond (to_status `Bad_request) rd
     | Ok f_or_d ->
       match rd'.Wm.Rd.meth with
@@ -237,8 +238,8 @@ class handler prefix fs = object(self)
       match Xml.string_to_tree body'' with
       | None when body'' <> "" -> Wm.continue `Conflict rd
       | tree ->
-        let dir = Webdav_fs.dir_from_string (self#id rd) in
-        Webdav_api.mkcol fs dir tree >>= function
+        let dir = Fs.dir_from_string (self#id rd) in
+        Dav.mkcol fs dir tree >>= function
         | Ok _ -> Wm.continue `Created rd
         | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string t) }
         | Error `Conflict -> Wm.continue `Conflict rd
@@ -322,7 +323,7 @@ let initialise_fs fs =
       else
         let filename = String.concat "/" path in
         let props = create_properties filename "text/directory" true 0 in
-        Fs.mkdir fs (Webdav_fs.dir_from_string filename) props >|= fun _ ->
+        Fs.mkdir fs (Fs.dir_from_string filename) props >|= fun _ ->
         ()
     in
     Lwt_list.iter_s create_dir (directories @ [ segments ])

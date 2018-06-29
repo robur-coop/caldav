@@ -1,0 +1,7 @@
+(executables
+ ((names (caldav_server))
+  (libraries (caldav webmachine lwt ptime ptime.clock.os cohttp-lwt-unix rresult))))
+
+(install
+ ((section bin)
+  (files ((caldav_server.exe as caldav_server)))))

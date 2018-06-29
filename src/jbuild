@@ -1,0 +1,4 @@
+(library
+ ((name        caldav)
+  (public_name caldav)
+  (libraries (lwt ptime ptime.clock.os cohttp mirage-fs-mem xmlm tyxml icalendar rresult))))

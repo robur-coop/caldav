@@ -1,4 +1,6 @@
-module Xml = Webdav_xml
+module Xml = Caldav.Webdav_xml
+module Dav = Caldav.Webdav_api
+module Fs = Caldav.Webdav_fs
 
 let header = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
 
@@ -344,7 +346,7 @@ let mkcol_success () =
         (Cstruct.of_string content) >>= fun _ ->
       Mirage_fs_mem.connect "" >>= fun fs ->
       Mirage_fs_mem.mkdir fs "home" >>= fun _ ->
-      Webdav_api.mkcol ~now fs (Webdav_fs.dir_from_string "home/special/") (Some (tree body)) >|= fun r ->
+      Dav.mkcol ~now fs (Fs.dir_from_string "home/special/") (Some (tree body)) >|= fun r ->
       (res_fs, r))
   in
   Alcotest.(check (result state_testable err_testable) __LOC__
