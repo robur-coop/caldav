@@ -41,16 +41,15 @@ type report_prop = [
   | `Propname
 ] [@@deriving show, eq]
 
-(* TODO remove tag, remove list from first element of Text_match *)
 type param_filter =
-  [ `Param_filter of string * [ `Is_not_defined | `Text_match of string list * string * bool ] list ] [@@deriving show, eq]
+  [ `Param_filter of string * [ `Is_not_defined | `Text_match of string * string * bool ] list ] [@@deriving show, eq]
 
 type prop_filter =
   string *
   [ `Exists
   | `Is_not_defined
   | `Range of (string * string) * param_filter list
-  | `Text of (string list * string * bool) * param_filter list ] [@@deriving show, eq]
+  | `Text of (string * string * bool) * param_filter list ] [@@deriving show, eq]
 
 (* TODO maybe add tag, make filter section more clear in the parse tree *)
 type comp_filter = [
@@ -436,6 +435,7 @@ let is_not_defined_parser =
 let text_match_parser =
   tree_lift
     (fun a c ->
+      exactly_one c >>| fun str ->
       let collation =
         match find_attribute "collation" a with
         | None -> "i;ascii-casemap"
@@ -446,7 +446,7 @@ let text_match_parser =
         | Some "yes" -> true
         | _ -> false
       in
-      Ok (`Text_match (c, collation, negate))
+      `Text_match (str, collation, negate)
     )
     (name_ns "text-match" caldav_ns >>~ extract_attributes)
     extract_pcdata

@@ -272,13 +272,235 @@ let parse_report_query_7_8_3 () =
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
+let parse_report_query_7_8_4 () =
+  let xml = header ^ {|<C:calendar-query xmlns:D="DAV:"
+                 xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <C:calendar-data>
+         <C:limit-freebusy-set start="20060102T000000Z"
+                                 end="20060103T000000Z"/>
+       </C:calendar-data>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VFREEBUSY">
+           <C:time-range start="20060102T000000Z"
+                           end="20060103T000000Z"/>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+   </C:calendar-query>|}
+  and expected =
+    Ok (Some (`Proplist [
+        `Calendar_data (None, None, Some (`Limit_freebusy_set ("20060102T000000Z", "20060103T000000Z"))) ] ),
+        ("VCALENDAR", `Comp_filter (None, [], [ ("VFREEBUSY", `Comp_filter (Some ("20060102T000000Z", "20060103T000000Z"), [], [])) ])))
+  in
+  Alcotest.(check (result calendar_query string) __LOC__ expected
+              (Xml.parse_calendar_query_xml (tree xml)))
+
+let parse_report_query_7_8_5 () =
+  let xml = header ^ {|<C:calendar-query xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop xmlns:D="DAV:">
+       <D:getetag/>
+       <C:calendar-data/>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VTODO">
+           <C:comp-filter name="VALARM">
+             <C:time-range start="20060106T100000Z"
+                             end="20060107T100000Z"/>
+           </C:comp-filter>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+   </C:calendar-query>|}
+  and expected =
+    Ok (Some (`Proplist [ `Prop (Xml.dav_ns, "getetag"); `Calendar_data (None, None, None)]),
+        ("VCALENDAR", `Comp_filter (None, [], [ ("VTODO", `Comp_filter ((None, [],
+                                    [("VALARM",
+                                      `Comp_filter (((Some ("20060106T100000Z",
+                                                            "20060107T100000Z")),
+                                                     [], [])))
+                                      ])))
+                     ]))) 
+  in
+  Alcotest.(check (result calendar_query string) __LOC__ expected
+              (Xml.parse_calendar_query_xml (tree xml)))
+
+let parse_report_query_7_8_6 () =
+  let xml = header ^ {|<C:calendar-query xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop xmlns:D="DAV:">
+       <D:getetag/>
+       <C:calendar-data/>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VEVENT">
+           <C:prop-filter name="UID">
+             <C:text-match collation="i;octet"
+             >DC6C50A017428C5216A2F1CD@example.com</C:text-match>
+           </C:prop-filter>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+   </C:calendar-query>|}
+  and expected =
+    Ok (Some (`Proplist [ `Prop (Xml.dav_ns, "getetag"); `Calendar_data (None, None, None)]),
+        ("VCALENDAR", `Comp_filter (None, [], [("VEVENT",
+                     `Comp_filter ((None,
+                                    [("UID",
+                                      `Text (("DC6C50A017428C5216A2F1CD@example.com" , "i;octet", false), []))
+                                      ],
+                                    [])))
+                     ])))
+  in
+  Alcotest.(check (result calendar_query string) __LOC__ expected
+              (Xml.parse_calendar_query_xml (tree xml)))
+
+let parse_report_query_7_8_7 () =
+  let xml = header ^ {|<C:calendar-query xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop xmlns:D="DAV:">
+       <D:getetag/>
+       <C:calendar-data/>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VEVENT">
+           <C:prop-filter name="ATTENDEE">
+             <C:text-match collation="i;ascii-casemap"
+              >mailto:lisa@example.com</C:text-match>
+             <C:param-filter name="PARTSTAT">
+               <C:text-match collation="i;ascii-casemap"
+                >NEEDS-ACTION</C:text-match>
+             </C:param-filter>
+           </C:prop-filter>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+   </C:calendar-query>|}
+  and expected =
+    Ok (Some (`Proplist [ `Prop (Xml.dav_ns, "getetag"); `Calendar_data (None, None, None)]),
+        ("VCALENDAR", `Comp_filter (None, [], [("VEVENT",
+                     `Comp_filter ((None, [("ATTENDEE",
+                                      `Text ((("mailto:lisa@example.com",
+                                               "i;ascii-casemap", false),
+                                              [`Param_filter (("PARTSTAT",
+                                                               [`Text_match (
+                                                                 ("NEEDS-ACTION",
+                                                                  "i;ascii-casemap",
+                                                                  false))
+                                                                 ]))
+                                                ])))
+                                      ],
+                                    [])))
+                     ])))
+  in
+  Alcotest.(check (result calendar_query string) __LOC__ expected
+              (Xml.parse_calendar_query_xml (tree xml)))
+
+
+let parse_report_query_7_8_8 () =
+  let xml = header ^ {|<C:calendar-query xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop xmlns:D="DAV:">
+       <D:getetag/>
+       <C:calendar-data/>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VEVENT"/>
+       </C:comp-filter>
+     </C:filter>
+   </C:calendar-query>|}
+  and expected =
+    Ok (Some (`Proplist [ `Prop (Xml.dav_ns, "getetag"); `Calendar_data (None, None, None)]),
+       ("VCALENDAR", `Comp_filter ((None, [], [("VEVENT", `Is_defined)]))))
+  in
+  Alcotest.(check (result calendar_query string) __LOC__ expected
+              (Xml.parse_calendar_query_xml (tree xml)))
+
+let parse_report_query_7_8_9 () =
+  let xml = header ^ {|<C:calendar-query xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop xmlns:D="DAV:">
+       <D:getetag/>
+       <C:calendar-data/>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VTODO">
+           <C:prop-filter name="COMPLETED">
+             <C:is-not-defined/>
+           </C:prop-filter>
+           <C:prop-filter name="STATUS">
+             <C:text-match
+                negate-condition="yes">CANCELLED</C:text-match>
+           </C:prop-filter>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+   </C:calendar-query>|}
+  and expected =
+    Ok (Some (`Proplist [ `Prop (Xml.dav_ns, "getetag"); `Calendar_data (None, None, None)]),
+       ("VCALENDAR", `Comp_filter ((None, [],
+                   [("VTODO",
+                     `Comp_filter ((None,
+                                    [("COMPLETED", `Is_not_defined);
+                                      ("STATUS",
+                                       `Text ((("CANCELLED",
+                                                "i;ascii-casemap", true),
+                                               [])))
+                                      ],
+                                    [])))
+                     ]))))
+  in
+  Alcotest.(check (result calendar_query string) __LOC__ expected
+              (Xml.parse_calendar_query_xml (tree xml)))
+
+let parse_report_query_7_8_10 () =
+  let xml = header ^ {|<C:calendar-query xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop xmlns:D="DAV:">
+       <D:getetag/>
+       <C:calendar-data/>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VEVENT">
+           <C:prop-filter name="X-ABC-GUID">
+             <C:text-match>ABC</C:text-match>
+           </C:prop-filter>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+   </C:calendar-query>|}
+  and expected =
+    Ok (Some (`Proplist [ `Prop (Xml.dav_ns, "getetag"); `Calendar_data (None, None, None)]),
+       ("VCALENDAR", `Comp_filter ((None, [],
+                   [("VEVENT",
+                     `Comp_filter ((None,
+                                    [("X-ABC-GUID",
+                                      `Text ((("ABC", "i;ascii-casemap",
+                                               false),
+                                              [])))
+                                      ],
+                                    [])))
+                     ]))))
+  in
+  Alcotest.(check (result calendar_query string) __LOC__ expected
+              (Xml.parse_calendar_query_xml (tree xml)))
 
 let report_tests = [
   "Parse simple report query", `Quick, parse_simple_report_query ;
   "Parse simple report query with calendar data", `Quick, parse_simple_report_query_with_calendar_data ;
   "Parse report query from section 7.8.1", `Quick, parse_report_query_7_8_1 ;
   "Parse report query from section 7.8.2", `Quick, parse_report_query_7_8_2 ;
-  "Parse report query from section 7.8.3", `Quick, parse_report_query_7_8_3
+  "Parse report query from section 7.8.3", `Quick, parse_report_query_7_8_3 ;
+  "Parse report query from section 7.8.4", `Quick, parse_report_query_7_8_4 ;
+  "Parse report query from section 7.8.5", `Quick, parse_report_query_7_8_5 ;
+  "Parse report query from section 7.8.6", `Quick, parse_report_query_7_8_6 ;
+  "Parse report query from section 7.8.7", `Quick, parse_report_query_7_8_7 ;
+  "Parse report query from section 7.8.8", `Quick, parse_report_query_7_8_8 ;
+  "Parse report query from section 7.8.9", `Quick, parse_report_query_7_8_9 ;
+  "Parse report query from section 7.8.10", `Quick, parse_report_query_7_8_10
 ]
 
 
