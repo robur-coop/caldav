@@ -61,10 +61,12 @@ and component_filter = string * comp_filter [@@deriving show, eq]
 
 type calendar_query = report_prop option * component_filter [@@deriving show, eq]
 
-let node ?(ns = "") name ?(a = []) children = Node (ns, name, a, children)
-
 let caldav_ns = "urn:ietf:params:xml:ns:caldav"
 let dav_ns = "DAV:"
+
+let node ?(ns = "") name ?(a = []) children = Node (ns, name, a, children)
+let dav_node = node ~ns:dav_ns
+let pcdata str = Pcdata str
 
 let rec tree_fold_right f s forest = match forest with
   | (Node (_, _, _, children) as n) :: tail ->

@@ -13,6 +13,9 @@ val proppatch : state -> prefix:string -> name:Webdav_fs.file_or_dir -> tree ->
   (state * tree, [ `Bad_request ]) result Lwt.t
 
 (*
+val report : state -> prefix:string -> name:Webdav_fs.file_or_dir -> tree -> 
+  (state * tree, [`Bad_request]) result Lwt.t
+
 val delete : state -> string -> state
 
 val get : state -> string ->

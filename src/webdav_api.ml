@@ -7,6 +7,16 @@ module Xml = Webdav_xml
 type state = Webdav_fs.Fs.t
 type tree = Webdav_xml.tree
 
+let statuscode_to_string res =
+  Format.sprintf "%s %s"
+    (Cohttp.Code.string_of_version `HTTP_1_1)
+    (Cohttp.Code.string_of_status res)
+
+let propstat_node (code, props) =
+  Xml.dav_node "propstat" [
+    Xml.dav_node "prop" props ;
+    Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string code) ] ]
+
 let parse_depth = function
   | None -> Ok `Infinity
   | Some "0" -> Ok `Zero
@@ -14,44 +24,32 @@ let parse_depth = function
   | Some "infinity" -> Ok `Infinity
   | _ -> Error `Bad_request
 
-let process_properties fs prefix f_or_d f =
+let propfind_request_to_selector = function
+   | `Propname -> (fun m -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings m)])
+   | `All_prop includes -> (fun m -> [`OK, Xml.props_to_tree m]) (* TODO: finish this *)
+   | `Props ps -> (fun m -> Xml.find_props ps m)
+
+let property_selector fs prefix request f_or_d =
   Printf.printf "processing properties of %s\n" (Fs.to_string f_or_d) ;
   Fs.get_property_map fs f_or_d >|= function
   | None -> `Not_found
   | Some map ->
     Printf.printf "read map %s\n" (Xml.props_to_string map) ;
-    let propstats = f map in
-    let status res =
-      Format.sprintf "%s %s"
-        (Cohttp.Code.string_of_version `HTTP_1_1)
-        (Cohttp.Code.string_of_status res)
+    let propstats = (propfind_request_to_selector request) map in
+    let ps = List.map propstat_node propstats in
+    let selected_properties =
+      Xml.dav_node "response"
+        (Xml.dav_node "href" [ Xml.Pcdata (prefix ^ "/" ^ (Fs.to_string f_or_d)) ] :: ps)
     in
-    let ps = List.map (fun (code, props) ->
-      Xml.node "propstat" [
-        Xml.node "prop" props ;
-        Xml.node "status" [ Xml.Pcdata (status code) ] ])
-      propstats
-    in
-    let tree =
-      Xml.node "response"
-        (Xml.node "href" [ Xml.Pcdata (prefix ^ "/" ^ (Fs.to_string f_or_d)) ] :: ps)
-    in
-    `Single_response tree
+    `Single_response selected_properties
 
-let process_property_leaf fs prefix req f_or_d =
-  let f = match req with
-   | `Propname -> (fun m -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings m)])
-   | `All_prop includes -> (fun m -> [`OK, Xml.props_to_tree m]) (* TODO: finish this *)
-   | `Props ps -> (fun m -> Xml.find_props ps m)
-  in process_properties fs prefix f_or_d f
+let multistatus nodes = Xml.dav_node "multistatus" nodes
 
-let multistatus nodes = Xml.node ~ns:Xml.dav_ns "multistatus" nodes
-
-let error_xml element = Xml.node ~ns:Xml.dav_ns "error" [ Xml.node ~ns:Xml.dav_ns element [] ]
+let error_xml element = Xml.dav_node "error" [ Xml.dav_node element [] ]
 
 let propfind fs f_or_d prefix req depth =
   let process_files fs prefix dir req els =
-    Lwt_list.map_s (process_property_leaf fs prefix req) (dir :: els) >|= fun answers ->
+    Lwt_list.map_s (property_selector fs prefix req) (dir :: els) >|= fun answers ->
     (* answers : [ `Not_found | `Single_response of Tyxml.Xml.node ] list *)
     let nodes = List.fold_left (fun acc element ->
         match element with
@@ -67,11 +65,11 @@ let propfind fs f_or_d prefix req depth =
   | `Zero, _
   | _, `File _ ->
     begin
-      process_property_leaf fs prefix req f_or_d >|= function
+      property_selector fs prefix req f_or_d >|= function
       | `Not_found -> Error `Property_not_found
       | `Single_response t ->
         let outer =
-          Xml.node ~ns:Xml.dav_ns "multistatus" [ t ]
+          Xml.dav_node "multistatus" [ t ]
         in
         Ok outer
     end
@@ -93,31 +91,31 @@ let propfind state ~prefix ~name tree ~depth =
 
 let apply_updates ?(validate_key = fun _ -> Ok ()) m updates =
   let set_prop k v m = match validate_key k with
-    | Error e -> None, (k, e)
+    | Error e -> None, (e, k)
     | Ok () ->
       (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
       let map = Xml.PairMap.add k v m in
       Format.printf "map after set %a %s\n" Xml.pp_fqname k (Xml.props_to_string map) ;
-      Some map, (k, `OK)
+      Some map, (`OK, k)
   in
   (* if an update did not apply, m will be None! *)
   let apply (m, propstats) update = match m, update with
-    | None, `Set (_, k, _) -> None, (k, `Failed_dependency) :: propstats
-    | None, `Remove k   -> None, (k, `Failed_dependency) :: propstats
+    | None, `Set (_, k, _) -> None, (`Failed_dependency, k) :: propstats
+    | None, `Remove k   -> None, (`Failed_dependency, k) :: propstats
     | Some m, `Set (a, k, v) -> let (m, p) = set_prop k (a, v) m in (m, p :: propstats)
     | Some m, `Remove k ->
       let map = Xml.PairMap.remove k m in
       Format.printf "map after remove %a %s\n" Xml.pp_fqname k (Xml.props_to_string map) ;
-      Some map, (k, `OK) :: propstats
+      Some map, (`OK, k) :: propstats
   in
   match List.fold_left apply (m, []) updates with
   | Some m, xs -> Some m, xs
   | None, xs ->
     (* some update did not apply -> tree: None *)
-    let ok_to_failed (k, s) =
-      (k, match s with
+    let ok_to_failed (s, k) =
+      ((match s with
         | `OK -> `Failed_dependency
-        | x -> x)
+        | x -> x), k)
     in
     None, List.map ok_to_failed xs
 
@@ -125,16 +123,8 @@ let update_properties ?validate_key fs f_or_d updates =
   Fs.get_property_map fs f_or_d >>= fun map ->
   let map', xs = apply_updates ?validate_key map updates in
   let propstats =
-    List.map (fun ((ns, name), status) ->
-        let status_code =
-          Format.sprintf "%s %s"
-            (Cohttp.Code.string_of_version `HTTP_1_1)
-            (Cohttp.Code.string_of_status status)
-        in
-        Xml.node ~ns:Xml.dav_ns "propstat" [
-          Xml.node ~ns:Xml.dav_ns "prop" [ Xml.node ~ns name [] ] ;
-          Xml.node ~ns:Xml.dav_ns "status" [ Xml.Pcdata status_code ] ])
-      xs in
+    List.map (fun (s, (ns, n)) -> propstat_node (s, [ Xml.node ~ns n [] ])) xs 
+  in
   (match map' with
   | None -> Lwt.return (Ok ())
   | Some m -> Fs.write_property_map fs f_or_d m ) >|= function
@@ -155,8 +145,8 @@ let proppatch state ~prefix ~name body =
     | Error _      -> Error `Bad_request
     | Ok propstats ->
       let nodes =
-        Xml.node ~ns:Xml.dav_ns "response"
-          (Xml.node ~ns:Xml.dav_ns "href" [ Xml.Pcdata (prefix ^ "/" ^ (Fs.to_string name)) ] :: propstats)
+        Xml.dav_node "response"
+          (Xml.dav_node "href" [ Xml.Pcdata (prefix ^ "/" ^ (Fs.to_string name)) ] :: propstats)
       in
       let status = multistatus [ nodes ] in
       Ok (state, status)
@@ -171,18 +161,9 @@ let body_to_props body default_props =
     match apply_updates (Some default_props) set_props with
     | None, errs ->
       let propstats =
-        List.map (fun ((ns, name), status) ->
-            let status_code =
-              Format.sprintf "%s %s"
-                (Cohttp.Code.string_of_version `HTTP_1_1)
-                (Cohttp.Code.string_of_status status)
-            in
-            Xml.node ~ns:Xml.dav_ns "propstat" [
-              Xml.node ~ns:Xml.dav_ns "prop" [ Xml.node ~ns name [] ] ;
-              Xml.node ~ns:Xml.dav_ns "status" [ Xml.Pcdata status_code ] ])
-          errs
+        List.map (fun (s, (ns, n)) -> propstat_node (s, [ Xml.node ~ns n [] ])) errs 
       in
-      let xml = Xml.node ~ns:Xml.dav_ns "mkcol-response" propstats in
+      let xml = Xml.dav_node "mkcol-response" propstats in
       Printf.printf "forbidden from body_to_props!\n" ;
       Error (`Forbidden xml)
     | Some map, _ -> Ok map
@@ -208,3 +189,41 @@ let mkcol ?(now = Ptime_clock.now ()) state (`Dir dir) body =
     | Ok map -> Fs.mkdir state (`Dir dir) map >|= function
       | Error _ -> Error `Conflict
       | Ok () -> Ok state
+
+let check_in_bounds p s e = true
+let apply_to_params pfs p = true
+let text_matches s c n p = true
+
+let apply_to_props props = function
+  | (property_name, `Exists) -> List.exists (fun p -> String.equal (Icalendar.Writer.calprop_to_ics_key p) property_name) props
+  | (property_name, `Is_not_defined) -> List.for_all (fun p -> not (String.equal (Icalendar.Writer.calprop_to_ics_key p) property_name)) props
+  | (property_name, `Range ((s, e), pfs)) -> 
+    let property = List.find_opt (fun p -> String.equal (Icalendar.Writer.calprop_to_ics_key p) property_name) props in
+    (match property with
+    | None -> false
+    | Some p -> check_in_bounds p s e && apply_to_params pfs p)
+  | (property_name, `Text ((substring, collate, negate), pfs)) -> 
+    let property = List.find_opt (fun p -> String.equal (Icalendar.Writer.calprop_to_ics_key p) property_name) props in
+    (match property with
+    | None -> false
+    | Some p -> text_matches substring collate negate p && apply_to_params pfs p)
+
+let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) data = match query, data with
+  | (None, ("VCALENDAR", `Is_defined)), data -> Some(data)
+  | (None, ("VCALENDAR", `Is_not_defined)), data -> None
+  | (None, ( _ , `Is_defined)), data -> None
+  | (None, ( _ , `Is_not_defined)), data -> Some(data)
+    (*`Comp_filter of timerange option * prop_filter list * component_filter list*) 
+  | (None, ("VCALENDAR", `Comp_filter (tr_opt, pfs, cfs))), (props, comps) -> if List.for_all (apply_to_props props) pfs then Some (props, comps) else None (* TODO handle tr_opt *)
+
+let report state ~prefix ~name req =
+  let (>>==) = Fs.(>>==) in
+  match Xml.parse_calendar_query_xml req with
+  | Error e -> Lwt.return (Ok ())
+  | Ok calendar_query -> match name with
+     | `File f -> Fs.read state name >>== fun (data, map) ->
+        match Icalendar.parse (Cstruct.to_string data) with
+        | Ok ics -> let _ = apply_to_vcalendar calendar_query ics in
+          Lwt.return (Ok ())
+(*     | `Dir d -> Fs.listdir state name >>= fun files ->
+       Lwt_list.map (fun f -> Fs.read state f) files  *)
