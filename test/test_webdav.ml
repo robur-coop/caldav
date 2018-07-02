@@ -513,11 +513,15 @@ let appendix_b_data =
       Ptime.to_rfc3339 ts
     in
     Mirage_fs_mem.connect "" >>= fun res_fs ->
+    let props name = Xml.create_properties true now 0 name in
+    Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
+    Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
     Lwt_list.iter_s (fun (fn, etag, data) ->
-        let props = Xml.create_properties ~content_type:"text/calendar" false now
-            (String.length data) fn
+        let props = Xml.create_properties ~content_type:"text/calendar" false
+            now (String.length data) ("bernard/work/" ^ fn)
         in
-        Fs.write res_fs (`File [ fn ]) (Cstruct.of_string data) props >|= fun _ ->
+        Fs.write res_fs (`File [ "bernard" ; "work" ; fn ])
+          (Cstruct.of_string data) props >|= fun _ ->
         ())
       Appendix_b.all >|= fun () ->
     res_fs)
@@ -634,6 +638,8 @@ END:VCALENDAR
    </D:multistatus>
 |}
   in
+  Format.printf "file system is %a\n"
+    Mirage_fs_mem.pp appendix_b_data ;
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
               (report (`Dir [ "bernard" ; "work" ]) (tree xml)))
@@ -740,6 +746,8 @@ let mkcol_success () =
       let content = {_|<?xml version="1.0" encoding="utf-8" ?>
 <A:prop xmlns:A="DAV:"><A:resourcetype><A:collection></A:collection><B:special-resource xmlns:B="http://example.com/ns/"></B:special-resource></A:resourcetype><A:getlastmodified>1970-01-02T00:00:00-00:00</A:getlastmodified><A:getcontenttype>text/directory</A:getcontenttype><A:getcontentlength>0</A:getcontentlength><A:getcontentlanguage>en</A:getcontentlanguage><A:displayname>Special Resource</A:displayname><A:creationdate>1970-01-02T00:00:00-00:00</A:creationdate></A:prop>|_}
       in
+      Mirage_fs_mem.mkdir res_fs "home" >>= fun _ ->
+      Mirage_fs_mem.mkdir res_fs "home/special" >>= fun _ ->
       Mirage_fs_mem.write res_fs "home/special/.prop.xml" 0
         (Cstruct.of_string content) >>= fun _ ->
       Mirage_fs_mem.connect "" >>= fun fs ->

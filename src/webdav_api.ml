@@ -242,7 +242,9 @@ let report state ~prefix ~name req =
   match Xml.parse_calendar_query_xml req with
   | Error e -> Lwt.return (Error `Bad_request)
   | Ok calendar_query -> match name with
-    | `Dir d -> Lwt.return (Error `Bad_request)
+    | `Dir d ->
+      Printf.printf "requested a directory\n" ;
+      Lwt.return (Error `Bad_request)
     | `File f ->
       Fs.read state (`File f) >>= function
       | Error _ -> Lwt.return (Error `Bad_request)
