@@ -14,7 +14,7 @@ module Wm = struct
   include Webmachine.Make(Cohttp_lwt_unix__Io)
 end
 
-let to_status x = Cohttp.Code.code_of_status x
+let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 
 let create_properties name content_type is_dir length =
   Printf.printf "Creating properties!!! %s \n" name;
@@ -91,30 +91,25 @@ class handler prefix fs = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
 
   method private write_calendar rd =
-    Format.printf "write_calendar, fs is: %a\n" Mirage_fs_mem.pp fs ;
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     let name = self#id rd in
-    let file = Fs.file_from_string name in
-    let parent = Fs.parent (file :> Fs.file_or_dir) in
-    Fs.dir_exists fs parent >>= function
-    | false ->
-      Printf.printf "parent directory of %s does not exist\n" name ;
+    let content_type =
+      match Cohttp.Header.get rd.Wm.Rd.req_headers "Content-Type" with
+      | None -> "text/calendar"
+      | Some x -> x
+    in
+    match Icalendar.parse body with
+    | Error e ->
+      Printf.printf "error %s while parsing calendar\n" e ;
+      Format.printf "write_calendar end, fs is now: %a\n" Mirage_fs_mem.pp fs ;
       Wm.continue false rd
-    | true ->
-      let content_type =
-        match Cohttp.Header.get rd.Wm.Rd.req_headers "Content-Type" with
-        | None -> "text/calendar"
-        | Some x -> x
-      in
-      match Icalendar.parse body with
+    | Ok cal ->
+      let ics = Icalendar.to_ics cal in
+      let file = Fs.file_from_string name in
+      Dav.write fs ~name:file ~content_type ics >>= function
       | Error e ->
-        Printf.printf "error %s while parsing calendar\n" e ;
-        Format.printf "write_calendar end, fs is now: %a\n" Mirage_fs_mem.pp fs ;
-        Wm.continue false rd
-      | Ok cal ->
-        let ics = Icalendar.to_ics cal in
-        let props = create_properties name content_type false (String.length ics) in
-        Fs.write fs file (Cstruct.of_string ics) props >>= fun _ ->
+        Wm.respond (to_status e) rd
+      | Ok _ ->
         let etag = etag ics in
         let rd = Wm.Rd.with_resp_headers (fun header ->
             let header' = Cohttp.Header.remove header "ETag" in

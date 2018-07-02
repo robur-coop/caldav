@@ -7,6 +7,25 @@ module Xml = Webdav_xml
 type state = Webdav_fs.Fs.t
 type tree = Webdav_xml.tree
 
+let write state ~name ~content_type data =
+  match name with
+  | `Dir _ -> Lwt.return (Error `Method_not_allowed)
+  | `File file ->
+    let parent = Fs.parent (`File file) in
+    Fs.dir_exists state parent >>= function
+    | false ->
+      Printf.printf "parent directory of %s does not exist\n" (Fs.to_string (`File file)) ;
+      Lwt.return (Error `Conflict)
+    | true ->
+      let props =
+        Xml.create_properties ~content_type false
+          (Ptime.to_rfc3339 (Ptime_clock.now ()))
+          (String.length data) (Fs.to_string (`File file))
+      in
+      Fs.write state (`File file) (Cstruct.of_string data) props >|= function
+      | Error e -> Error `Internal_server_error
+      | Ok () -> Ok state
+
 let statuscode_to_string res =
   Format.sprintf "%s %s"
     (Cohttp.Code.string_of_version `HTTP_1_1)
