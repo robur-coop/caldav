@@ -162,8 +162,7 @@ let parse_simple_report_query_with_calendar_data () =
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
-let parse_report_query_7_8_1 () =
-  let xml = header ^ {|<C:calendar-query xmlns:D="DAV:"
+let report_7_8_1 = header ^ {|<C:calendar-query xmlns:D="DAV:"
                  xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:prop>
        <D:getetag/>
@@ -195,6 +194,9 @@ let parse_report_query_7_8_1 () =
        </C:comp-filter>
      </C:filter>
                           </C:calendar-query>|}
+
+let parse_report_query_7_8_1 () =
+  let xml = report_7_8_1
   and expected =
     Ok (Some (`Proplist [
         `Prop (Xml.dav_ns, "getetag") ;
@@ -488,7 +490,7 @@ let parse_report_query_7_8_10 () =
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
-let report_tests = [
+let report_parse_tests = [
   "Parse simple report query", `Quick, parse_simple_report_query ;
   "Parse simple report query with calendar data", `Quick, parse_simple_report_query_with_calendar_data ;
   "Parse report query from section 7.8.1", `Quick, parse_report_query_7_8_1 ;
@@ -501,6 +503,152 @@ let report_tests = [
   "Parse report query from section 7.8.8", `Quick, parse_report_query_7_8_8 ;
   "Parse report query from section 7.8.9", `Quick, parse_report_query_7_8_9 ;
   "Parse report query from section 7.8.10", `Quick, parse_report_query_7_8_10
+]
+
+let appendix_b_data =
+  let open Lwt.Infix in
+  Lwt_main.run (
+    let now =
+      let ts = Ptime.v (1, 0L) in
+      Ptime.to_rfc3339 ts
+    in
+    Mirage_fs_mem.connect "" >>= fun res_fs ->
+    Lwt_list.iter_s (fun (fn, etag, data) ->
+        let props = Xml.create_properties ~content_type:"text/calendar" false now
+            (String.length data) fn
+        in
+        Fs.write res_fs (`File [ fn ]) (Cstruct.of_string data) props >|= fun _ ->
+        ())
+      Appendix_b.all >|= fun () ->
+    res_fs)
+
+let t_tree =
+  let module M = struct
+    type t = Xml.tree
+    let pp = Xml.pp_tree
+    let equal = Xml.equal_tree
+  end in
+  (module M : Alcotest.TESTABLE with type t = M.t)
+
+let report name request =
+  let open Lwt.Infix in
+  Lwt_main.run (
+    Dav.report appendix_b_data ~prefix:"" ~name request >|= function
+    | Ok t -> Ok t
+    | Error _ -> Error "failed")
+
+let test_report_7_8_1 () =
+  let xml = report_7_8_1
+  and expected = header ^ {|<D:multistatus xmlns:D="DAV:"
+              xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd2.ics</D:href>
+       <D:propstat>
+         <D:prop>
+           <D:getetag>"fffff-abcd2"</D:getetag>
+           <C:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VTIMEZONE
+LAST-MODIFIED:20040110T032845Z
+TZID:US/Eastern
+BEGIN:DAYLIGHT
+DTSTART:20000404T020000
+RRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=4
+TZNAME:EDT
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0400
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20001026T020000
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10
+TZNAME:EST
+TZOFFSETFROM:-0400
+TZOFFSETTO:-0500
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+DTSTART;TZID=US/Eastern:20060102T120000
+DURATION:PT1H
+RRULE:FREQ=DAILY;COUNT=5
+SUMMARY:Event #2
+UID:00959BC664CA650E933C892C@example.com
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;TZID=US/Eastern:20060104T140000
+DURATION:PT1H
+RECURRENCE-ID;TZID=US/Eastern:20060104T120000
+SUMMARY:Event #2 bis
+UID:00959BC664CA650E933C892C@example.com
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;TZID=US/Eastern:20060106T140000
+DURATION:PT1H
+RECURRENCE-ID;TZID=US/Eastern:20060106T120000
+SUMMARY:Event #2 bis bis
+UID:00959BC664CA650E933C892C@example.com
+END:VEVENT
+END:VCALENDAR
+</C:calendar-data>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>http://cal.example.com/bernard/work/abcd3.ics</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:getetag>"fffff-abcd3"</D:getetag>
+        <C:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VTIMEZONE
+LAST-MODIFIED:20040110T032845Z
+TZID:US/Eastern
+BEGIN:DAYLIGHT
+DTSTART:20000404T020000
+RRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=4
+TZNAME:EDT
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0400
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20001026T020000
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10
+TZNAME:EST
+TZOFFSETFROM:-0400
+TZOFFSETTO:-0500
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+DTSTART;TZID=US/Eastern:20060104T100000
+DURATION:PT1H
+SUMMARY:Event #3
+UID:DC6C50A017428C5216A2F1CD@example.com
+END:VEVENT
+END:VCALENDAR
+   </C:calendar-data>
+         </D:prop>
+         <D:status>HTTP/1.1 200 OK</D:status>
+       </D:propstat>
+     </D:response>
+   </D:multistatus>
+|}
+  in
+  Alcotest.(check (result t_tree string) __LOC__
+              (Ok (tree expected))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml)))
+
+let report_tests = [
+  "Report from section 7.8.1", `Quick, test_report_7_8_1 ;
+(*  "Parse report query from section 7.8.2", `Quick, parse_report_query_7_8_2 ;
+  "Parse report query from section 7.8.3", `Quick, parse_report_query_7_8_3 ;
+  "Parse report query from section 7.8.4", `Quick, parse_report_query_7_8_4 ;
+  "Parse report query from section 7.8.5", `Quick, parse_report_query_7_8_5 ;
+  "Parse report query from section 7.8.6", `Quick, parse_report_query_7_8_6 ;
+  "Parse report query from section 7.8.7", `Quick, parse_report_query_7_8_7 ;
+  "Parse report query from section 7.8.8", `Quick, parse_report_query_7_8_8 ;
+  "Parse report query from section 7.8.9", `Quick, parse_report_query_7_8_9 ;
+    "Parse report query from section 7.8.10", `Quick, parse_report_query_7_8_10 *)
 ]
 
 
@@ -609,6 +757,7 @@ let webdav_api_tests = [
 let tests = [
   "Read propfind", parse_propfind_xml_tests ;
   "Read propertyupdate", parse_propupdate_xml_tests ;
+  "Report parse tests", report_parse_tests ;
   "Report tests", report_tests ;
   "Webdav API", webdav_api_tests
 ]

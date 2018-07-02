@@ -86,7 +86,7 @@ let propfind state ~prefix ~name tree ~depth =
     | Error _ -> Lwt.return (Error `Property_not_found)
     | Ok req ->
       propfind state name prefix req depth >|= function
-      | Ok body -> Ok (state, body)
+      | Ok body -> Ok body
       | Error e -> Error e
 
 let apply_updates ?(validate_key = fun _ -> Ok ()) m updates =
@@ -224,13 +224,16 @@ let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) da
     else None (* TODO handle tr_opt *)
 
 let report state ~prefix ~name req =
-  let (>>==) = Fs.(>>==) in
   match Xml.parse_calendar_query_xml req with
-  | Error e -> Lwt.return (Ok ())
+  | Error e -> Lwt.return (Error `Bad_request)
   | Ok calendar_query -> match name with
-     | `File f -> Fs.read state name >>== fun (data, map) ->
+    | `Dir d -> Lwt.return (Error `Bad_request)
+    | `File f ->
+      Fs.read state (`File f) >>= function
+      | Error _ -> Lwt.return (Error `Bad_request)
+      | Ok (data, map) ->
         match Icalendar.parse (Cstruct.to_string data) with
         | Ok ics -> let _ = apply_to_vcalendar calendar_query ics in
-          Lwt.return (Ok ())
+          Lwt.return (Ok req)
 (*     | `Dir d -> Fs.listdir state name >>= fun files ->
        Lwt_list.map (fun f -> Fs.read state f) files  *)

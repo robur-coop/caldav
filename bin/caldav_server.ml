@@ -191,7 +191,7 @@ class handler prefix fs = object(self)
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
       Dav.propfind fs ~prefix ~name tree ~depth >>= function
-      | Ok (_, b) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
+      | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Property_not_found -> Wm.continue `Property_not_found rd
       | Error (`Forbidden b) -> Wm.respond ~body:(`String (Xml.tree_to_string b)) (to_status `Forbidden) rd
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
