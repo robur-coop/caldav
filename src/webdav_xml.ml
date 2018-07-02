@@ -41,20 +41,25 @@ type report_prop = [
   | `Propname
 ] [@@deriving show, eq]
 
-type param_filter =
-  [ `Param_filter of string * [ `Is_not_defined | `Text_match of string * string * bool ] list ] [@@deriving show, eq]
+type param_filter = [
+    `Param_filter of
+      string *
+      [ `Is_defined (* represents empty filter in RFC *)
+      | `Is_not_defined
+      | `Text_match of string * string * bool ]
+] [@@deriving show, eq]
 
 type prop_filter =
   string *
-  [ `Exists
+  [ `Is_defined (* represents empty filter in RFC *)
   | `Is_not_defined
   | `Range of (string * string) * param_filter list
   | `Text of (string * string * bool) * param_filter list ] [@@deriving show, eq]
 
 (* TODO maybe add tag, make filter section more clear in the parse tree *)
 type comp_filter = [
+  | `Is_defined (* represents empty filter in RFC *)
   | `Is_not_defined
-  | `Is_defined
   | `Comp_filter of timerange option * prop_filter list * component_filter list
 ]
 and component_filter = string * comp_filter [@@deriving show, eq]
@@ -457,7 +462,11 @@ let param_filter_parser : tree -> ([> param_filter ], string) result =
   tree_lift
     (fun a c -> match find_attribute "name" a with
        | None -> Error "Attribute \"name\" required"
-       | Some n -> Ok (`Param_filter (n, c)))
+       | Some n -> match c with
+         | [] -> Ok (`Param_filter (n, `Is_defined))
+         | [ `Is_not_defined ] -> Ok (`Param_filter (n, `Is_not_defined))
+         | [ `Text_match t ] -> Ok (`Param_filter (n, `Text_match t))
+         | _ -> Error "expected zero or one elements in param-filter")
     (name_ns "param-filter" caldav_ns >>~ extract_attributes)
     (is_not_defined_parser ||| text_match_parser)
 
@@ -474,7 +483,7 @@ let prop_filter_parser : tree -> (prop_filter, string) result =
     (fun a c -> match find_attribute "name" a with
       | None -> Error "Attribute \"name\" required."
       | Some n -> match c with
-        | [] -> Ok (n, `Exists)
+        | [] -> Ok (n, `Is_defined)
         | [ `Is_not_defined ] -> Ok (n, `Is_not_defined)
         | `Timerange t :: pfs -> all_param_filters pfs >>| fun pfs' -> (n, `Range (t, pfs'))
         | `Text_match t :: pfs -> all_param_filters pfs >>| fun pfs' -> (n, `Text (t, pfs'))

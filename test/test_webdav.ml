@@ -386,11 +386,11 @@ let parse_report_query_7_8_7 () =
                                       `Text ((("mailto:lisa@example.com",
                                                "i;ascii-casemap", false),
                                               [`Param_filter (("PARTSTAT",
-                                                               [`Text_match (
+                                                               `Text_match (
                                                                  ("NEEDS-ACTION",
                                                                   "i;ascii-casemap",
                                                                   false))
-                                                                 ]))
+                                                                 ))
                                                 ])))
                                       ],
                                     [])))

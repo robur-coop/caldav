@@ -194,16 +194,20 @@ let check_in_bounds p s e = true
 let apply_to_params pfs p = true
 let text_matches s c n p = true
 
-let apply_to_props props = function
-  | (property_name, `Exists) -> List.exists (fun p -> String.equal (Icalendar.Writer.calprop_to_ics_key p) property_name) props
-  | (property_name, `Is_not_defined) -> List.for_all (fun p -> not (String.equal (Icalendar.Writer.calprop_to_ics_key p) property_name)) props
-  | (property_name, `Range ((s, e), pfs)) -> 
-    let property = List.find_opt (fun p -> String.equal (Icalendar.Writer.calprop_to_ics_key p) property_name) props in
+let apply_to_props props =
+  let key p = Icalendar.Writer.calprop_to_ics_key p in
+  function
+  | (name, `Is_defined) ->
+    List.exists (String.equal name) (List.map key props)
+  | (name, `Is_not_defined) ->
+    not (List.exists (String.equal name) (List.map key props))
+  | (name, `Range ((s, e), pfs)) ->
+    let property = List.find_opt (fun p -> String.equal name (key p)) props in
     (match property with
     | None -> false
     | Some p -> check_in_bounds p s e && apply_to_params pfs p)
-  | (property_name, `Text ((substring, collate, negate), pfs)) -> 
-    let property = List.find_opt (fun p -> String.equal (Icalendar.Writer.calprop_to_ics_key p) property_name) props in
+  | (name, `Text ((substring, collate, negate), pfs)) ->
+    let property = List.find_opt (fun p -> String.equal name (key p)) props in
     (match property with
     | None -> false
     | Some p -> text_matches substring collate negate p && apply_to_params pfs p)
@@ -214,7 +218,10 @@ let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) da
   | (None, ( _ , `Is_defined)), data -> None
   | (None, ( _ , `Is_not_defined)), data -> Some(data)
     (*`Comp_filter of timerange option * prop_filter list * component_filter list*) 
-  | (None, ("VCALENDAR", `Comp_filter (tr_opt, pfs, cfs))), (props, comps) -> if List.for_all (apply_to_props props) pfs then Some (props, comps) else None (* TODO handle tr_opt *)
+  | (None, ("VCALENDAR", `Comp_filter (tr_opt, pfs, cfs))), (props, comps) ->
+    if List.for_all (apply_to_props props) pfs
+    then Some (props, comps)
+    else None (* TODO handle tr_opt *)
 
 let report state ~prefix ~name req =
   let (>>==) = Fs.(>>==) in
