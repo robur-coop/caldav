@@ -95,27 +95,33 @@ class handler prefix fs = object(self)
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     let name = self#id rd in
     let file = Fs.file_from_string name in
-    let content_type =
-      match Cohttp.Header.get rd.Wm.Rd.req_headers "Content-Type" with
-      | None -> "text/calendar"
-      | Some x -> x
-    in
-    match Icalendar.parse body with
-    | Error e ->
-      Printf.printf "error %s while parsing calendar\n" e ;
-      Format.printf "write_calendar end, fs is now: %a\n" Mirage_fs_mem.pp fs ;
+    let parent = Fs.parent (file :> Fs.file_or_dir) in
+    Fs.dir_exists fs parent >>= function
+    | false ->
+      Printf.printf "parent directory of %s does not exist\n" name ;
       Wm.continue false rd
-    | Ok cal ->
-      let ics = Icalendar.to_ics cal in
-      let props = create_properties name content_type false (String.length ics) in
-      Fs.write fs file (Cstruct.of_string ics) props >>= fun _ ->
-      let etag = etag ics in
-      let rd = Wm.Rd.with_resp_headers (fun header ->
-          let header' = Cohttp.Header.remove header "ETag" in
-          Cohttp.Header.add header' "Etag" etag) rd
+    | true ->
+      let content_type =
+        match Cohttp.Header.get rd.Wm.Rd.req_headers "Content-Type" with
+        | None -> "text/calendar"
+        | Some x -> x
       in
-      Format.printf "write_calendar end, fs is now: %a\n" Mirage_fs_mem.pp fs ;
-      Wm.continue true rd
+      match Icalendar.parse body with
+      | Error e ->
+        Printf.printf "error %s while parsing calendar\n" e ;
+        Format.printf "write_calendar end, fs is now: %a\n" Mirage_fs_mem.pp fs ;
+        Wm.continue false rd
+      | Ok cal ->
+        let ics = Icalendar.to_ics cal in
+        let props = create_properties name content_type false (String.length ics) in
+        Fs.write fs file (Cstruct.of_string ics) props >>= fun _ ->
+        let etag = etag ics in
+        let rd = Wm.Rd.with_resp_headers (fun header ->
+            let header' = Cohttp.Header.remove header "ETag" in
+            Cohttp.Header.add header' "Etag" etag) rd
+        in
+        Format.printf "write_calendar end, fs is now: %a\n" Mirage_fs_mem.pp fs ;
+        Wm.continue true rd
 
   method private read_calendar rd =
     let file = self#id rd in
@@ -311,27 +317,17 @@ class handler prefix fs = object(self)
 end
 
 let initialise_fs fs =
-  let create_dir_rec fs name =
-    let segments = Astring.String.cuts ~sep:"/" name in
-    let rec prefixes = function
-      | [] -> []
-      | h :: t -> [] :: (List.map (fun a -> h :: a) (prefixes t)) in
-    let directories = prefixes segments in
-    let create_dir path =
-      if path = [] then
-        Lwt.return_unit
-      else
-        let filename = String.concat "/" path in
-        let props = create_properties filename "text/directory" true 0 in
-        Fs.mkdir fs (Fs.dir_from_string filename) props >|= fun _ ->
-        ()
-    in
-    Lwt_list.iter_s create_dir (directories @ [ segments ])
-  in
   let props = create_properties "/" "text/directory" true 0 in
   Fs.write_property_map fs (`Dir []) props >>= fun _ ->
-  create_dir_rec fs "users" >>= fun _ ->
-  create_dir_rec fs "__uids__/10000000-0000-0000-0000-000000000001/calendar/" >>= fun _ ->
+  let create_dir name =
+    let props = create_properties name "text/directory" true 0 in
+    Fs.mkdir fs (Fs.dir_from_string name) props
+  in
+  create_dir "users" >>= fun _ ->
+  create_dir "__uids__" >>= fun _ ->
+  create_dir "__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
+  create_dir "__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
+  create_dir "__uids__/10000000-0000-0000-0000-000000000001/tasks" >>= fun _ ->
   Format.printf "FS is:\n%a\n" Mirage_fs_mem.pp fs ;
   Lwt.return_unit
 

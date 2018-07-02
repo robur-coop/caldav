@@ -40,6 +40,16 @@ let to_string =
   | `File data -> a data
   | `Dir data -> a data ^ "/"
 
+let parent f_or_d =
+  let parent p =
+    match List.rev p with
+    | _ :: tl -> `Dir (List.rev tl)
+    | [] -> `Dir []
+  in
+  match f_or_d with
+  | `Dir d -> parent d
+  | `File f -> parent f
+
 let propfilename =
   let ext = ".prop.xml" in
   function
@@ -57,10 +67,15 @@ let get_properties fs f_or_d =
 
 let get_property_map fs f_or_d =
   get_properties fs f_or_d >|= function
-  | Error _ -> None
+  | Error e ->
+    Format.printf "error while getting properties %a\n%!" Fs.pp_error e ;
+    None
   | Ok data ->
-    match Webdav_xml.string_to_tree Cstruct.(to_string @@ concat data) with
-    | None -> None
+    let str = Cstruct.(to_string @@ concat data) in
+    match Webdav_xml.string_to_tree str with
+    | None ->
+      Printf.printf "couldn't convert %s to xml tree\n%!" str ;
+      None
     | Some t -> Some (Webdav_xml.prop_tree_to_map t)
 
 (* TODO: check call sites, used to do:
@@ -94,6 +109,11 @@ let exists fs str =
   Fs.stat fs str >|= function
   | Ok _ -> true
   | Error _ -> false
+
+let dir_exists fs (`Dir dir) =
+  Fs.stat fs (to_string (`Dir dir)) >|= function
+  | Ok s when s.Mirage_fs.directory -> true
+  | _ -> false
 
 let listdir fs (`Dir dir) =
   let dir_string = to_string (`Dir dir) in

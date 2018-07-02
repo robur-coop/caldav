@@ -171,12 +171,8 @@ let body_to_props body default_props =
 (* assumption: name is a relative path! *)
 let mkcol ?(now = Ptime_clock.now ()) state (`Dir dir) body =
   (* TODO: move to caller *)
-  let parent =
-    match List.rev dir with
-    | _ :: tl -> `Dir (List.rev tl)
-    | [] -> `Dir []
-  in
-  Fs.exists state (Fs.to_string parent) >>= function
+  let parent = Fs.parent (`Dir dir) in
+  Fs.dir_exists state parent >>= function
   | false -> Lwt.return (Error `Conflict)
   | true ->
     let default_props =
