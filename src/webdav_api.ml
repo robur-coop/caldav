@@ -86,11 +86,7 @@ let propfind fs f_or_d prefix req depth =
     begin
       property_selector fs prefix req f_or_d >|= function
       | `Not_found -> Error `Property_not_found
-      | `Single_response t ->
-        let outer =
-          Xml.dav_node "multistatus" [ t ]
-        in
-        Ok outer
+      | `Single_response t -> Ok (multistatus [t])
     end
   | `One, `Dir data ->
     Fs.listdir fs (`Dir data) >>= function
@@ -227,30 +223,124 @@ let apply_to_props props =
     | None -> false
     | Some p -> text_matches substring collate negate p && apply_to_params pfs p)
 
-let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) data = match query, data with
-  | (None, ("VCALENDAR", `Is_defined)), data -> Some(data)
-  | (None, ("VCALENDAR", `Is_not_defined)), data -> None
-  | (None, ( _ , `Is_defined)), data -> None
-  | (None, ( _ , `Is_not_defined)), data -> Some(data)
+(*
+type comp = [ `Allcomp | `Comp of component list ]
+and prop = [ `Allprop | `Prop of (string * bool) list ]
+and component = string * prop * comp [@@deriving show, eq]
+
+type timerange = string * string [@@deriving show, eq]
+
+type calendar_data =
+  component option *
+  [ `Expand of timerange | `Limit_recurrence_set of timerange ] option *
+  [ `Limit_freebusy_set of timerange ] option [@@deriving show, eq]
+
+type report_prop = [
+  | `All_props
+  | `Proplist of [ `Calendar_data of calendar_data | `Prop of fqname ] list
+  | `Propname
+] [@@deriving show, eq]
+*)
+
+let propfilter to_key req_data props =
+  match req_data with
+  | `Allprop -> props
+  | `Prop ps -> List.filter (fun p -> List.exists (fun (key, _) -> String.equal (to_key p) key) ps) props
+
+
+let event_propfilter = propfilter Icalendar.Writer.eventprop_to_ics_key
+let todo_propfilter = propfilter Icalendar.Writer.todoprop_to_ics_key
+let freebusy_propfilter = propfilter Icalendar.Writer.freebusyprop_to_ics_key
+let timezone_propfilter = propfilter Icalendar.Writer.timezoneprop_to_ics_key
+let calprop_propfilter = propfilter Icalendar.Writer.calprop_to_ics_key
+
+let alarm_compfilter (comp: Xml.comp) alarms =
+  match comp with
+  | `Allcomp -> alarms
+  | `Comp [("VALARM", _, _)] -> alarms
+  | _ -> []
+(*
+  match alarms with
+  | `Audio a -> Some(`Audio (audio_propfilter prop a))
+  | `Display d -> Some(`Display (display_propfilter prop d))
+  | `Email e -> Some(`Email (email_propfilter prop e))
+*)
+
+let select_component component ((name, prop, comp): Xml.component) =
+  match component, name with
+  | `Event (props, alarms), "VEVENT" -> Some(`Event (event_propfilter prop props, alarm_compfilter comp alarms))
+  | `Todo (props, alarms), "VTODO" -> Some(`Todo (todo_propfilter prop props, alarm_compfilter comp alarms))
+  | `Freebusy props, "VFREEBUSY" -> Some(`Freebusy (freebusy_propfilter prop props))
+  | `Timezone props, "VTIMEZONE" -> Some(`Timezone (timezone_propfilter prop props))
+  | _ -> None
+
+let select_calendar_data (calprop, comps) (requested_data: Xml.calendar_data) =
+  let (comp, range, freebusy) = requested_data in
+  match comp with
+  | None -> Some (calprop, comps)
+  | Some ("VCALENDAR", prop, comp) -> 
+    let comps' = match comp with
+    | `Allcomp -> comps
+    | `Comp cs -> 
+       let select_and_filter c acc' comp = match select_component c comp with None -> acc' | Some c -> c :: acc' in
+       List.fold_left (fun acc c -> List.fold_left (select_and_filter c) acc cs) [] comps
+    in
+    Some (calprop_propfilter prop calprop, comps')
+  | _ -> None
+
+let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) data map = 
+  let filtered_data = match snd query, data with
+  | ("VCALENDAR", `Is_defined), data -> Some(data)
+  | ("VCALENDAR", `Is_not_defined), data -> None
+  | ( _ , `Is_defined), data -> None
+  | ( _ , `Is_not_defined), data -> Some(data)
     (*`Comp_filter of timerange option * prop_filter list * component_filter list*) 
-  | (None, ("VCALENDAR", `Comp_filter (tr_opt, pfs, cfs))), (props, comps) ->
+  | ("VCALENDAR", `Comp_filter (tr_opt, pfs, cfs)), (props, comps) ->
     if List.for_all (apply_to_props props) pfs
     then Some (props, comps)
     else None (* TODO handle tr_opt *)
+  in
+  let apply f d = match f with
+  | `All_props -> [`OK, Xml.props_to_tree map]
+  | `Proplist ps -> 
+     let props, calendar_data = List.fold_left (fun (ps, cs) -> function
+     | `Calendar_data c -> (ps, c :: cs)
+     | `Prop p -> (p :: ps, cs)) ([], []) ps
+     in
+     let outputs = List.fold_left (fun acc c -> match select_calendar_data data c with
+     | None -> acc
+     | Some r -> r :: acc) [] calendar_data in
+     [`OK, List.map (fun c -> Xml.node "calendar-data" [Xml.pcdata (Icalendar.to_ics c)]) outputs ] @ Xml.find_props props map
+  | `Propname -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings map)]
+  in
+  match fst query, filtered_data with
+  | None, Some c -> [`OK, [Xml.node "calendar-data" [Xml.pcdata (Icalendar.to_ics c)]]]
+  | _ , None -> []
+  | Some f, Some d -> apply f d
 
 let report state ~prefix ~name req =
-  match Xml.parse_calendar_query_xml req with
-  | Error e -> Lwt.return (Error `Bad_request)
-  | Ok calendar_query -> match name with
-    | `Dir d ->
-      Printf.printf "requested a directory\n" ;
-      Lwt.return (Error `Bad_request)
-    | `File f ->
+  let report_one query = function
+    | `Dir _ -> Lwt.return (Error `Bad_request)
+    | `File f -> 
       Fs.read state (`File f) >>= function
       | Error _ -> Lwt.return (Error `Bad_request)
       | Ok (data, map) ->
         match Icalendar.parse (Cstruct.to_string data) with
-        | Ok ics -> let _ = apply_to_vcalendar calendar_query ics in
-          Lwt.return (Ok req)
-(*     | `Dir d -> Fs.listdir state name >>= fun files ->
-       Lwt_list.map (fun f -> Fs.read state f) files  *)
+        | Error e -> 
+          Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
+          Lwt.return (Error `Bad_request)
+        | Ok ics -> let _ = apply_to_vcalendar query ics map in
+          Lwt.return (Ok req) in
+  match Xml.parse_calendar_query_xml req with
+  | Error e -> Lwt.return (Error `Bad_request)
+  | Ok calendar_query -> match name with
+    | `File f -> report_one calendar_query (`File f) 
+    | `Dir d ->
+      Fs.listdir state (`Dir d) >>= function
+      | Error _ -> Lwt.return (Error `Bad_request)
+      | Ok files -> 
+        Lwt_list.map_p (report_one calendar_query) files >>= fun reports ->
+        let report' = List.fold_left (fun acc -> function
+        | Ok r -> r :: acc
+        | Error _ -> acc) [] reports in
+        Lwt.return (Ok (multistatus report'))
