@@ -304,7 +304,8 @@ let select_calendar_data (calprop, comps) (requested_data: Xml.calendar_data) =
     | `Allcomp -> comps
     | `Comp cs -> 
        let select_and_filter c acc' comp = match select_component c comp with None -> acc' | Some c -> c :: acc' in
-       List.fold_left (fun acc c -> List.fold_left (select_and_filter c) acc cs) [] comps
+       let comps' = List.fold_left (fun acc c -> List.fold_left (select_and_filter c) acc cs) [] comps in
+       List.rev comps'
     in
     Some (calprop_propfilter prop calprop, comps')
   | _ -> None
@@ -325,19 +326,26 @@ let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) da
   | `All_props -> [`OK, Xml.props_to_tree map]
   | `Proplist ps ->
      let props, calendar_data = List.fold_left (fun (ps, cs) -> function
-     | `Calendar_data c -> (ps, c :: cs)
-     | `Prop p -> (p :: ps, cs)) ([], []) ps
+        | `Calendar_data c -> (ps, c :: cs)
+        | `Prop p -> (p :: ps, cs)) ([], []) ps
      in
      let outputs = List.fold_left (fun acc c -> match select_calendar_data data c with
          | None -> acc
          | Some r -> r :: acc) [] calendar_data
      in
+     let calendar_data =
+       List.map
+         (fun c -> Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics c)])
+         outputs
+     in
      let found_props = Xml.find_props props map in
-     [`OK, List.map (fun c -> Xml.node "calendar-data" [Xml.pcdata (Icalendar.to_ics c)]) outputs ] @ found_props
+     let ok_props, rest_props = List.partition (fun (st, _) -> st = `OK) found_props in
+     let ok_props' = List.flatten (List.map snd ok_props) in
+     [`OK, ok_props' @ calendar_data ] @ rest_props
   | `Propname -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings map)]
   in
   match fst query, filtered_data with
-  | None, Some c -> [`OK, [Xml.node "calendar-data" [Xml.pcdata (Icalendar.to_ics c)]]]
+  | None, Some c -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics c)]]]
   | _ , None -> []
   | Some f, Some d -> apply f d
 

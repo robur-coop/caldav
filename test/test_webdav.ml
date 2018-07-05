@@ -517,7 +517,7 @@ let appendix_b_data =
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
     Lwt_list.iter_s (fun (fn, etag, data) ->
-        let props = Xml.create_properties ~content_type:"text/calendar" false
+        let props = Xml.create_properties ~content_type:"text/calendar" ~etag false
             now (String.length data) ("bernard/work/" ^ fn)
         in
         Fs.write res_fs (`File [ "bernard" ; "work" ; fn ])
