@@ -758,8 +758,34 @@ let mkcol_success () =
   Alcotest.(check (result state_testable err_testable) __LOC__
               (Ok res_fs) r)
 
+let delete_test () =
+  let res_fs, r =
+    Lwt_main.run (
+      let open Lwt.Infix in
+      Mirage_fs_mem.connect "" >>= fun res_fs ->
+      let content = {_|<?xml version="1.0" encoding="utf-8" ?>
+<A:prop xmlns:A="DAV:"><A:resourcetype><A:collection></A:collection><B:special-resource xmlns:B="http://example.com/ns/"></B:special-resource></A:resourcetype><A:getlastmodified>1970-01-02T00:00:00-00:00</A:getlastmodified><A:getcontenttype>text/directory</A:getcontenttype><A:getcontentlength>0</A:getcontentlength><A:getcontentlanguage>en</A:getcontentlanguage><A:displayname>Special Resource</A:displayname><A:creationdate>1970-01-02T00:00:00-00:00</A:creationdate></A:prop>|_}
+      in
+      Mirage_fs_mem.write res_fs ".prop.xml" 0
+        (Cstruct.of_string content) >>= fun _ ->
+      Mirage_fs_mem.mkdir res_fs "home" >>= fun _ ->
+      Mirage_fs_mem.write res_fs "home/.prop.xml" 0
+        (Cstruct.of_string content) >>= fun _ ->
+      Mirage_fs_mem.connect "" >>= fun fs ->
+      let now = Ptime.v (10, 0L) in
+      let content' = {_|<?xml version="1.0" encoding="utf-8" ?>
+<A:prop xmlns:A="DAV:"><A:resourcetype><A:collection></A:collection><B:special-resource xmlns:B="http://example.com/ns/"></B:special-resource></A:resourcetype><A:getlastmodified>1970-01-11T00:00:00-00:00</A:getlastmodified><A:getcontenttype>text/directory</A:getcontenttype><A:getcontentlength>0</A:getcontentlength><A:getcontentlanguage>en</A:getcontentlanguage><A:displayname>Special Resource</A:displayname><A:creationdate>1970-01-02T00:00:00-00:00</A:creationdate></A:prop>|_}
+      in
+      Mirage_fs_mem.write fs ".prop.xml" 0
+        (Cstruct.of_string content') >>= fun _ ->
+      Dav.delete ~now res_fs ~name:(`Dir [ "home" ]) >|= fun r ->
+      (fs, r))
+  in
+  Alcotest.(check state_testable __LOC__ res_fs r)
+
 let webdav_api_tests = [
-  "successful mkcol", `Quick, mkcol_success
+  "successful mkcol", `Quick, mkcol_success ;
+  "delete", `Quick, delete_test
 ]
 
 let tests = [

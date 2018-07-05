@@ -126,6 +126,7 @@ let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
     let unapply ns name m = match M.find_opt ns m with
       | None when ns = "" -> (m, name, []) (* node has no namespace *)
       | None when ns = Xmlm.ns_xml -> (m, "xml:" ^ name, [])
+      | None when ns = Xmlm.ns_xmlns -> (m, "xmlns:" ^ name, [])
       | None ->
         let id = new_identifier m in
         (M.add ns id m, id ^ ":" ^ name, [(id, ns)])
@@ -172,6 +173,7 @@ let props_to_tree m =
 
 let props_to_string m =
   let c = props_to_tree m in
+  Format.printf "map is %a\n" Fmt.(list ~sep:(unit "\n") pp_tree) c ;
   tree_to_string (node ~ns:dav_ns "prop" c)
 
 let find_props ps m =

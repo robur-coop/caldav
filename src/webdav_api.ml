@@ -29,6 +29,24 @@ let write state ~name ?etag ~content_type data =
       | Error e -> Error `Internal_server_error
       | Ok () -> Ok state
 
+let delete ?(now = Ptime_clock.now ()) state ~name =
+  Fs.destroy state name >>= fun res ->
+  let now = Ptime.to_rfc3339 now in
+  let rec update_parent f_or_d =
+    let (`Dir parent) = Fs.parent f_or_d in
+    Fs.get_property_map state (`Dir parent) >>= function
+    | None -> assert false
+    | Some map ->
+      let map' = Xml.PairMap.add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
+      Fs.write_property_map state (`Dir parent) map' >>= function
+      | Error e -> assert false
+      | Ok () -> match parent with
+        | [] -> Lwt.return_unit
+        | dir -> update_parent (`Dir dir)
+  in
+  update_parent name >|= fun () ->
+  state
+
 let statuscode_to_string res =
   Format.sprintf "%s %s"
     (Cohttp.Code.string_of_version `HTTP_1_1)
