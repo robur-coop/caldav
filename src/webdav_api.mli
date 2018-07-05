@@ -15,7 +15,7 @@ val proppatch : state -> prefix:string -> name:Webdav_fs.file_or_dir -> tree ->
 val report : state -> prefix:string -> name:Webdav_fs.file_or_dir -> tree ->
   (tree, [`Bad_request]) result Lwt.t
 
-val write : state -> name:Webdav_fs.file -> content_type:string -> string ->
+val write : state -> name:Webdav_fs.file -> ?etag:string -> content_type:string -> string ->
   (state, [ `Conflict | `Internal_server_error | `Method_not_allowed ]) result Lwt.t
 
 (*

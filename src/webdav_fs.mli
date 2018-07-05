@@ -41,9 +41,6 @@ val dir_exists : t -> dir -> bool Lwt.t
 
 val listdir : t -> dir -> (file_or_dir list, Fs.error) result Lwt.t
 
-val last_modified : t -> file_or_dir ->
-  (string, [ Fs.error | `Invalid_xml | `Invalid_date | `Unknown_prop ]) result Lwt.t
-
 val mkdir : t -> dir -> propmap -> (unit, Fs.write_error) result Lwt.t
 
 val write : t -> file -> Cstruct.t -> propmap -> (unit, Fs.write_error) result Lwt.t

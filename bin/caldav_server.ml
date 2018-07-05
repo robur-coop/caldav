@@ -16,20 +16,20 @@ end
 
 let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 
-let create_properties name content_type is_dir length =
-  Printf.printf "Creating properties!!! %s \n" name;
-  Xml.create_properties ~content_type
-    is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length name
-
 let etag str = Digest.to_hex @@ Digest.string str
 
 (* assumption: path is a directory - otherwise we return none *)
 (* out: ( name * typ * last_modified ) list - non-recursive *)
 let list_dir fs (`Dir dir) =
   let list_file f_or_d =
-    Fs.last_modified fs f_or_d >|= function
-    | Error _ -> assert false
-    | Ok last_modified ->
+    (* maybe implement a Fs.get_property? *)
+    Fs.get_property_map fs f_or_d >|= function
+    | None -> assert false
+    | Some m ->
+      let last_modified = match Xml.get_prop (Xml.dav_ns, "getlastmodified") m with
+        | Some (_, [ Xml.Pcdata lm ]) -> lm
+        | _ -> assert false
+      in
       let is_dir = match f_or_d with
         | `File _ -> false | `Dir _ -> true
       in
@@ -45,6 +45,10 @@ let directory_as_html prefix fs (`Dir dir) =
     Printf.sprintf "<tr><td><a href=\"%s/%s\">%s</a></td><td>%s</td><td>%s</td></tr>"
       prefix file file (if is_dir then "directory" else "text/calendar") last_modified in
   String.concat "\n" (List.map print_file files)
+
+let directory_etag prefix fs (`Dir dir) =
+  directory_as_html prefix fs (`Dir dir) >|= fun data ->
+  etag data
 
 let directory_as_ics fs (`Dir dir) =
   let calendar_components = function
@@ -252,6 +256,7 @@ class handler prefix fs = object(self)
     | Error _ ->
       Wm.continue false rd
     | Ok f_or_d ->
+      (* TODO need to update lastmodified / etag of parent! *)
       Fs.destroy fs f_or_d >>= fun res ->
       Format.printf "deleted - FS now: %a\n" Mirage_fs_mem.pp fs ;
       Wm.continue true rd
@@ -260,32 +265,32 @@ class handler prefix fs = object(self)
     Fs.from_string fs (self#id rd) >>= function
     | Error _ -> Wm.continue None rd
     | Ok f_or_d ->
-      let to_lwt_option res =
-        Lwt.return (match res with
-            | Error _ -> None
-            | Ok x -> Some x)
-      in
-      Fs.last_modified fs f_or_d >>= to_lwt_option >>= fun res ->
+      Fs.get_property_map fs f_or_d >|= (function
+          | None -> None
+          | Some map -> match Xml.get_prop (Xml.dav_ns, "getlastmodified") map with
+            | Some (_, [ Xml.Pcdata lm]) -> Some lm
+            | _ -> None) >>= fun res ->
       Wm.continue res rd
 
   method generate_etag rd =
     Fs.from_string fs (self#id rd) >>= function
     | Error _ -> Wm.continue None rd
     | Ok f_or_d ->
-      (Fs.last_modified fs f_or_d >|= function
-        | Error _ -> rd
-        | Ok lm ->
-          let add_headers h = Cohttp.Header.add_list h [ ("Last-Modified", lm) ] in
-          Wm.Rd.with_resp_headers add_headers rd) >>= fun rd' ->
-      (match f_or_d with
-       | `Dir dir ->
-         directory_as_html prefix fs (`Dir dir) >|= fun data ->
-         Some (etag data)
-       | `File file ->
-         Fs.read fs (`File file) >|= function
-         | Error _ -> None
-         | Ok (data, _) -> Some (etag @@ Cstruct.to_string data)) >>= fun result ->
-      Wm.continue result rd'
+      Fs.get_property_map fs f_or_d >>= function
+      | None -> Wm.continue None rd
+      | Some map ->
+        let rd' =
+          match Xml.get_prop (Xml.dav_ns, "getlastmodified") map with
+          | Some (_, [ Xml.Pcdata lm ]) ->
+            let add_headers h = Cohttp.Header.add_list h [ ("Last-Modified", lm) ] in
+            Wm.Rd.with_resp_headers add_headers rd
+          | _ -> rd
+        in
+        let etag = match Xml.get_prop (Xml.dav_ns, "getetag") map with
+          | Some (_, [ Xml.Pcdata etag ]) -> Some etag
+          | _ -> None
+        in
+        Wm.continue etag rd'
 
   method finish_request rd =
     let rd' = if rd.Wm.Rd.meth = `OPTIONS then
@@ -312,11 +317,16 @@ class handler prefix fs = object(self)
 end
 
 let initialise_fs fs =
+  let create_properties name content_type is_dir length =
+    Xml.create_properties ~content_type
+      is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length name
+  in
   let props = create_properties "/" "text/directory" true 0 in
   Fs.write_property_map fs (`Dir []) props >>= fun _ ->
   let create_dir name =
+    let dir = Fs.dir_from_string name in
     let props = create_properties name "text/directory" true 0 in
-    Fs.mkdir fs (Fs.dir_from_string name) props
+    Fs.mkdir fs dir props
   in
   create_dir "users" >>= fun _ ->
   create_dir "__uids__" >>= fun _ ->

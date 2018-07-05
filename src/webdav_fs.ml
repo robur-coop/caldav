@@ -1,6 +1,8 @@
 open Lwt.Infix
 module Fs = Mirage_fs_mem
 
+module Xml = Webdav_xml
+
 type t = Fs.t
 
 let (>>==) a f = a >>= function
@@ -58,33 +60,24 @@ let propfilename =
     | filename :: path -> `File (List.rev path @ [ filename ^ ext ])
     | [] -> assert false (* no file without a name *)
 
-type propmap = (Webdav_xml.attribute list * Webdav_xml.tree list) Webdav_xml.PairMap.t
+type propmap = (Xml.attribute list * Xml.tree list) Xml.PairMap.t
 
 let get_properties fs f_or_d =
   let propfile = to_string (propfilename f_or_d) in
   Fs.size fs propfile >>== fun size ->
   Fs.read fs propfile 0 (Int64.to_int size)
 
-let get_property_map fs f_or_d =
-  get_properties fs f_or_d >|= function
-  | Error e ->
-    Format.printf "error while getting properties %a\n%!" Fs.pp_error e ;
-    None
-  | Ok data ->
-    let str = Cstruct.(to_string @@ concat data) in
-    match Webdav_xml.string_to_tree str with
-    | None ->
-      Printf.printf "couldn't convert %s to xml tree\n%!" str ;
-      None
-    | Some t -> Some (Webdav_xml.prop_tree_to_map t)
-
 (* TODO: check call sites, used to do:
-    else match Webdav_xml.get_prop "resourcetype" map with
+    else match Xml.get_prop "resourcetype" map with
       | Some (_, c) when List.exists (function `Node (_, "collection", _) -> true | _ -> false) c -> name ^ "/"
       | _ -> name in
 *)
 let write_property_map fs f_or_d map =
-  let data = Webdav_xml.props_to_string map in
+  let map' = match f_or_d with
+    | `File _ -> map
+    | `Dir _ -> Xml.PairMap.remove (Xml.dav_ns, "getetag") map
+  in
+  let data = Xml.props_to_string map' in
   let filename = to_string (propfilename f_or_d) in
   Printf.printf "writing %s, content: %s\n" filename data ;
   Fs.write fs filename 0 (Cstruct.of_string data) >|= fun r ->
@@ -94,14 +87,6 @@ let write_property_map fs f_or_d map =
 let size fs (`File file) =
   let name = to_string (`File file) in
   Fs.size fs name
-
-let read fs (`File file) =
-  let name = to_string (`File file) in
-  Fs.size fs name >>== fun length ->
-  Fs.read fs name 0 (Int64.to_int length) >>== fun data ->
-  get_property_map fs (`File file) >|= function
-  | None -> assert false
-  | Some props -> Ok (Cstruct.concat data, props)
 
 let stat fs f_or_d = Fs.stat fs (to_string f_or_d)
 
@@ -135,54 +120,121 @@ let listdir fs (`Dir dir) =
     [] files >|= fun files ->
   Ok files
 
+let get_raw_property_map fs f_or_d =
+  get_properties fs f_or_d >|= function
+  | Error e ->
+    Format.printf "error while getting properties %a\n%!" Fs.pp_error e ;
+    None
+  | Ok data ->
+    let str = Cstruct.(to_string @@ concat data) in
+    match Xml.string_to_tree str with
+    | None ->
+      Printf.printf "couldn't convert %s to xml tree\n%!" str ;
+      None
+    | Some t -> Some (Xml.prop_tree_to_map t)
+
 (* property getlastmodified does not exist for directories *)
 let last_modified_as_ptime fs f_or_d =
   Printf.printf "last_modified_as_ptime for %s\n" (to_string f_or_d) ;
-  get_property_map fs f_or_d >|= function
+  get_raw_property_map fs f_or_d >|= function
   | None ->
     Printf.printf "invalid XML!\n" ;
-    Error `Invalid_xml
+    None
   | Some map ->
-    match Webdav_xml.get_prop (Webdav_xml.dav_ns, "getlastmodified") map with
-    | Some (_, [ Webdav_xml.Pcdata last_modified ]) ->
+    match Xml.get_prop (Xml.dav_ns, "getlastmodified") map with
+    | Some (_, [ Xml.Pcdata last_modified ]) ->
       begin match Ptime.of_rfc3339 last_modified with
         | Error _ ->
           Printf.printf "invalid data!\n" ;
-          Error `Invalid_date
-        | Ok (ts, _, _) -> Ok ts
+          None
+        | Ok (ts, _, _) -> Some ts
       end
-    | _ ->
-      Printf.printf "unknown prop!\n" ;
-      Error `Unknown_prop
+    | _ -> None
 
-
-let last_modified_of_dir fs (`Dir dir) =
+(* we only take depth 1 into account when computing the overall last modified *)
+let last_modified_of_dir map fs (`Dir dir) =
   Printf.printf "last_modified_of_dir %s\n" (to_string (`Dir dir)) ;
-  listdir fs (`Dir dir) >>== fun files ->
-  Printf.printf "last_modified_of_dir found %d files\n" (List.length files) ;
-  Lwt_list.map_p (last_modified_as_ptime fs) files >>= fun last_modifieds ->
-  let oks = List.filter (function Ok _ -> true | _ -> false) last_modifieds in
-  Printf.printf "last_modified_of_dir: found %d last_modified\n" (List.length oks) ;
-  let max_mtime a (Ok b) =
-    Printf.printf "max_mtime a %s b %s, is_later %b\n"
-      (Ptime.to_rfc3339 a) (Ptime.to_rfc3339 b)
-      (Ptime.is_later ~than:a b) ;
-    if Ptime.is_later ~than:a b then b else a
+  let start = match Xml.get_prop (Xml.dav_ns, "creationdate") map with
+    | Some (_, [ Xml.Pcdata date ]) ->
+      begin match Ptime.of_rfc3339 date with
+        | Error _ -> assert false
+        | Ok (ts, _, _) -> ts
+      end
+    | _ -> assert false
   in
-  last_modified_as_ptime fs (`Dir dir) >|= function
-  | Ok start -> Ok (List.fold_left max_mtime start oks)
-  | Error _ -> assert false (* getlastmodified property is ensured on creation *)
+  listdir fs (`Dir dir) >>= function
+  | Error _ -> Lwt.return (Xml.ptime_to_http_date start)
+  | Ok files ->
+    Printf.printf "last_modified_of_dir found %d files\n" (List.length files) ;
+    Lwt_list.map_p (last_modified_as_ptime fs) files >>= fun last_modifieds ->
+    let lms = List.fold_left (fun acc -> function None -> acc | Some lm -> lm :: acc) [] last_modifieds in
+    let max_mtime a b =
+      Printf.printf "max_mtime a %s b %s, is_later %b\n"
+        (Ptime.to_rfc3339 a) (Ptime.to_rfc3339 b)
+        (Ptime.is_later ~than:a b) ;
+      if Ptime.is_later ~than:a b then b else a
+    in
+    Lwt.return (Xml.ptime_to_http_date @@ List.fold_left max_mtime start lms)
 
-let open_fs_error x =
-  (x : ('a, Fs.error) result Lwt.t :> ('a, [> Fs.error ]) result Lwt.t)
+let get_etag fs f_or_d =
+  Printf.printf "etag for %s\n" (to_string f_or_d) ;
+  get_raw_property_map fs f_or_d >|= function
+  | None ->
+    Printf.printf "invalid XML!\n" ;
+    None
+  | Some map -> match Xml.get_prop (Xml.dav_ns, "getetag") map with
+    | Some (_, [ Xml.Pcdata etag ]) -> Some etag
+    | _ -> Some (to_string f_or_d)
 
-let last_modified fs f_or_d =
-  Printf.printf "last-modified for %s\n" (to_string f_or_d) ;
-  begin match f_or_d with
-  | `File _ -> last_modified_as_ptime fs f_or_d
-  | `Dir data -> open_fs_error @@ last_modified_of_dir fs (`Dir data)
-  end >>|= fun ptime ->
-  Ok (Webdav_xml.ptime_to_http_date ptime)
+let etag_of_dir fs (`Dir dir) =
+  Printf.printf "etag_of_dir %s\n" (to_string (`Dir dir)) ;
+  listdir fs (`Dir dir) >>= function
+  | Error _ -> Lwt.return ""
+  | Ok files ->
+    Printf.printf "get_etag_of_dir found %d files\n" (List.length files) ;
+    Lwt_list.map_p (get_etag fs) files >>= fun etags ->
+    let some_etags = List.fold_left (fun acc -> function None -> acc | Some x -> x :: acc) [] etags in
+    let data = String.concat ":" some_etags in
+    Lwt.return (Digest.to_hex @@ Digest.string data)
+
+(* let open_fs_error x =
+ *   (x : ('a, Fs.error) result Lwt.t :> ('a, [> Fs.error ]) result Lwt.t) *)
+
+let get_property_map fs f_or_d =
+  get_raw_property_map fs f_or_d >>= function
+  | None -> Lwt.return None
+  | Some map -> match f_or_d with
+    | `File _ ->
+      begin match Xml.PairMap.find_opt (Xml.dav_ns, "getlastmodified") map with
+        | Some (_, [ Xml.Pcdata rfc3339 ]) ->
+          begin match Ptime.of_rfc3339 rfc3339 with
+            | Error _ ->
+              Printf.printf "invalid data!\n" ;
+              assert false
+            | Ok (ts, _, _) ->
+              let http_date = Xml.ptime_to_http_date ts in
+              let map' =
+                Xml.PairMap.add (Xml.dav_ns, "getlastmodified")
+                  ([], [ Xml.pcdata http_date ]) map
+              in
+              Lwt.return (Some map')
+          end
+        | _ -> Lwt.return (Some map)
+      end
+    | `Dir d ->
+      last_modified_of_dir map fs (`Dir d) >>= fun last_modified ->
+      etag_of_dir fs (`Dir d) >|= fun etag ->
+      Some
+        (Xml.PairMap.add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata last_modified ])
+           (Xml.PairMap.add (Xml.dav_ns, "getetag") ([], [ Xml.pcdata etag ]) map))
+
+let read fs (`File file) =
+  let name = to_string (`File file) in
+  Fs.size fs name >>== fun length ->
+  Fs.read fs name 0 (Int64.to_int length) >>== fun data ->
+  get_property_map fs (`File file) >|= function
+  | None -> assert false
+  | Some props -> Ok (Cstruct.concat data, props)
 
 let mkdir fs (`Dir dir) propmap =
   Fs.mkdir fs (to_string (`Dir dir)) >>== fun () ->

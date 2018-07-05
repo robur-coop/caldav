@@ -177,20 +177,27 @@ let props_to_string m =
 let find_props ps m =
   let (found, not_found) =
     List.fold_left (fun (s, f) (ns, k) -> match PairMap.find_opt (ns, k) m with
-    | None        -> (s, node ~ns k [] :: f)
-    | Some (a, v) -> (node ~ns ~a k v :: s, f)) ([], []) ps
+        | None        -> (s, node ~ns k [] :: f)
+        | Some (a, v) -> (node ~ns ~a k v :: s, f))
+      ([], []) ps
   in
-  [(`OK, found) ; (`Forbidden, not_found)]
+  match found, not_found with
+  | [], [] -> []
+  | [], nf -> [ (`Not_found, nf) ]
+  | f, [] -> [ (`OK, f) ]
+  | f, nf -> [ (`OK, f) ; (`Not_found, nf) ]
 
-let create_properties ?(content_type = "text/html") ?(language = "en") is_dir timestamp length filename =
+let create_properties ?(content_type = "text/html") ?(language = "en") is_dir ?etag timestamp length filename =
   let rtype = if is_dir then [ node ~ns:dav_ns "collection" [] ] else [] in
   let filename = if filename = "" then "hinz und kunz" else filename in
+  let etag' m = match etag with None -> m | Some e -> PairMap.add (dav_ns, "getetag") ([], [ Pcdata e ]) m in
+  etag' @@
   PairMap.add (dav_ns, "creationdate") ([], [ Pcdata timestamp ]) @@
   PairMap.add (dav_ns, "displayname") ([], [ Pcdata filename ]) @@
   PairMap.add (dav_ns, "getcontentlanguage") ([], [ Pcdata language ]) @@
   PairMap.add (dav_ns, "getcontenttype") ([], [ Pcdata content_type ]) @@
-  PairMap.add (dav_ns, "getlastmodified") ([], [ Pcdata timestamp ]) @@
   PairMap.add (dav_ns, "getcontentlength") ([], [ Pcdata (string_of_int length) ]) @@
+  PairMap.add (dav_ns, "getlastmodified") ([], [ Pcdata timestamp ]) @@
   (* PairMap.add "lockdiscovery" *)
   PairMap.add (dav_ns, "resourcetype") ([], rtype) PairMap.empty
   (* PairMap.add "supportedlock" *)

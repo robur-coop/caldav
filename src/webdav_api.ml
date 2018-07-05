@@ -7,7 +7,9 @@ module Xml = Webdav_xml
 type state = Webdav_fs.Fs.t
 type tree = Webdav_xml.tree
 
-let write state ~name ~content_type data =
+let compute_etag str = Digest.to_hex @@ Digest.string str
+
+let write state ~name ?etag ~content_type data =
   match name with
   | `Dir _ -> Lwt.return (Error `Method_not_allowed)
   | `File file ->
@@ -18,8 +20,9 @@ let write state ~name ~content_type data =
       Lwt.return (Error `Conflict)
     | true ->
       let props =
+        let etag = match etag with None -> compute_etag data | Some e -> e in
         Xml.create_properties ~content_type false
-          (Ptime.to_rfc3339 (Ptime_clock.now ()))
+          ~etag (Ptime.to_rfc3339 (Ptime_clock.now ()))
           (String.length data) (Fs.to_string (`File file))
       in
       Fs.write state (`File file) (Cstruct.of_string data) props >|= function
@@ -44,9 +47,9 @@ let parse_depth = function
   | _ -> Error `Bad_request
 
 let propfind_request_to_selector = function
-   | `Propname -> (fun m -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings m)])
-   | `All_prop includes -> (fun m -> [`OK, Xml.props_to_tree m]) (* TODO: finish this *)
-   | `Props ps -> (fun m -> Xml.find_props ps m)
+  | `Propname -> (fun m -> [`OK, List.map (fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings m)])
+  | `All_prop includes -> (fun m -> [`OK, Xml.props_to_tree m]) (* TODO: finish this *)
+  | `Props ps -> (fun m -> Xml.find_props ps m)
 
 let property_selector fs prefix request f_or_d =
   Printf.printf "processing properties of %s\n" (Fs.to_string f_or_d) ;
@@ -302,15 +305,17 @@ let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) da
   in
   let apply f d = match f with
   | `All_props -> [`OK, Xml.props_to_tree map]
-  | `Proplist ps -> 
+  | `Proplist ps ->
      let props, calendar_data = List.fold_left (fun (ps, cs) -> function
      | `Calendar_data c -> (ps, c :: cs)
      | `Prop p -> (p :: ps, cs)) ([], []) ps
      in
      let outputs = List.fold_left (fun acc c -> match select_calendar_data data c with
-     | None -> acc
-     | Some r -> r :: acc) [] calendar_data in
-     [`OK, List.map (fun c -> Xml.node "calendar-data" [Xml.pcdata (Icalendar.to_ics c)]) outputs ] @ Xml.find_props props map
+         | None -> acc
+         | Some r -> r :: acc) [] calendar_data
+     in
+     let found_props = Xml.find_props props map in
+     [`OK, List.map (fun c -> Xml.node "calendar-data" [Xml.pcdata (Icalendar.to_ics c)]) outputs ] @ found_props
   | `Propname -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings map)]
   in
   match fst query, filtered_data with
@@ -321,26 +326,41 @@ let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) da
 let report state ~prefix ~name req =
   let report_one query = function
     | `Dir _ -> Lwt.return (Error `Bad_request)
-    | `File f -> 
+    | `File f ->
       Fs.read state (`File f) >>= function
       | Error _ -> Lwt.return (Error `Bad_request)
       | Ok (data, map) ->
         match Icalendar.parse (Cstruct.to_string data) with
-        | Error e -> 
+        | Error e ->
           Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
           Lwt.return (Error `Bad_request)
-        | Ok ics -> let _ = apply_to_vcalendar query ics map in
-          Lwt.return (Ok req) in
+        | Ok ics ->
+          let xs = apply_to_vcalendar query ics map in
+          Format.printf "xs for %s are:\n%a\n" (Fs.to_string (`File f))
+            Fmt.(list ~sep:(unit "\n\n") Xml.pp_tree) (List.map propstat_node xs) ;
+          let node =
+            Xml.dav_node "response"
+              (Xml.dav_node "href" [ Xml.pcdata (prefix ^ Fs.to_string (`File f)) ]
+               :: List.map propstat_node xs)
+          in
+          Lwt.return (Ok node) in
   match Xml.parse_calendar_query_xml req with
   | Error e -> Lwt.return (Error `Bad_request)
   | Ok calendar_query -> match name with
-    | `File f -> report_one calendar_query (`File f) 
+    | `File f ->
+      begin
+        report_one calendar_query (`File f) >|= function
+        | Ok node -> Ok (multistatus [ node ])
+        | Error e -> Error e
+      end
     | `Dir d ->
       Fs.listdir state (`Dir d) >>= function
       | Error _ -> Lwt.return (Error `Bad_request)
-      | Ok files -> 
+      | Ok files ->
         Lwt_list.map_p (report_one calendar_query) files >>= fun reports ->
+        (* TODO we remove individual file errors, should we report them back?
+           be consistent in respect to other HTTP verbs taking directories (e.g. propfind) *)
         let report' = List.fold_left (fun acc -> function
-        | Ok r -> r :: acc
-        | Error _ -> acc) [] reports in
+            | Ok r -> r :: acc
+            | Error _ -> acc) [] reports in
         Lwt.return (Ok (multistatus report'))
