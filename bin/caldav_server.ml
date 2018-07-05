@@ -253,11 +253,23 @@ class handler prefix fs = object(self)
   method delete_resource rd =
     Format.printf "deleting %s in FS %a\n" (self#id rd) Mirage_fs_mem.pp fs ;
     Fs.from_string fs (self#id rd) >>= function
-    | Error _ ->
-      Wm.continue false rd
+    | Error _ -> Wm.continue false rd
     | Ok f_or_d ->
-      (* TODO need to update lastmodified / etag of parent! *)
       Fs.destroy fs f_or_d >>= fun res ->
+      let now = Ptime.to_rfc3339 (Ptime_clock.now ()) in
+      let rec update_parent f_or_d =
+        let (`Dir parent) = Fs.parent f_or_d in
+        Fs.get_property_map fs (`Dir parent) >>= function
+        | None -> assert false
+        | Some map ->
+          let map' = Xml.PairMap.add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
+          Fs.write_property_map fs (`Dir parent) map' >>= function
+          | Error e -> assert false
+          | Ok () -> match parent with
+            | [] -> Lwt.return_unit
+            | dir -> update_parent (`Dir dir)
+      in
+      update_parent f_or_d >>= fun () ->
       Format.printf "deleted - FS now: %a\n" Mirage_fs_mem.pp fs ;
       Wm.continue true rd
 
