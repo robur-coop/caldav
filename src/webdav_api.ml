@@ -265,7 +265,7 @@ type report_prop = [
 
 let propfilter to_key req_data props =
   match req_data with
-  | `Allprop -> props
+  | `Allprop | `Prop [] -> props
   | `Prop ps -> List.filter (fun p -> List.exists (fun (key, _) -> String.equal (to_key p) key) ps) props
 
 
@@ -310,6 +310,56 @@ let select_calendar_data (calprop, comps) (requested_data: Xml.calendar_data) =
     Some (calprop_propfilter prop calprop, comps')
   | _ -> None
 
+
+let get_time_properties (props:Icalendar.eventprop list) =
+  let dtstart = match List.find_opt (function `Dtstart _ -> true | _ -> false) props with
+  | None -> assert false
+  | Some (`Dtstart (_, startdate)) -> startdate
+  in
+  let dtend = match List.find_opt (function `Dtend _ -> true | _ -> false) props with
+  | Some (`Dtend (_, `Date enddate)) -> begin match Ptime.of_date_time (enddate, ((0, 0, 0), 0)) with
+    | None -> assert false
+    | Some end_ts -> Some end_ts
+  end 
+  | Some (`Dtend (_, `Datetime (ts, utc))) -> Some ts
+  | None -> None
+  in 
+  let duration = match List.find_opt (function `Duration _ -> true | _ -> false) props with
+  | None -> None
+  | Some (`Duration (_, s)) -> Some s
+  in (dtstart, dtend, duration)
+
+let event_in_timerange ((s, _), (e, _)) (`Event (props, alarms)) =
+  Format.printf "s: %a\n" Ptime.pp s ;
+  Format.printf "e: %a\n" Ptime.pp e ;
+  let (dtstart, dtend, duration) = get_time_properties props
+  and ts_of_dtstart = function
+  | `Datetime (dtstart, utc) -> dtstart
+  | `Date start -> match Ptime.of_date_time (start, ((0, 0, 0), 0)) with
+    | None -> assert false
+    | Some dtstart -> dtstart
+  in 
+  let dtstart' = ts_of_dtstart dtstart in
+  Format.printf "dtstart: %a\n" Ptime.pp dtstart' ;
+ 
+  match dtend, duration with
+  | Some dtend, None -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart'
+  | None, Some secs when secs > 0 -> 
+    begin match Ptime.add_span dtstart' (Ptime.Span.of_int_s secs) with
+    | None -> false
+    | Some dtend -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart'
+    end
+  | None, Some 0 -> (Ptime.is_earlier s ~than:dtstart' || Ptime.equal s dtstart') && Ptime.is_later e ~than:dtstart'
+  | None, None -> match dtstart with
+    | `Datetime _ -> (Ptime.is_earlier s ~than:dtstart' || Ptime.equal s dtstart') && Ptime.is_later e ~than:dtstart' 
+    | `Date _ -> match Ptime.add_span dtstart' (Ptime.Span.of_int_s (24 * 60 * 60)) with
+      | None -> false
+      | Some dtend -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart' 
+
+let comp_in_timerange r = function
+  | `Event _ as e -> event_in_timerange r e
+  | _ -> false
+
 let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) data map = 
   let filtered_data = match snd query, data with
   | ("VCALENDAR", `Is_defined), data -> Some(data)
@@ -318,9 +368,14 @@ let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) da
   | ( _ , `Is_not_defined), data -> Some(data)
     (*`Comp_filter of timerange option * prop_filter list * component_filter list*) 
   | ("VCALENDAR", `Comp_filter (tr_opt, pfs, cfs)), (props, comps) ->
+    let comps' = match tr_opt with
+    | None -> comps
+    | Some (s, e) -> match Icalendar.parse_datetime s, Icalendar.parse_datetime e with
+      | Error _, _ | _, Error _ -> assert false (*TODO*)
+      | Ok s, Ok e -> List.filter (comp_in_timerange (s, e)) comps in
     if List.for_all (apply_to_props props) pfs
-    then Some (props, comps)
-    else None (* TODO handle tr_opt *)
+    then Some (props, comps')
+    else None
   in
   let apply f d = match f with
   | `All_props -> [`OK, Xml.props_to_tree map]

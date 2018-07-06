@@ -526,6 +526,28 @@ let appendix_b_data =
       Appendix_b.all >|= fun () ->
     res_fs)
 
+let appendix_b_1_data =
+  let open Lwt.Infix in
+  Lwt_main.run (
+    let now =
+      let ts = Ptime.v (1, 0L) in
+      Ptime.to_rfc3339 ts
+    in
+    Mirage_fs_mem.connect "" >>= fun res_fs ->
+    let props name = Xml.create_properties true now 0 name in
+    Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
+    Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
+    (match Appendix_b.all with 
+    | (fn, etag, data) :: _ -> 
+        let props = Xml.create_properties ~content_type:"text/calendar" ~etag false
+            now (String.length data) ("bernard/work/" ^ fn)
+        in
+        Fs.write res_fs (`File [ "bernard" ; "work" ; fn ])
+          (Cstruct.of_string data) props >|= fun _ ->
+        ())
+      >|= fun () ->
+    res_fs)
+
 let t_tree =
   let module M = struct
     type t = Xml.tree
@@ -534,12 +556,25 @@ let t_tree =
   end in
   (module M : Alcotest.TESTABLE with type t = M.t)
 
-let report name request =
+let report name request data =
   let open Lwt.Infix in
   Lwt_main.run (
-    Dav.report appendix_b_data ~prefix:"" ~name request >|= function
+    Dav.report data ~prefix:"" ~name request >|= function
     | Ok t -> Ok t
     | Error _ -> Error "failed")
+
+let test_report_1 () =
+  let xml = report_7_8_1
+  and expected = header ^ {|<D:multistatus xmlns:D="DAV:"
+              xmlns:C="urn:ietf:params:xml:ns:caldav"/>|}
+   in
+  Format.printf "file system is %a\n"
+    Mirage_fs_mem.pp appendix_b_1_data ;
+  Alcotest.(check (result t_tree string) __LOC__
+              (Ok (tree expected))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml) appendix_b_1_data))
+
+ 
 
 let test_report_7_8_1 () =
   let xml = report_7_8_1
@@ -642,11 +677,12 @@ END:VCALENDAR
     Mirage_fs_mem.pp appendix_b_data ;
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml)))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
 
 let report_tests = [
-  "Report from section 7.8.1", `Quick, test_report_7_8_1 ;
-(*  "Parse report query from section 7.8.2", `Quick, parse_report_query_7_8_2 ;
+  "Report from section 7.8.1 - first file only", `Quick, test_report_1 ;
+(*  "Report from section 7.8.1", `Quick, test_report_7_8_1 ;
+  "Parse report query from section 7.8.2", `Quick, parse_report_query_7_8_2 ;
   "Parse report query from section 7.8.3", `Quick, parse_report_query_7_8_3 ;
   "Parse report query from section 7.8.4", `Quick, parse_report_query_7_8_4 ;
   "Parse report query from section 7.8.5", `Quick, parse_report_query_7_8_5 ;
