@@ -360,23 +360,62 @@ let comp_in_timerange r = function
   | `Event _ as e -> event_in_timerange r e
   | _ -> false
 
-let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) data map = 
+(*
+type comp_filter = [
+  | `Is_defined (* represents empty filter in RFC *)
+  | `Is_not_defined
+  | `Comp_filter of timerange option * prop_filter list * component_filter list
+]
+and component_filter = string * comp_filter
+*)
+
+let apply_comp_filter (comp_name, comp_filter) component =
+  let is_match =
+    String.equal comp_name (Icalendar.component_to_ics_key component)
+  in
+  match comp_filter, is_match with
+  | `Is_defined, true -> true
+  | `Is_not_defined, true -> false
+  | `Is_defined, false -> false
+  | `Is_not_defined, false -> true
+  | `Comp_filter (_, _, _), false -> false
+  | `Comp_filter (tr_opt, pfs, cfs), true ->
+    match tr_opt with
+    | None -> true
+    | Some (s, e) -> match Icalendar.parse_datetime s, Icalendar.parse_datetime e with
+      | Error _, _ | _, Error _ ->
+        Printf.printf "error while parsing datetime\n" ;
+        assert false (*TODO*)
+      | Ok s, Ok e ->
+        Format.printf "range filter from %a till %a\n" Ptime.pp (fst s) Ptime.pp (fst e) ;
+        comp_in_timerange (s, e) component
+        (* TODO: treat pfs and cfs *)
+
+let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) data map =
+  Format.printf "apply to vcalendar, snd query is %a\n" Xml.pp_component_filter (snd query) ;
   let filtered_data = match snd query, data with
-  | ("VCALENDAR", `Is_defined), data -> Some(data)
+  | ("VCALENDAR", `Is_defined), data -> Some data
   | ("VCALENDAR", `Is_not_defined), data -> None
   | ( _ , `Is_defined), data -> None
-  | ( _ , `Is_not_defined), data -> Some(data)
+  | ( _ , `Is_not_defined), data -> Some data
     (*`Comp_filter of timerange option * prop_filter list * component_filter list*) 
   | ("VCALENDAR", `Comp_filter (tr_opt, pfs, cfs)), (props, comps) ->
     let comps' = match tr_opt with
     | None -> comps
     | Some (s, e) -> match Icalendar.parse_datetime s, Icalendar.parse_datetime e with
-      | Error _, _ | _, Error _ -> assert false (*TODO*)
-      | Ok s, Ok e -> List.filter (comp_in_timerange (s, e)) comps in
+      | Error _, _ | _, Error _ ->
+        Printf.printf "error while parsing datetime\n" ;
+        assert false (*TODO*)
+      | Ok s, Ok e ->
+        Format.printf "range filter from %a till %a\n" Ptime.pp (fst s) Ptime.pp (fst e) ;
+        List.filter (comp_in_timerange (s, e)) comps in
+    let comps'' = List.filter (fun c -> List.exists (fun cf -> apply_comp_filter cf c) cfs) comps' in
     if List.for_all (apply_to_props props) pfs
-    then Some (props, comps')
+    then Some (props, comps'')
     else None
+  | _ -> Printf.printf "something else\n" ; None
   in
+  Format.printf "filtered data is %a" Fmt.(option ~none:(unit "none") Icalendar.pp) filtered_data ;
   let apply f d = match f with
   | `All_props -> [`OK, Xml.props_to_tree map]
   | `Proplist ps ->
@@ -384,7 +423,7 @@ let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) da
         | `Calendar_data c -> (ps, c :: cs)
         | `Prop p -> (p :: ps, cs)) ([], []) ps
      in
-     let outputs = List.fold_left (fun acc c -> match select_calendar_data data c with
+     let outputs = List.fold_left (fun acc c -> match select_calendar_data d c with
          | None -> acc
          | Some r -> r :: acc) [] calendar_data
      in
