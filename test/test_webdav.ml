@@ -565,13 +565,11 @@ let report name request data =
 
 let test_report_1 () =
   let xml = report_7_8_1
-  and expected = header ^ {|<D:multistatus xmlns:D="DAV:"
-              xmlns:C="urn:ietf:params:xml:ns:caldav"/>|}
-   in
+  and expected_tree = Xml.dav_node "multistatus" [] in
   Format.printf "file system is %a\n"
     Mirage_fs_mem.pp appendix_b_1_data ;
   Alcotest.(check (result t_tree string) __LOC__
-              (Ok (tree expected))
+              (Ok expected_tree)
               (report (`Dir [ "bernard" ; "work" ]) (tree xml) appendix_b_1_data))
 
  

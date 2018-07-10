@@ -391,9 +391,15 @@ let apply_comp_filter (comp_name, comp_filter) component =
         comp_in_timerange (s, e) component
         (* TODO: treat pfs and cfs *)
 
-let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) data map =
-  Format.printf "apply to vcalendar, snd query is %a\n" Xml.pp_component_filter (snd query) ;
-  let filtered_data = match snd query, data with
+let get_timezones_for_resp calendar tzids = 
+  let get_timezone tzid = 
+    let has_matching_tzid props = List.exists (function `Timezone_id (_, (_, tzid')) -> tzid = tzid' | _ -> false) props in
+    List.find (function `Timezone props -> has_matching_tzid props | _ -> false ) (snd calendar) in
+  List.map get_timezone tzids
+
+let apply_comp_filter_to_vcalendar filter data =
+  Format.printf "apply to vcalendar, snd query is %a\n" Xml.pp_component_filter filter ;
+  match filter, data with
   | ("VCALENDAR", `Is_defined), data -> Some data
   | ("VCALENDAR", `Is_not_defined), data -> None
   | ( _ , `Is_defined), data -> None
@@ -414,9 +420,13 @@ let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) da
     then Some (props, comps'')
     else None
   | _ -> Printf.printf "something else\n" ; None
-  in
+
+
+
+let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.component_filter) data map =
+  let filtered_data = apply_comp_filter_to_vcalendar filter data in
   Format.printf "filtered data is %a" Fmt.(option ~none:(unit "none") Icalendar.pp) filtered_data ;
-  let apply f d = match f with
+  let apply_transformation t d = match t with
   | `All_props -> [`OK, Xml.props_to_tree map]
   | `Proplist ps ->
      let props, calendar_data = List.fold_left (fun (ps, cs) -> function
@@ -425,23 +435,30 @@ let apply_to_vcalendar (query: Xml.report_prop option * Xml.component_filter) da
      in
      let outputs = List.fold_left (fun acc c -> match select_calendar_data d c with
          | None -> acc
-         | Some r -> r :: acc) [] calendar_data
-     in
-     let calendar_data =
-       List.map
-         (fun c -> Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics c)])
-         outputs
+         | Some (props, comps) -> 
+           let tzids = List.flatten @@ List.map Icalendar.collect_tzids comps in
+           let timezones = get_timezones_for_resp data tzids in
+           (props, timezones @ comps) :: acc) [] calendar_data
      in
      let found_props = Xml.find_props props map in
      let ok_props, rest_props = List.partition (fun (st, _) -> st = `OK) found_props in
      let ok_props' = List.flatten (List.map snd ok_props) in
-     [`OK, ok_props' @ calendar_data ] @ rest_props
+     let calendars = List.flatten @@ List.map
+       (fun c -> 
+         match snd c with 
+         | [] -> [] 
+         | _  -> 
+           let ics = Icalendar.to_ics c in
+           [ Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata ics] ]
+       )
+       outputs in
+       begin match calendars with [] -> [] | cs -> [`OK, ok_props' @ cs ] @ rest_props end
   | `Propname -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings map)]
   in
-  match fst query, filtered_data with
+  match transform, filtered_data with
   | None, Some c -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics c)]]]
   | _ , None -> []
-  | Some f, Some d -> apply f d
+  | Some t, Some d -> apply_transformation t d
 
 let report state ~prefix ~name req =
   let report_one query = function
@@ -455,22 +472,26 @@ let report state ~prefix ~name req =
           Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
           Lwt.return (Error `Bad_request)
         | Ok ics ->
-          let xs = apply_to_vcalendar query ics map in
-          Format.printf "xs for %s are:\n%a\n" (Fs.to_string (`File f))
-            Fmt.(list ~sep:(unit "\n\n") Xml.pp_tree) (List.map propstat_node xs) ;
-          let node =
-            Xml.dav_node "response"
-              (Xml.dav_node "href" [ Xml.pcdata (prefix ^ Fs.to_string (`File f)) ]
-               :: List.map propstat_node xs)
-          in
-          Lwt.return (Ok node) in
+          match apply_to_vcalendar query ics map with
+          | [] -> Lwt.return (Ok None)
+          | xs -> 
+            let filename = Fs.to_string (`File f) in
+            Format.printf "xs for %s are:\n%a\n" filename
+              Fmt.(list ~sep:(unit "\n\n") Xml.pp_tree) (List.map propstat_node xs) ;
+            let node =
+              Xml.dav_node "response"
+                (Xml.dav_node "href" [ Xml.pcdata (prefix ^ filename) ]
+                 :: List.map propstat_node xs)
+            in
+            Lwt.return (Ok (Some node)) in
   match Xml.parse_calendar_query_xml req with
   | Error e -> Lwt.return (Error `Bad_request)
   | Ok calendar_query -> match name with
     | `File f ->
       begin
         report_one calendar_query (`File f) >|= function
-        | Ok node -> Ok (multistatus [ node ])
+        | Ok (Some node) -> Ok (multistatus [ node ])
+        | Ok None -> Ok (multistatus [])
         | Error e -> Error e
       end
     | `Dir d ->
@@ -481,6 +502,7 @@ let report state ~prefix ~name req =
         (* TODO we remove individual file errors, should we report them back?
            be consistent in respect to other HTTP verbs taking directories (e.g. propfind) *)
         let report' = List.fold_left (fun acc -> function
-            | Ok r -> r :: acc
+            | Ok (Some r) -> r :: acc
+            | Ok None -> acc
             | Error _ -> acc) [] reports in
         Lwt.return (Ok (multistatus report'))
