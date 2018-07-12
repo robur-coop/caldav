@@ -391,11 +391,11 @@ let apply_comp_filter (comp_name, comp_filter) component =
         comp_in_timerange (s, e) component
         (* TODO: treat pfs and cfs *)
 
-let get_timezones_for_resp calendar tzids = 
-  let get_timezone tzid = 
+let get_timezones_for_resp calendar tzids =
+  let get_timezone tzid =
     let has_matching_tzid props = List.exists (function `Timezone_id (_, (_, tzid')) -> tzid = tzid' | _ -> false) props in
     List.find (function `Timezone props -> has_matching_tzid props | _ -> false ) (snd calendar) in
-  List.map get_timezone tzids
+  List.map get_timezone @@ Astring.String.Set.elements tzids
 
 let apply_comp_filter_to_vcalendar filter data =
   Format.printf "apply to vcalendar, snd query is %a\n" Xml.pp_component_filter filter ;
@@ -414,8 +414,14 @@ let apply_comp_filter_to_vcalendar filter data =
         assert false (*TODO*)
       | Ok s, Ok e ->
         Format.printf "range filter from %a till %a\n" Ptime.pp (fst s) Ptime.pp (fst e) ;
-        List.filter (comp_in_timerange (s, e)) comps in
-    let comps'' = List.filter (fun c -> List.exists (fun cf -> apply_comp_filter cf c) cfs) comps' in
+        if List.exists (comp_in_timerange (s, e)) comps then comps else []
+    in
+    let comps'' =
+      (* TODO abstract *)
+      if List.exists (fun c -> List.exists (fun cf -> apply_comp_filter cf c) cfs) comps'
+      then comps'
+      else []
+    in
     if List.for_all (apply_to_props props) pfs
     then Some (props, comps'')
     else None
@@ -435,8 +441,11 @@ let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.compon
      in
      let outputs = List.fold_left (fun acc c -> match select_calendar_data d c with
          | None -> acc
-         | Some (props, comps) -> 
-           let tzids = List.flatten @@ List.map Icalendar.collect_tzids comps in
+         | Some (props, comps) ->
+           let tzids =
+             List.fold_left Astring.String.Set.union Astring.String.Set.empty
+             @@ List.map Icalendar.collect_tzids comps
+           in
            let timezones = get_timezones_for_resp data tzids in
            (props, timezones @ comps) :: acc) [] calendar_data
      in
@@ -448,7 +457,7 @@ let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.compon
          match snd c with 
          | [] -> [] 
          | _  -> 
-           let ics = Icalendar.to_ics c in
+           let ics = Icalendar.to_ics ~cr:false c in
            [ Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata ics] ]
        )
        outputs in
@@ -456,7 +465,7 @@ let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.compon
   | `Propname -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings map)]
   in
   match transform, filtered_data with
-  | None, Some c -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics c)]]]
+  | None, Some c -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics ~cr:false c)]]]
   | _ , None -> []
   | Some t, Some d -> apply_transformation t d
 
