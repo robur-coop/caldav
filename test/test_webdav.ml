@@ -560,21 +560,24 @@ let report name request data =
   let open Lwt.Infix in
   Lwt_main.run (
     Dav.report data ~prefix:"http://cal.example.com/" ~name request >|= function
-    | Ok t -> Ok t
+    | Ok t -> Ok (tree (Xml.tree_to_string t))
     | Error _ -> Error "failed")
 
 let test_report_1 () =
   let xml = report_7_8_1
-  and expected_tree = Xml.dav_node "multistatus" [] in
+  and expected = header ^ {|
+<D:multistatus xmlns:D="DAV:"></D:multistatus>|}
+  in
   Format.printf "file system is %a\n"
     Mirage_fs_mem.pp appendix_b_1_data ;
   Alcotest.(check (result t_tree string) __LOC__
-              (Ok expected_tree)
+              (Ok (tree expected))
               (report (`Dir [ "bernard" ; "work" ]) (tree xml) appendix_b_1_data))
 
 let test_report_7_8_1 () =
   let xml = report_7_8_1
-  and expected = header ^ {|<D:multistatus xmlns:D="DAV:"
+  and expected = header ^ {|
+<D:multistatus xmlns:D="DAV:"
               xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:response>
        <D:href>http://cal.example.com/bernard/work/abcd2.ics</D:href>
@@ -660,7 +663,7 @@ SUMMARY:Event #3
 UID:DC6C50A017428C5216A2F1CD@example.com
 END:VEVENT
 END:VCALENDAR
-   </C:calendar-data>
+</C:calendar-data>
          </D:prop>
          <D:status>HTTP/1.1 200 OK</D:status>
        </D:propstat>
@@ -775,7 +778,7 @@ let mkcol_success () =
       let now = Ptime.v (1, 0L) in
       Mirage_fs_mem.connect "" >>= fun res_fs ->
       let content = {_|<?xml version="1.0" encoding="utf-8" ?>
-<A:prop xmlns:A="DAV:"><A:resourcetype><A:collection></A:collection><B:special-resource xmlns:B="http://example.com/ns/"></B:special-resource></A:resourcetype><A:getlastmodified>1970-01-02T00:00:00-00:00</A:getlastmodified><A:getcontenttype>text/directory</A:getcontenttype><A:getcontentlength>0</A:getcontentlength><A:getcontentlanguage>en</A:getcontentlanguage><A:displayname>Special Resource</A:displayname><A:creationdate>1970-01-02T00:00:00-00:00</A:creationdate></A:prop>|_}
+<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-02T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
       in
       Mirage_fs_mem.mkdir res_fs "home" >>= fun _ ->
       Mirage_fs_mem.mkdir res_fs "home/special" >>= fun _ ->
@@ -795,7 +798,7 @@ let delete_test () =
       let open Lwt.Infix in
       Mirage_fs_mem.connect "" >>= fun res_fs ->
       let content = {_|<?xml version="1.0" encoding="utf-8" ?>
-<A:prop xmlns:A="DAV:"><A:resourcetype><A:collection></A:collection><B:special-resource xmlns:B="http://example.com/ns/"></B:special-resource></A:resourcetype><A:getlastmodified>1970-01-02T00:00:00-00:00</A:getlastmodified><A:getcontenttype>text/directory</A:getcontenttype><A:getcontentlength>0</A:getcontentlength><A:getcontentlanguage>en</A:getcontentlanguage><A:displayname>Special Resource</A:displayname><A:creationdate>1970-01-02T00:00:00-00:00</A:creationdate></A:prop>|_}
+<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-02T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
       in
       Mirage_fs_mem.write res_fs ".prop.xml" 0
         (Cstruct.of_string content) >>= fun _ ->
@@ -805,7 +808,7 @@ let delete_test () =
       Mirage_fs_mem.connect "" >>= fun fs ->
       let now = Ptime.v (10, 0L) in
       let content' = {_|<?xml version="1.0" encoding="utf-8" ?>
-<A:prop xmlns:A="DAV:"><A:resourcetype><A:collection></A:collection><B:special-resource xmlns:B="http://example.com/ns/"></B:special-resource></A:resourcetype><A:getlastmodified>1970-01-11T00:00:00-00:00</A:getlastmodified><A:getcontenttype>text/directory</A:getcontenttype><A:getcontentlength>0</A:getcontentlength><A:getcontentlanguage>en</A:getcontentlanguage><A:displayname>Special Resource</A:displayname><A:creationdate>1970-01-02T00:00:00-00:00</A:creationdate></A:prop>|_}
+<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-11T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
       in
       Mirage_fs_mem.write fs ".prop.xml" 0
         (Cstruct.of_string content') >>= fun _ ->

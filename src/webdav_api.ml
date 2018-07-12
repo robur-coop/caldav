@@ -441,13 +441,7 @@ let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.compon
      in
      let outputs = List.fold_left (fun acc c -> match select_calendar_data d c with
          | None -> acc
-         | Some (props, comps) ->
-           let tzids =
-             List.fold_left Astring.String.Set.union Astring.String.Set.empty
-             @@ List.map Icalendar.collect_tzids comps
-           in
-           let timezones = get_timezones_for_resp data tzids in
-           (props, timezones @ comps) :: acc) [] calendar_data
+         | Some c -> c :: acc) [] calendar_data
      in
      let found_props = Xml.find_props props map in
      let ok_props, rest_props = List.partition (fun (st, _) -> st = `OK) found_props in

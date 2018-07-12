@@ -102,12 +102,18 @@ let rec tree_fold_left f s forest = match forest with
 *)
 
 
-let new_identifier map =
+let new_identifier map ns =
   let taken s = M.exists (fun _ v -> String.equal v s) map in
-  let rec gen i = 
+  let rec gen i =
     let id = String.make 1 (char_of_int i) in
     if taken id then gen (succ i) else id in
-  gen 0x41 
+  let start =
+    (* TODO this is brittle - need to check whether D and C is already used *)
+    if ns = dav_ns then 'D'
+    else if ns = caldav_ns then 'C'
+    else 'A'
+  in
+  gen (int_of_char start)
 
 (* apply_variables <map> <Tyxml> -> <list of trees> *)
 let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
@@ -124,37 +130,62 @@ let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
           m) ns_map a
     in
     let unapply ns name m = match M.find_opt ns m with
-      | None when ns = "" -> (m, name, []) (* node has no namespace *)
-      | None when ns = Xmlm.ns_xml -> (m, "xml:" ^ name, [])
-      | None when ns = Xmlm.ns_xmlns -> (m, "xmlns:" ^ name, [])
+      | None when ns = "" -> (m, "", name, []) (* node has no namespace *)
+      | None when ns = Xmlm.ns_xml -> (m, "xml", name, [])
+      | None when ns = Xmlm.ns_xmlns -> (m, "xmlns", name, [])
       | None ->
-        let id = new_identifier m in
-        (M.add ns id m, id ^ ":" ^ name, [(id, ns)])
-      | Some "" -> (m, name, [])
-      | Some short -> (m, short ^ ":" ^ name, [])
+        let id = new_identifier m ns in
+        (M.add ns id m, id, name, [(id, ns)])
+      | Some "" -> (m, "", name, [])
+      | Some short -> (m, short, name, [])
     in
-    let (ns_map'', n', new_ns) = unapply ns n ns_map' in
-    let (ns_map''', a', new_ns') = List.fold_left (fun (m, attributes, new_ns) ((ns, n), value) -> 
-      let (m', name, new_ns') = unapply ns n m in
-      m', (("", name), value) :: attributes, new_ns' @ new_ns) (ns_map'', [], new_ns) a in
-    let c' = List.map (tree_unapply_namespaces ~ns_map:ns_map''') c in
-    let a'' = List.map (fun (id, ns) -> (("", "xmlns:" ^ id), ns)) new_ns' in
-    node ~a:(a' @ a'') n' c'
-  | Pcdata data -> Pcdata data
+    let (ns_map'', ns', n', new_ns) = unapply ns n ns_map' in
+    let (ns_map''', a', new_ns') =
+      List.fold_left (fun (m, attributes, new_ns) ((ns, n), value) ->
+          let (m', ns', n', new_ns'') = unapply ns n m in
+          m', ((ns', n'), value) :: attributes, new_ns'' @ new_ns)
+        (ns_map'', [], new_ns) a
+    in
+    let c', ns_map'''' =
+      List.fold_left
+        (fun (cs, ns_map) c ->
+           let c', ns_map' = tree_unapply_namespaces ~ns_map:ns_map c in
+           (c' :: cs,  ns_map'))
+        ([], ns_map''')
+        c
+    in
+    (* let a'' = List.map (fun (id, ns) -> (("xmlns", id), ns)) new_ns' in *)
+    node ~ns:ns' ~a:a' n' (List.rev c'), ns_map''''
+  | Pcdata data -> Pcdata data, ns_map
+
+let attach_namespaces tree =
+  let tree', ns_map = tree_unapply_namespaces tree in
+  let tree'' = match tree' with
+    | Pcdata str -> Pcdata str
+    | Node (ns, n, a, c) ->
+      (* TODO a may already contain any ns from ns_map, don't add xmlns for the
+         same namespace multiple times *)
+      let a' = List.map (fun (ns, id) -> (("xmlns", id), ns)) (M.bindings ns_map) in
+      Node (ns, n, a' @ a, c)
+  in
+  tree''
 
 let tyxml_to_body t =
   Format.asprintf "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n%a"
     (Tyxml.Xml.pp ()) t
 
-let attrib_to_tyxml ((_, name), value) =
-  Tyxml.Xml.string_attrib name (Tyxml_xml.W.return value)
+let apply_ns ns name =
+  if ns = "" then name else ns ^ ":" ^ name
+
+let attrib_to_tyxml ((ns, name), value) =
+  Tyxml.Xml.string_attrib (apply_ns ns name) (Tyxml_xml.W.return value)
 
 let tree_to_tyxml t =
-  let t' = tree_unapply_namespaces t in
+  let t' = attach_namespaces t in
   let f s children tail = match s with
-    | Node (_, n, a, c) ->
+    | Node (ns, n, a, c) ->
       let a' = List.map attrib_to_tyxml a in
-      Tyxml.Xml.node ~a:a' n (Tyxml_xml.W.return children) :: tail
+      Tyxml.Xml.node ~a:a' (apply_ns ns n) (Tyxml_xml.W.return children) :: tail
     | Pcdata str -> Tyxml.Xml.pcdata (Tyxml_xml.W.return str) :: tail
   in List.hd @@ tree_fold_right f [] [t']
 
