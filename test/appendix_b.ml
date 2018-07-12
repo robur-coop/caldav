@@ -1,5 +1,5 @@
 
-let abcd1 = ("abcd1.ics", "fffff-abcd1",
+let abcd1 = ("abcd1.ics", "\"fffff-abcd1\"",
 {|BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -32,7 +32,7 @@ END:VEVENT
 END:VCALENDAR
 |})
 
-let abcd2 = ("abcd2.ics", "fffff-abcd2",
+let abcd2 = ("abcd2.ics", "\"fffff-abcd2\"",
 {|BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -81,7 +81,7 @@ END:VEVENT
 END:VCALENDAR
 |})
 
-let abcd3 = ("abcd3.ics", "fffff-abcd3",
+let abcd3 = ("abcd3.ics", "\"fffff-abcd3\"",
 {|BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -120,7 +120,7 @@ END:VEVENT
 END:VCALENDAR
 |})
 
-let abcd4 = ("abcd4.ics", "fffff-abcd4",
+let abcd4 = ("abcd4.ics", "\"fffff-abcd4\"",
 {|BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -138,7 +138,7 @@ END:VTODO
 END:VCALENDAR
 |})
 
-let abcd5 = ("abcd5.ics", "fffff-abcd5",
+let abcd5 = ("abcd5.ics", "\"fffff-abcd5\"",
 {|BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -176,7 +176,7 @@ END:VTODO
 END:VCALENDAR
 |})
 
-let abcd6 = ("abcd6.ics", "fffff-abcd6",
+let abcd6 = ("abcd6.ics", "\"fffff-abcd6\"",
 {|BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -193,7 +193,7 @@ END:VTODO
 END:VCALENDAR
 |})
 
-let abcd7 = ("abcd7.ics", "fffff-abcd7",
+let abcd7 = ("abcd7.ics", "\"fffff-abcd7\"",
 {|BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -209,7 +209,7 @@ END:VTODO
 END:VCALENDAR
 |})
 
-let abcd8 = ("abcd8.ics", "fffff-abcd8",
+let abcd8 = ("abcd8.ics", "\"fffff-abcd8\"",
 {|BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
