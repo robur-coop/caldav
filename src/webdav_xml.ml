@@ -213,14 +213,27 @@ let prop_tree_to_map t =
       PairMap.empty children
   | _ -> assert false
 
+let is_whitespace_node = function
+  | Pcdata str -> Astring.String.for_all (function ' ' | '\n' | '\r' | '\t' -> true | _ -> false) str
+  | Node _ -> false
+
 let string_to_tree str =
   let data str = Pcdata str
   and el ((ns, name), attrs) children = node ~ns ~a:attrs name children
   in
   try
-    let input = Xmlm.make_input ~strip:true (`String (0, str)) in
+    let input = Xmlm.make_input (`String (0, str)) in
     ignore (Xmlm.input input) ; (* ignore DTD *)
-    Some (Xmlm.input_tree ~el ~data input)
+    let tree = Xmlm.input_tree ~el ~data input in
+    let strip node children tail =
+      if is_whitespace_node node
+      then tail
+      else match node with
+        | Pcdata str -> Pcdata str :: tail
+        | Node (ns, name, attrs, _) -> Node (ns, name, attrs, children) :: tail
+    in
+    let stripped_tree = tree_fold_right strip [] [ tree ] in
+    Some (List.hd stripped_tree)
   with _ -> None
 
 let rec filter_map f = function
