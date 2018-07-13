@@ -28,7 +28,7 @@ type comp = [ `Allcomp | `Comp of component list ]
 and prop = [ `Allprop | `Prop of (string * bool) list ]
 and component = string * prop * comp [@@deriving show, eq]
 
-type timerange = string * string [@@deriving show, eq]
+type timerange = (Ptime.t * bool) * (Ptime.t * bool) [@@deriving show, eq]
 
 type calendar_data =
   component option *
@@ -53,7 +53,7 @@ type prop_filter =
   string *
   [ `Is_defined (* represents empty filter in RFC *)
   | `Is_not_defined
-  | `Range of (string * string) * param_filter list
+  | `Range of timerange * param_filter list
   | `Text of (string * string * bool) * param_filter list ] [@@deriving show, eq]
 
 (* TODO maybe add tag, make filter section more clear in the parse tree *)
@@ -427,7 +427,10 @@ let range_parser name : tree -> (timerange, string) result =
   tree_lift
     (fun a c -> is_empty c >>= fun () -> match find_attribute "start" a, find_attribute "end" a with
        | None, _ | _, None -> Error "Missing attribute \"start\" or \"end\""
-       | Some s, Some e -> Ok (s, e))
+       | Some s, Some e -> match Icalendar.parse_datetime s, Icalendar.parse_datetime e with
+         | Error e, _ -> Error e
+         | _, Error e -> Error e
+         | Ok s', Ok e' -> Ok (s', e'))
     (name_ns name caldav_ns >>~ extract_attributes)
     (any)
 

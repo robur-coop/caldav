@@ -6,6 +6,11 @@ let header = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
 
 let tree xml = match Xml.string_to_tree xml with Some t -> t | None -> Alcotest.fail "Invalid xml."
 
+let to_ptime date time =
+  match Ptime.of_date_time (date, (time, 0)) with
+  | None -> Alcotest.fail "invalid date time"
+  | Some p -> p
+
 let prop =
   let module M = struct
     type t = Xml.propfind
@@ -217,15 +222,16 @@ let parse_report_query_7_8_1 () =
                       ("RECURRENCE-ID", false) ],
                     `Comp []) ;
                    ("VTIMEZONE", `Prop [], `Comp []) ]), None, None) ] ),
-        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ("20060104T000000Z", "20060105T000000Z"), [], [])) ])))
+        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ((to_ptime (2006,01,04) (00,00,00), true), (to_ptime (2006,01,05) (00,00,00), true)), [], [])) ])))
   in
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
-let parse_report_query_7_8_2 () =
-  let xml = header ^ {|<C:calendar-query xmlns:D="DAV:"
+let report_7_8_2 = 
+  header ^ {|<C:calendar-query xmlns:D="DAV:"
                      xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:prop>
+       <D:getetag/>
        <C:calendar-data>
          <C:limit-recurrence-set start="20060103T000000Z"
                                  end="20060105T000000Z"/>
@@ -240,10 +246,13 @@ let parse_report_query_7_8_2 () =
        </C:comp-filter>
      </C:filter>
                           </C:calendar-query>|}
+
+let parse_report_query_7_8_2 () =
+  let xml = report_7_8_2 
   and expected =
     Ok (Some (`Proplist [
-        `Calendar_data (None, Some (`Limit_recurrence_set ("20060103T000000Z", "20060105T000000Z")), None) ] ),
-        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ("20060103T000000Z", "20060105T000000Z"), [], [])) ])))
+        `Prop (("DAV:", "getetag")); `Calendar_data (None, Some (`Limit_recurrence_set ((to_ptime (2006,01,03) (00,00,00), true), (to_ptime (2006,01,05) (00,00,00), true))), None) ] ),
+        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ((to_ptime (2006,01,03) (00,00,00), true), (to_ptime (2006,01,05) (00,00,00), true)), [], [])) ])))
   in
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
@@ -268,8 +277,8 @@ let parse_report_query_7_8_3 () =
    </C:calendar-query>|}
   and expected =
     Ok (Some (`Proplist [
-        `Calendar_data (None, Some (`Expand ("20060103T000000Z", "20060105T000000Z")), None) ] ),
-        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ("20060103T000000Z", "20060105T000000Z"), [], [])) ])))
+        `Calendar_data (None, Some (`Expand ((to_ptime (2006,01,03) (00,00,00), true), (to_ptime (2006,01,05) (00,00,00), true))), None) ] ),
+        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ((to_ptime (2006,01,03) (00,00,00), true), (to_ptime (2006,01,05) (00,00,00), true)), [], [])) ])))
   in
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
@@ -294,8 +303,8 @@ let parse_report_query_7_8_4 () =
    </C:calendar-query>|}
   and expected =
     Ok (Some (`Proplist [
-        `Calendar_data (None, None, Some (`Limit_freebusy_set ("20060102T000000Z", "20060103T000000Z"))) ] ),
-        ("VCALENDAR", `Comp_filter (None, [], [ ("VFREEBUSY", `Comp_filter (Some ("20060102T000000Z", "20060103T000000Z"), [], [])) ])))
+        `Calendar_data (None, None, Some (`Limit_freebusy_set ((to_ptime (2006,01,02) (00,00,00), true), (to_ptime (2006,01,03) (00,00,00), true)))) ] ),
+        ("VCALENDAR", `Comp_filter (None, [], [ ("VFREEBUSY", `Comp_filter (Some ((to_ptime (2006,01,02) (00,00,00), true), (to_ptime (2006,01,03) (00,00,00), true)), [], [])) ])))
   in
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
@@ -321,8 +330,8 @@ let parse_report_query_7_8_5 () =
     Ok (Some (`Proplist [ `Prop (Xml.dav_ns, "getetag"); `Calendar_data (None, None, None)]),
         ("VCALENDAR", `Comp_filter (None, [], [ ("VTODO", `Comp_filter ((None, [],
                                     [("VALARM",
-                                      `Comp_filter (((Some ("20060106T100000Z",
-                                                            "20060107T100000Z")),
+                                      `Comp_filter (((Some ((to_ptime (2006,01,06) (10,00,00), true),
+                                                            (to_ptime (2006,01,07) (10,00,00), true))),
                                                      [], [])))
                                       ])))
                      ]))) 
@@ -677,11 +686,121 @@ END:VCALENDAR
               (Ok (tree expected))
               (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
 
+
+let test_report_7_8_2 () =
+  let xml = report_7_8_2
+  and expected = header ^ {|
+   <D:multistatus xmlns:D="DAV:"
+              xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd2.ics</D:href>
+       <D:propstat>
+         <D:prop>
+           <D:getetag>"fffff-abcd2"</D:getetag>
+           <C:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VTIMEZONE
+LAST-MODIFIED:20040110T032845Z
+TZID:US/Eastern
+BEGIN:DAYLIGHT
+DTSTART:20000404T020000
+RRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=4
+TZNAME:EDT
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0400
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20001026T020000
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10
+TZNAME:EST
+TZOFFSETFROM:-0400
+TZOFFSETTO:-0500
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+DTSTAMP:20060206T001121Z
+DTSTART;TZID=US/Eastern:20060102T120000
+DURATION:PT1H
+RRULE:FREQ=DAILY;COUNT=5
+SUMMARY:Event #2
+UID:00959BC664CA650E933C892C@example.com
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20060206T001121Z
+DTSTART;TZID=US/Eastern:20060104T140000
+DURATION:PT1H
+RECURRENCE-ID;TZID=US/Eastern:20060104T120000
+SUMMARY:Event #2 bis
+UID:00959BC664CA650E933C892C@example.com
+END:VEVENT
+END:VCALENDAR
+</C:calendar-data>
+         </D:prop>
+         <D:status>HTTP/1.1 200 OK</D:status>
+       </D:propstat>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd3.ics</D:href>
+       <D:propstat>
+         <D:prop>
+           <D:getetag>"fffff-abcd3"</D:getetag>
+           <C:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VTIMEZONE
+LAST-MODIFIED:20040110T032845Z
+TZID:US/Eastern
+BEGIN:DAYLIGHT
+DTSTART:20000404T020000
+RRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=4
+TZNAME:EDT
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0400
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20001026T020000
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10
+TZNAME:EST
+TZOFFSETFROM:-0400
+TZOFFSETTO:-0500
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+ATTENDEE;PARTSTAT=ACCEPTED;ROLE=CHAIR:mailto:cyrus@example.com
+ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:lisa@example.com
+DTSTAMP:20060206T001220Z
+DTSTART;TZID=US/Eastern:20060104T100000
+DURATION:PT1H
+LAST-MODIFIED:20060206T001330Z
+ORGANIZER:mailto:cyrus@example.com
+SEQUENCE:1
+STATUS:TENTATIVE
+SUMMARY:Event #3
+UID:DC6C50A017428C5216A2F1CD@example.com
+X-ABC-GUID:E1CX5Dr-0007ym-Hz@example.com
+END:VEVENT
+END:VCALENDAR
+</C:calendar-data>
+         </D:prop>
+         <D:status>HTTP/1.1 200 OK</D:status>
+       </D:propstat>
+     </D:response>
+   </D:multistatus>
+ |}
+  in
+  Format.printf "file system is %a\n"
+    Mirage_fs_mem.pp appendix_b_data ;
+  Alcotest.(check (result t_tree string) __LOC__
+              (Ok (tree expected))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
+
+
 let report_tests = [
   "Report from section 7.8.1 - first file only", `Quick, test_report_1 ;
   "Report from section 7.8.1", `Quick, test_report_7_8_1 ;
-(*  "Parse report query from section 7.8.2", `Quick, parse_report_query_7_8_2 ;
-  "Parse report query from section 7.8.3", `Quick, parse_report_query_7_8_3 ;
+  "Parse report query from section 7.8.2", `Quick, test_report_7_8_2 ;
+(*  "Parse report query from section 7.8.3", `Quick, parse_report_query_7_8_3 ;
   "Parse report query from section 7.8.4", `Quick, parse_report_query_7_8_4 ;
   "Parse report query from section 7.8.5", `Quick, parse_report_query_7_8_5 ;
   "Parse report query from section 7.8.6", `Quick, parse_report_query_7_8_6 ;

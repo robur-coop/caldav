@@ -295,22 +295,6 @@ let select_component component ((name, prop, comp): Xml.component) =
   | `Timezone props, "VTIMEZONE" -> Some(`Timezone (timezone_propfilter prop props))
   | _ -> None
 
-let select_calendar_data (calprop, comps) (requested_data: Xml.calendar_data) =
-  let (comp, range, freebusy) = requested_data in
-  match comp with
-  | None -> Some (calprop, comps)
-  | Some ("VCALENDAR", prop, comp) -> 
-    let comps' = match comp with
-    | `Allcomp -> comps
-    | `Comp cs -> 
-       let select_and_filter c acc' comp = match select_component c comp with None -> acc' | Some c -> c :: acc' in
-       let comps' = List.fold_left (fun acc c -> List.fold_left (select_and_filter c) acc cs) [] comps in
-       List.rev comps'
-    in
-    Some (calprop_propfilter prop calprop, comps')
-  | _ -> None
-
-
 let get_time_properties (props:Icalendar.eventprop list) =
   let dtstart = match List.find_opt (function `Dtstart _ -> true | _ -> false) props with
   | None -> assert false
@@ -358,7 +342,27 @@ let event_in_timerange ((s, _), (e, _)) (`Event (props, alarms)) =
 
 let comp_in_timerange r = function
   | `Event _ as e -> event_in_timerange r e
+  | `Timezone _  -> true
   | _ -> false
+
+let select_calendar_data (calprop, comps) (requested_data: Xml.calendar_data) =
+  let (comp, range, freebusy) = requested_data in
+  let limit_rec_set comps = match range with
+  | Some (`Limit_recurrence_set range) -> List.filter (comp_in_timerange range) comps
+  | _ -> comps in
+  match comp with
+  | None -> Some (calprop, limit_rec_set comps)
+  | Some ("VCALENDAR", prop, comp) -> 
+    let comps' = match comp with
+    | `Allcomp -> comps
+    | `Comp cs -> 
+       let select_and_filter c acc' comp = match select_component c comp with None -> acc' | Some c -> c :: acc' in
+       let comps' = List.fold_left (fun acc c -> List.fold_left (select_and_filter c) acc cs) [] comps in
+       List.rev comps'
+    in
+    Some (calprop_propfilter prop calprop, limit_rec_set comps')
+  | _ -> None
+
 
 (*
 type comp_filter = [
@@ -368,7 +372,6 @@ type comp_filter = [
 ]
 and component_filter = string * comp_filter
 *)
-
 let apply_comp_filter (comp_name, comp_filter) component =
   let is_match =
     String.equal comp_name (Icalendar.component_to_ics_key component)
@@ -382,13 +385,7 @@ let apply_comp_filter (comp_name, comp_filter) component =
   | `Comp_filter (tr_opt, pfs, cfs), true ->
     match tr_opt with
     | None -> true
-    | Some (s, e) -> match Icalendar.parse_datetime s, Icalendar.parse_datetime e with
-      | Error _, _ | _, Error _ ->
-        Printf.printf "error while parsing datetime\n" ;
-        assert false (*TODO*)
-      | Ok s, Ok e ->
-        Format.printf "range filter from %a till %a\n" Ptime.pp (fst s) Ptime.pp (fst e) ;
-        comp_in_timerange (s, e) component
+    | Some range -> comp_in_timerange range component
         (* TODO: treat pfs and cfs *)
 
 let get_timezones_for_resp calendar tzids =
@@ -408,13 +405,7 @@ let apply_comp_filter_to_vcalendar filter data =
   | ("VCALENDAR", `Comp_filter (tr_opt, pfs, cfs)), (props, comps) ->
     let comps' = match tr_opt with
     | None -> comps
-    | Some (s, e) -> match Icalendar.parse_datetime s, Icalendar.parse_datetime e with
-      | Error _, _ | _, Error _ ->
-        Printf.printf "error while parsing datetime\n" ;
-        assert false (*TODO*)
-      | Ok s, Ok e ->
-        Format.printf "range filter from %a till %a\n" Ptime.pp (fst s) Ptime.pp (fst e) ;
-        if List.exists (comp_in_timerange (s, e)) comps then comps else []
+    | Some range -> if List.exists (comp_in_timerange range) comps then comps else []
     in
     let comps'' =
       (* TODO abstract *)
