@@ -328,7 +328,7 @@ let real_event_in_timerange s e dtstart dtend duration is_datetime =
       | None -> false
       | Some dtend -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart 
 
-let fold_event f acc range (`Event (props, alarms)) = 
+let fold_event f acc range exceptions (`Event (props, alarms)) = 
   let ((s, _), (e, _)) = range in
   let (dtstart, dtend, duration) = get_time_properties props in
   let ts_of_dtstart = function
@@ -340,7 +340,14 @@ let fold_event f acc range (`Event (props, alarms)) =
   let dtstart', is_datetime = ts_of_dtstart dtstart in
   let rrule = List.find_opt (function `Rrule _ -> true | _ -> false) props in
 
-  let next_r dtstart'' = match rrule with None -> None | Some (`Rrule (_, r)) -> Icalendar.next_recurrence r dtstart' dtstart'' in
+  let rec next_r dtstart'' = match rrule with 
+  | None -> None 
+  | Some (`Rrule (_, r)) -> match Icalendar.next_recurrence r dtstart' dtstart'' with
+    | None -> None
+    | Some dtstart''' -> 
+      let date, _ = Ptime.to_date_time dtstart''' in
+      if List.mem date exceptions then next_r dtstart''' else Some dtstart'''
+  in
   let rec in_timerange acc = function
    | Some dtstart'' when Ptime.is_earlier ~than:s dtstart'' -> 
      in_timerange acc (next_r dtstart'')
@@ -350,16 +357,16 @@ let fold_event f acc range (`Event (props, alarms)) =
    | _ -> acc in
   in_timerange acc (Some dtstart')
 
-let event_in_timerange range e =
+let event_in_timerange range exceptions e =
   let f acc _ = true in
-  fold_event f false range e
+  fold_event f false range exceptions e
  
-let comp_in_timerange r = function
-  | `Event _ as e -> event_in_timerange r e
+let comp_in_timerange r exceptions = function
+  | `Event _ as e -> event_in_timerange r exceptions e
   | `Timezone _  -> true
   | _ -> false
 
-let expand_event range ((props: Icalendar.eventprop list), alarms) =
+let expand_event range exceptions ((props: Icalendar.eventprop list), alarms) =
   let f acc dtstart =
     let recur_id : Icalendar.eventprop = match List.find_opt (function `Dtstart (prop, v) -> true | _ -> false) props with
     | None -> assert false
@@ -378,17 +385,24 @@ let expand_event range ((props: Icalendar.eventprop list), alarms) =
       | x -> x) props in
     `Event (props', alarms) :: acc
   in
-  fold_event f [] range (`Event (props, alarms))
+  fold_event f [] range exceptions (`Event (props, alarms))
 
-let expand_comp range = function
-  | `Event e -> expand_event range e
+let expand_comp range exceptions = function
+  | `Event e -> expand_event range exceptions e
   | _ -> []
 
-let select_calendar_data (calprop, comps) (requested_data: Xml.calendar_data) =
+let select_calendar_data (calprop, (comps : Icalendar.component list)) (requested_data: Xml.calendar_data) =
   let (comp, range, freebusy) = requested_data in
+  let exceptions = 
+    let events = List.filter (function `Event (props, _) -> List.exists (function `Recur_id _ -> true | _ -> false) props | _ -> false) comps in
+    List.map (function `Event ((props: Icalendar.eventprop list), _) -> begin match List.find (function `Dtstart _ -> true | _ -> false) props with
+      | `Dtstart (_, `Date d)          -> d
+      | `Dtstart (_, `Datetime (d, _)) -> fst @@ Ptime.to_date_time d end
+    | _ -> assert false
+  ) events in
   let limit_rec_set comps = match range with
-  | Some (`Limit_recurrence_set range) -> List.filter (comp_in_timerange range) comps
-  | Some (`Expand range) -> List.flatten (List.map (expand_comp range) comps)
+  | Some (`Limit_recurrence_set range) -> List.filter (comp_in_timerange range exceptions) comps
+  | Some (`Expand range) -> List.flatten (List.map (expand_comp range exceptions) comps)
   | _ -> comps in
   match comp with
   | None -> Some (calprop, limit_rec_set comps)
@@ -425,7 +439,9 @@ let apply_comp_filter (comp_name, comp_filter) component =
   | `Comp_filter (tr_opt, pfs, cfs), true ->
     match tr_opt with
     | None -> true
-    | Some range -> comp_in_timerange range component
+    | Some range -> 
+       let exceptions = [] in (* TODO *)
+       comp_in_timerange range exceptions component
         (* TODO: treat pfs and cfs *)
 
 let get_timezones_for_resp calendar tzids =
@@ -445,7 +461,9 @@ let apply_comp_filter_to_vcalendar filter data =
   | ("VCALENDAR", `Comp_filter (tr_opt, pfs, cfs)), (props, comps) ->
     let comps' = match tr_opt with
     | None -> comps
-    | Some range -> if List.exists (comp_in_timerange range) comps then comps else []
+    | Some range -> 
+      let exceptions = [] in (* TODO *)
+      if List.exists (comp_in_timerange range exceptions) comps then comps else []
     in
     let comps'' =
       (* TODO abstract *)
