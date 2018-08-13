@@ -361,11 +361,21 @@ let comp_in_timerange r = function
 
 let expand_event range ((props: Icalendar.eventprop list), alarms) =
   let f acc dtstart =
+    let recur_id : Icalendar.eventprop = match List.find_opt (function `Dtstart (prop, v) -> true | _ -> false) props with
+    | None -> assert false
+    | Some (`Dtstart (prop, v)) -> 
+      let id = function
+         | `Iana_param (a, b) -> `Iana_param (a, b)
+         | `Tzid (a, b) -> `Tzid (a, b)
+         | `Valuetype v -> `Valuetype v 
+         | `Xparam ((a, b), c) -> `Xparam ((a, b), c)
+      in
+      `Recur_id (List.map id prop, v) in
     let props' = List.map (function 
       | `Dtstart (prop, `Datetime (_, utc)) -> `Dtstart (prop, `Datetime (dtstart, utc))
       | `Dtstart (prop, `Date _) -> `Dtstart (prop, `Date (fst (Ptime.to_date_time dtstart)))
-      | x -> x) props |> 
-    List.filter  (function `Rrule _ -> false | _ -> true ) in
+      | `Rrule _ -> recur_id
+      | x -> x) props in
     `Event (props', alarms) :: acc
   in
   fold_event f [] range (`Event (props, alarms))
