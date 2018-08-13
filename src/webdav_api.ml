@@ -366,7 +366,9 @@ let comp_in_timerange r exceptions = function
   | `Timezone _  -> true
   | _ -> false
 
-let expand_event range exceptions ((props: Icalendar.eventprop list), alarms) =
+let normalize_timezone tzid timezones =
+
+let expand_event range exceptions timezones ((props: Icalendar.eventprop list), alarms) =
   let f acc dtstart =
     let recur_id : Icalendar.eventprop = match List.find_opt (function `Dtstart (prop, v) -> true | _ -> false) props with
     | None -> assert false
@@ -387,8 +389,8 @@ let expand_event range exceptions ((props: Icalendar.eventprop list), alarms) =
   in
   fold_event f [] range exceptions (`Event (props, alarms))
 
-let expand_comp range exceptions = function
-  | `Event e -> expand_event range exceptions e
+let expand_comp range exceptions timezones = function
+  | `Event e -> expand_event range exceptions timezones e
   | _ -> []
 
 let select_calendar_data (calprop, (comps : Icalendar.component list)) (requested_data: Xml.calendar_data) =
@@ -400,9 +402,10 @@ let select_calendar_data (calprop, (comps : Icalendar.component list)) (requeste
       | `Dtstart (_, `Datetime (d, _)) -> fst @@ Ptime.to_date_time d end
     | _ -> assert false
   ) events in
+  let timezones = List.filter (function `Timezone _ -> true | _ -> false) comps in
   let limit_rec_set comps = match range with
   | Some (`Limit_recurrence_set range) -> List.filter (comp_in_timerange range exceptions) comps
-  | Some (`Expand range) -> List.flatten (List.map (expand_comp range exceptions) comps)
+  | Some (`Expand range) -> List.flatten (List.map (expand_comp range exceptions timezones) comps)
   | _ -> comps in
   match comp with
   | None -> Some (calprop, limit_rec_set comps)
