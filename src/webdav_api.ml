@@ -332,12 +332,12 @@ let fold_event f acc range (`Event (props, alarms)) =
   let ((s, _), (e, _)) = range in
   let (dtstart, dtend, duration) = get_time_properties props in
   let ts_of_dtstart = function
-  | `Datetime (dtstart, utc) -> dtstart, utc, true
+  | `Datetime (dtstart, utc) -> dtstart, true
   | `Date start -> match Ptime.of_date_time (start, ((0, 0, 0), 0)) with
     | None -> assert false
-    | Some dtstart -> dtstart, false, false
+    | Some dtstart -> dtstart, false
   in 
-  let dtstart', utc, is_datetime = ts_of_dtstart dtstart in
+  let dtstart', is_datetime = ts_of_dtstart dtstart in
   let rrule = List.find_opt (function `Rrule _ -> true | _ -> false) props in
 
   let next_r dtstart'' = match rrule with None -> None | Some (`Rrule (_, r)) -> Icalendar.next_recurrence r dtstart' dtstart'' in
@@ -345,13 +345,13 @@ let fold_event f acc range (`Event (props, alarms)) =
    | Some dtstart'' when Ptime.is_earlier ~than:s dtstart'' -> 
      in_timerange acc (next_r dtstart'')
    | Some dtstart'' when real_event_in_timerange s e dtstart'' dtend duration is_datetime -> 
-     let acc' = f acc dtstart'' utc is_datetime in
+     let acc' = f acc dtstart'' in
      in_timerange acc' (next_r dtstart'')
    | _ -> acc in
   in_timerange acc (Some dtstart')
 
 let event_in_timerange range e =
-  let f acc _ _ _ = true in
+  let f acc _ = true in
   fold_event f false range e
  
 let comp_in_timerange r = function
@@ -360,9 +360,13 @@ let comp_in_timerange r = function
   | _ -> false
 
 let expand_event range ((props: Icalendar.eventprop list), alarms) =
-  let f acc dtstart utc is_datetime =
-    let start = if is_datetime then `Datetime (dtstart, utc) else `Date (fst (Ptime.to_date_time dtstart)) in
-    `Event (`Dtstart ([], start) :: List.filter (function `Rrule _ | `Dtstart _ -> false | _ -> true ) props, alarms) :: acc
+  let f acc dtstart =
+    let props' = List.map (function 
+      | `Dtstart (prop, `Datetime (_, utc)) -> `Dtstart (prop, `Datetime (dtstart, utc))
+      | `Dtstart (prop, `Date _) -> `Dtstart (prop, `Date (fst (Ptime.to_date_time dtstart)))
+      | x -> x) props |> 
+    List.filter  (function `Rrule _ -> false | _ -> true ) in
+    `Event (props', alarms) :: acc
   in
   fold_event f [] range (`Event (props, alarms))
 
