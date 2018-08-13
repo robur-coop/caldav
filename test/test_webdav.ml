@@ -257,10 +257,11 @@ let parse_report_query_7_8_2 () =
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
-let parse_report_query_7_8_3 () =
-  let xml = header ^ {|<C:calendar-query xmlns:D="DAV:"
+let report_7_8_3 = 
+  header ^ {|<C:calendar-query xmlns:D="DAV:"
                      xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:prop>
+     <D:getetag/>
        <C:calendar-data>
          <C:expand start="20060103T000000Z"
                    end="20060105T000000Z"/>
@@ -275,8 +276,12 @@ let parse_report_query_7_8_3 () =
        </C:comp-filter>
      </C:filter>
    </C:calendar-query>|}
+
+let parse_report_query_7_8_3 () =
+  let xml = report_7_8_3
   and expected =
     Ok (Some (`Proplist [
+        `Prop (("DAV:", "getetag")); 
         `Calendar_data (None, Some (`Expand ((to_ptime (2006,01,03) (00,00,00), true), (to_ptime (2006,01,05) (00,00,00), true))), None) ] ),
         ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ((to_ptime (2006,01,03) (00,00,00), true), (to_ptime (2006,01,05) (00,00,00), true)), [], [])) ])))
   in
@@ -577,8 +582,6 @@ let test_report_1 () =
   and expected = header ^ {|
 <D:multistatus xmlns:D="DAV:"></D:multistatus>|}
   in
-  Format.printf "file system is %a\n"
-    Mirage_fs_mem.pp appendix_b_1_data ;
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
               (report (`Dir [ "bernard" ; "work" ]) (tree xml) appendix_b_1_data))
@@ -680,8 +683,6 @@ END:VCALENDAR
    </D:multistatus>
 |}
   in
-  Format.printf "file system is %a\n"
-    Mirage_fs_mem.pp appendix_b_data ;
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
               (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
@@ -789,25 +790,92 @@ END:VCALENDAR
    </D:multistatus>
  |}
   in
-  Format.printf "file system is %a\n"
-    Mirage_fs_mem.pp appendix_b_data ;
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
               (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
 
+let test_report_7_8_3 () =
+  let xml = report_7_8_3
+  and expected = header ^ {|
+   <D:multistatus xmlns:D="DAV:"
+              xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd2.ics</D:href>
+       <D:propstat>
+         <D:prop>
+           <D:getetag>"fffff-abcd2"</D:getetag>
+           <C:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+DTSTAMP:20060206T001121Z
+DTSTART:20060103T170000
+DURATION:PT1H
+RECURRENCE-ID:20060103T170000
+SUMMARY:Event #2
+UID:00959BC664CA650E933C892C@example.com
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20060206T001121Z
+DTSTART:20060104T190000
+DURATION:PT1H
+RECURRENCE-ID:20060104T170000
+SUMMARY:Event #2 bis
+UID:00959BC664CA650E933C892C@example.com
+END:VEVENT
+END:VCALENDAR
+</C:calendar-data>
+         </D:prop>
+         <D:status>HTTP/1.1 200 OK</D:status>
+       </D:propstat>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd3.ics</D:href>
+       <D:propstat>
+         <D:prop>
+           <D:getetag>"fffff-abcd3"</D:getetag>
+           <C:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+ATTENDEE;PARTSTAT=ACCEPTED;ROLE=CHAIR:mailto:cyrus@example.com
+ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:lisa@example.com
+DTSTAMP:20060206T001220Z
+DTSTART:20060104T150000
+DURATION:PT1H
+LAST-MODIFIED:20060206T001330Z
+ORGANIZER:mailto:cyrus@example.com
+SEQUENCE:1
+STATUS:TENTATIVE
+SUMMARY:Event #3
+UID:DC6C50A017428C5216A2F1CD@example.com
+X-ABC-GUID:E1CX5Dr-0007ym-Hz@example.com
+END:VEVENT
+END:VCALENDAR
+</C:calendar-data>
+         </D:prop>
+         <D:status>HTTP/1.1 200 OK</D:status>
+       </D:propstat>
+     </D:response>
+   </D:multistatus>
+ |}
+  in
+  Alcotest.(check (result t_tree string) __LOC__
+              (Ok (tree expected))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
 
 let report_tests = [
   "Report from section 7.8.1 - first file only", `Quick, test_report_1 ;
   "Report from section 7.8.1", `Quick, test_report_7_8_1 ;
   "Parse report query from section 7.8.2", `Quick, test_report_7_8_2 ;
-(*  "Parse report query from section 7.8.3", `Quick, parse_report_query_7_8_3 ;
-  "Parse report query from section 7.8.4", `Quick, parse_report_query_7_8_4 ;
-  "Parse report query from section 7.8.5", `Quick, parse_report_query_7_8_5 ;
-  "Parse report query from section 7.8.6", `Quick, parse_report_query_7_8_6 ;
-  "Parse report query from section 7.8.7", `Quick, parse_report_query_7_8_7 ;
-  "Parse report query from section 7.8.8", `Quick, parse_report_query_7_8_8 ;
-  "Parse report query from section 7.8.9", `Quick, parse_report_query_7_8_9 ;
-    "Parse report query from section 7.8.10", `Quick, parse_report_query_7_8_10 *)
+  "Parse report query from section 7.8.3", `Quick, test_report_7_8_3 ;
+(*  "Parse report query from section 7.8.4", `Quick, test_report_7_8_4 ;
+  "Parse report query from section 7.8.5", `Quick, test_report_7_8_5 ;
+  "Parse report query from section 7.8.6", `Quick, test_report_7_8_6 ;
+  "Parse report query from section 7.8.7", `Quick, test_report_7_8_7 ;
+  "Parse report query from section 7.8.8", `Quick, test_report_7_8_8 ;
+  "Parse report query from section 7.8.9", `Quick, test_report_7_8_9 ;
+    "Parse report query from section 7.8.10", `Quick, test_report_7_8_10 *)
 ]
 
 

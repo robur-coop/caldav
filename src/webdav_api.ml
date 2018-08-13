@@ -313,42 +313,68 @@ let get_time_properties (props:Icalendar.eventprop list) =
   | Some (`Duration (_, s)) -> Some s
   in (dtstart, dtend, duration)
 
-let event_in_timerange ((s, _), (e, _)) (`Event (props, alarms)) =
-  Format.printf "s: %a\n" Ptime.pp s ;
-  Format.printf "e: %a\n" Ptime.pp e ;
-  let (dtstart, dtend, duration) = get_time_properties props
-  and ts_of_dtstart = function
-  | `Datetime (dtstart, utc) -> dtstart
+let real_event_in_timerange s e dtstart dtend duration is_datetime =
+  match dtend, duration with
+  | Some dtend, None -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart
+  | None, Some secs when secs > 0 -> 
+    begin match Ptime.add_span dtstart (Ptime.Span.of_int_s secs) with
+    | None -> false
+    | Some dtend -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart
+    end
+  | None, Some 0 -> (Ptime.is_earlier s ~than:dtstart || Ptime.equal s dtstart) && Ptime.is_later e ~than:dtstart
+  | None, None -> if is_datetime 
+    then (Ptime.is_earlier s ~than:dtstart || Ptime.equal s dtstart) && Ptime.is_later e ~than:dtstart 
+    else match Ptime.add_span dtstart (Ptime.Span.of_int_s (24 * 60 * 60)) with
+      | None -> false
+      | Some dtend -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart 
+
+let fold_event f acc range (`Event (props, alarms)) = 
+  let ((s, _), (e, _)) = range in
+  let (dtstart, dtend, duration) = get_time_properties props in
+  let ts_of_dtstart = function
+  | `Datetime (dtstart, utc) -> dtstart, utc, true
   | `Date start -> match Ptime.of_date_time (start, ((0, 0, 0), 0)) with
     | None -> assert false
-    | Some dtstart -> dtstart
+    | Some dtstart -> dtstart, false, false
   in 
-  let dtstart' = ts_of_dtstart dtstart in
-  Format.printf "dtstart: %a\n" Ptime.pp dtstart' ;
- 
-  match dtend, duration with
-  | Some dtend, None -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart'
-  | None, Some secs when secs > 0 -> 
-    begin match Ptime.add_span dtstart' (Ptime.Span.of_int_s secs) with
-    | None -> false
-    | Some dtend -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart'
-    end
-  | None, Some 0 -> (Ptime.is_earlier s ~than:dtstart' || Ptime.equal s dtstart') && Ptime.is_later e ~than:dtstart'
-  | None, None -> match dtstart with
-    | `Datetime _ -> (Ptime.is_earlier s ~than:dtstart' || Ptime.equal s dtstart') && Ptime.is_later e ~than:dtstart' 
-    | `Date _ -> match Ptime.add_span dtstart' (Ptime.Span.of_int_s (24 * 60 * 60)) with
-      | None -> false
-      | Some dtend -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart' 
+  let dtstart', utc, is_datetime = ts_of_dtstart dtstart in
+  let rrule = List.find_opt (function `Rrule _ -> true | _ -> false) props in
 
+  let next_r dtstart'' = match rrule with None -> None | Some (`Rrule (_, r)) -> Icalendar.next_recurrence r dtstart' dtstart'' in
+  let rec in_timerange acc = function
+   | Some dtstart'' when Ptime.is_earlier ~than:s dtstart'' -> 
+     in_timerange acc (next_r dtstart'')
+   | Some dtstart'' when real_event_in_timerange s e dtstart'' dtend duration is_datetime -> 
+     let acc' = f acc dtstart'' utc is_datetime in
+     in_timerange acc' (next_r dtstart'')
+   | _ -> acc in
+  in_timerange acc (Some dtstart')
+
+let event_in_timerange range e =
+  let f acc _ _ _ = true in
+  fold_event f false range e
+ 
 let comp_in_timerange r = function
   | `Event _ as e -> event_in_timerange r e
   | `Timezone _  -> true
   | _ -> false
 
+let expand_event range ((props: Icalendar.eventprop list), alarms) =
+  let f acc dtstart utc is_datetime =
+    let start = if is_datetime then `Datetime (dtstart, utc) else `Date (fst (Ptime.to_date_time dtstart)) in
+    `Event (`Dtstart ([], start) :: List.filter (function `Rrule _ | `Dtstart _ -> false | _ -> true ) props, alarms) :: acc
+  in
+  fold_event f [] range (`Event (props, alarms))
+
+let expand_comp range = function
+  | `Event e -> expand_event range e
+  | _ -> []
+
 let select_calendar_data (calprop, comps) (requested_data: Xml.calendar_data) =
   let (comp, range, freebusy) = requested_data in
   let limit_rec_set comps = match range with
   | Some (`Limit_recurrence_set range) -> List.filter (comp_in_timerange range) comps
+  | Some (`Expand range) -> List.flatten (List.map (expand_comp range) comps)
   | _ -> comps in
   match comp with
   | None -> Some (calprop, limit_rec_set comps)
