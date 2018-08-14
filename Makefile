@@ -6,3 +6,6 @@ clean:
 	jbuilder clean
 run: all
 	_build/default/bin/caldav_server.exe
+
+utop:
+	dune utop src --profile=release

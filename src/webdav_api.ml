@@ -366,9 +366,8 @@ let comp_in_timerange r exceptions = function
   | `Timezone _  -> true
   | _ -> false
 
-let normalize_timezone tzid timezones =
-
 let expand_event range exceptions timezones ((props: Icalendar.eventprop list), alarms) =
+  Format.printf "timezones: %s\n" (String.concat "\n" (List.map Icalendar.show_component timezones)) ;
   let f acc dtstart =
     let recur_id : Icalendar.eventprop = match List.find_opt (function `Dtstart (prop, v) -> true | _ -> false) props with
     | None -> assert false
