@@ -407,33 +407,12 @@ let expand_event range exceptions timezones ((props: Icalendar.eventprop list), 
       `Recur_id (List.map id props'', v') in
     let props' = List.map (function 
       | `Dtstart (props', `Datetime (_, utc)) -> 
-          let props'', dtstart' = normalize_tz dtstart props' timezones in
-          `Dtstart (props'', `Datetime (dtstart', utc))
+        `Dtstart (normalize_date_or_datetime props' timezones (`Datetime (dtstart, utc)))
       | `Dtstart (props', `Date _) -> 
-          let props'', dtstart' = normalize_tz dtstart props' timezones in
-          `Dtstart (props'', `Date (ptime_to_date dtstart))
+        `Dtstart (normalize_date_or_datetime props' timezones (`Date (ptime_to_date dtstart)))
+      | `Recur_id (props', v) -> 
+        `Recur_id (normalize_date_or_datetime props' timezones v)
       | `Rrule _ -> recur_id
-      | `Recur_id (props', `Datetime (dtstart, utc)) -> 
-          begin
-            match List.find_opt is_tzid props' with
-            | None -> `Recur_id (props', `Datetime (dtstart, utc))
-            | Some (`Tzid tzid) -> 
-                let props'' = List.filter (fun p -> not (is_tzid p)) props' in
-                let dtstart' = Icalendar.normalize_timezone dtstart (`Tzid tzid) timezones in
-                `Recur_id (props'', `Datetime (dtstart', utc)) 
-            | _ -> assert false
-          end
-      | `Recur_id (props', `Date date) ->
-          begin
-            match List.find_opt is_tzid props' with
-            | None -> `Recur_id (props', `Date date)
-            | Some (`Tzid tzid) -> 
-                let dtstart = date_to_ptime date in
-                let props'' = List.filter (fun p -> not (is_tzid p)) props' in
-                let dtstart' = Icalendar.normalize_timezone dtstart (`Tzid tzid) timezones in
-                `Recur_id (props'', `Date (ptime_to_date dtstart'))
-            | _ -> assert false
-          end
       | x -> x) props in
     `Event (props', alarms) :: acc
   in
