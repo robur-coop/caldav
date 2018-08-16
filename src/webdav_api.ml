@@ -339,21 +339,22 @@ let fold_event f acc range exceptions (`Event (props, alarms)) =
   in 
   let dtstart', is_datetime = ts_of_dtstart dtstart in
   let rrule = List.find_opt (function `Rrule _ -> true | _ -> false) props in
-
-  let rec next_r dtstart'' = match rrule with 
+  let next_event = match rrule with
+  | None -> (fun () -> None)
+  | Some (`Rrule (_, rrule)) -> Icalendar.recur_events dtstart' rrule
+  in
+  let rec next_r () = match next_event () with 
   | None -> None 
-  | Some (`Rrule (_, r)) -> match Icalendar.next_recurrence r dtstart' dtstart'' with
-    | None -> None
-    | Some dtstart''' -> 
-      let date, _ = Ptime.to_date_time dtstart''' in
-      if List.mem date exceptions then next_r dtstart''' else Some dtstart'''
+  | Some dtstart -> 
+    let date, _ = Ptime.to_date_time dtstart in
+    if List.mem date exceptions then next_r () else Some dtstart
   in
   let rec in_timerange acc = function
-   | Some dtstart'' when Ptime.is_earlier ~than:s dtstart'' -> 
-     in_timerange acc (next_r dtstart'')
-   | Some dtstart'' when real_event_in_timerange s e dtstart'' dtend duration is_datetime -> 
-     let acc' = f acc dtstart'' in
-     in_timerange acc' (next_r dtstart'')
+   | Some dtstart when Ptime.is_earlier ~than:s dtstart -> 
+     in_timerange acc (next_r ())
+   | Some dtstart when real_event_in_timerange s e dtstart dtend duration is_datetime -> 
+     let acc' = f acc dtstart in
+     in_timerange acc' (next_r ())
    | _ -> acc in
   in_timerange acc (Some dtstart')
 
