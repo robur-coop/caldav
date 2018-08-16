@@ -367,22 +367,45 @@ let comp_in_timerange r exceptions = function
   | `Timezone _  -> true
   | _ -> false
 
+let normalize_tz timestamp (props : [`Iana_param of string * string list | `Tzid of bool * string | `Valuetype of Icalendar.valuetype | `Xparam of (string * string) * string list ] list ) timezones =
+  let is_tzid = function `Tzid _ -> true | _ -> false in
+  match List.find_opt is_tzid props with
+  | None -> props, timestamp
+  | Some (`Tzid tzid) -> 
+      let props' = List.filter (fun p -> not (is_tzid p)) props in
+      props', Icalendar.normalize_timezone timestamp (`Tzid tzid) timezones
+
+let normalize_date_or_datetime props timezones = function
+  | `Datetime (ts, utc) -> 
+       let props', ts' = normalize_tz ts props timezones in
+       props', `Datetime (ts', utc)
+  | `Date date ->
+       let ts = match Ptime.of_date_time (date, ((0, 0, 0), 0)) with
+       | None -> assert false
+       | Some t -> t in
+       let props', ts' = normalize_tz ts props timezones in
+       props', `Date (fst (Ptime.to_date_time ts'))
+
 let expand_event range exceptions timezones ((props: Icalendar.eventprop list), alarms) =
-  Format.printf "timezones: %s\n" (String.concat "\n" (List.map Icalendar.show_component timezones)) ;
   let f acc dtstart =
     let recur_id : Icalendar.eventprop = match List.find_opt (function `Dtstart (prop, v) -> true | _ -> false) props with
     | None -> assert false
-    | Some (`Dtstart (prop, v)) -> 
+    | Some (`Dtstart (props', v)) -> 
+      let props'', v' = normalize_date_or_datetime props' timezones v in
       let id = function
          | `Iana_param (a, b) -> `Iana_param (a, b)
          | `Tzid (a, b) -> `Tzid (a, b)
          | `Valuetype v -> `Valuetype v 
          | `Xparam ((a, b), c) -> `Xparam ((a, b), c)
       in
-      `Recur_id (List.map id prop, v) in
+      `Recur_id (List.map id props'', v') in
     let props' = List.map (function 
-      | `Dtstart (prop, `Datetime (_, utc)) -> `Dtstart (prop, `Datetime (dtstart, utc))
-      | `Dtstart (prop, `Date _) -> `Dtstart (prop, `Date (fst (Ptime.to_date_time dtstart)))
+      | `Dtstart (props', `Datetime (_, utc)) -> 
+          let props'', dtstart' = normalize_tz dtstart props' timezones in
+          `Dtstart (props'', `Datetime (dtstart', utc))
+      | `Dtstart (props', `Date _) -> 
+          let props'', dtstart' = normalize_tz dtstart props' timezones in
+          `Dtstart (props'', `Date (fst (Ptime.to_date_time dtstart')))
       | `Rrule _ -> recur_id
       | x -> x) props in
     `Event (props', alarms) :: acc
@@ -402,7 +425,7 @@ let select_calendar_data (calprop, (comps : Icalendar.component list)) (requeste
       | `Dtstart (_, `Datetime (d, _)) -> fst @@ Ptime.to_date_time d end
     | _ -> assert false
   ) events in
-  let timezones = List.filter (function `Timezone _ -> true | _ -> false) comps in
+  let timezones = List.fold_left (fun acc -> function `Timezone tz -> tz :: acc | _ -> acc) [] comps in
   let limit_rec_set comps = match range with
   | Some (`Limit_recurrence_set range) -> List.filter (comp_in_timerange range exceptions) comps
   | Some (`Expand range) -> List.flatten (List.map (expand_comp range exceptions timezones) comps)
