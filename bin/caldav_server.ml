@@ -71,14 +71,15 @@ let directory_as_ics fs (`Dir dir) =
     Fs.get_property_map fs (`Dir dir) >>= function
     | None -> assert false (* invariant: each file and directory has a property map *)
     | Some props ->
+      let empty = Icalendar.Params.empty in
       let name =
         match Xml.get_prop (Xml.dav_ns, "displayname") props with
-        | Some (_, [ Xml.Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), Icalendar.Param_map.empty, name) ]
+        | Some (_, [ Xml.Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), empty, name) ]
         | _ -> []
       in
       let calprops = [
-        `Prodid (Icalendar.Param_map.empty, "-//ROBUR.IO//EN") ;
-        `Version (Icalendar.Param_map.empty, "2.0")
+        `Prodid (empty, "-//ROBUR.IO//EN") ;
+        `Version (empty, "2.0")
       ] @ name in
       Lwt_list.map_p calendar_components files >|= fun components ->
       Icalendar.to_ics (calprops, List.flatten components)

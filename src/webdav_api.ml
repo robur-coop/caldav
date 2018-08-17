@@ -374,10 +374,10 @@ let date_to_ptime date = match Ptime.of_date_time (date, ((0, 0, 0), 0)) with
 let ptime_to_date ts = fst @@ Ptime.to_date_time ts
 
 let normalize_tz timestamp params timezones =
-  match Icalendar.Param_map.find Icalendar.Tzid params with
+  match Icalendar.Params.find Icalendar.Tzid params with
   | None -> params, timestamp
   | Some tzid ->
-      let params' = Icalendar.Param_map.remove Icalendar.Tzid params in
+      let params' = Icalendar.Params.remove Icalendar.Tzid params in
       params', Icalendar.normalize_timezone timestamp tzid timezones
 
 let normalize_date_or_datetime params timezones = function
