@@ -73,12 +73,12 @@ let directory_as_ics fs (`Dir dir) =
     | Some props ->
       let name =
         match Xml.get_prop (Xml.dav_ns, "displayname") props with
-        | Some (_, [ Xml.Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), [], name) ]
+        | Some (_, [ Xml.Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), Icalendar.Param_map.empty, name) ]
         | _ -> []
       in
       let calprops = [
-        `Prodid ([], "-//ROBUR.IO//EN") ;
-        `Version ([], "2.0")
+        `Prodid (Icalendar.Param_map.empty, "-//ROBUR.IO//EN") ;
+        `Version (Icalendar.Param_map.empty, "2.0")
       ] @ name in
       Lwt_list.map_p calendar_components files >|= fun components ->
       Icalendar.to_ics (calprops, List.flatten components)
