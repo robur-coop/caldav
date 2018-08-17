@@ -288,11 +288,12 @@ let parse_report_query_7_8_3 () =
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
-let parse_report_query_7_8_4 () =
-  let xml = header ^ {|<C:calendar-query xmlns:D="DAV:"
+let report_7_8_4 =
+  header ^ {|<C:calendar-query xmlns:D="DAV:"
                  xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:prop>
-       <C:calendar-data>
+        <D:getetag/>
+    <C:calendar-data>
          <C:limit-freebusy-set start="20060102T000000Z"
                                  end="20060103T000000Z"/>
        </C:calendar-data>
@@ -306,8 +307,12 @@ let parse_report_query_7_8_4 () =
        </C:comp-filter>
      </C:filter>
    </C:calendar-query>|}
+
+let parse_report_query_7_8_4 () =
+  let xml = report_7_8_4
   and expected =
     Ok (Some (`Proplist [
+        `Prop (("DAV:", "getetag")); 
         `Calendar_data (None, None, Some (`Limit_freebusy_set ((to_ptime (2006,01,02) (00,00,00), true), (to_ptime (2006,01,03) (00,00,00), true)))) ] ),
         ("VCALENDAR", `Comp_filter (None, [], [ ("VFREEBUSY", `Comp_filter (Some ((to_ptime (2006,01,02) (00,00,00), true), (to_ptime (2006,01,03) (00,00,00), true)), [], [])) ])))
   in
@@ -551,8 +556,8 @@ let appendix_b_1_data =
     let props name = Xml.create_properties true now 0 name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
-    (match Appendix_b.all with 
-    | (fn, etag, data) :: _ -> 
+    (match Appendix_b.all with
+    | (fn, etag, data) :: _ ->
         let props = Xml.create_properties ~content_type:"text/calendar" ~etag false
             now (String.length data) ("bernard/work/" ^ fn)
         in
@@ -864,13 +869,47 @@ END:VCALENDAR
               (Ok (tree expected))
               (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
 
+let test_report_7_8_4 () =
+  let xml = report_7_8_4
+  and expected = header ^ {|
+<D:multistatus xmlns:D="DAV:"
+                  xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd8.ics</D:href>
+       <D:propstat>
+         <D:prop>
+           <D:getetag>"fffff-abcd8"</D:getetag>
+           <C:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VFREEBUSY
+ORGANIZER;CN="Bernard Desruisseaux":mailto:bernard@example.com
+UID:76ef34-54a3d2@example.com
+DTSTAMP:20050530T123421Z
+DTSTART:20060101T000000Z
+DTEND:20060108T000000Z
+FREEBUSY;FBTYPE=BUSY-TENTATIVE:20060102T100000Z/20060102T120000Z
+END:VFREEBUSY
+END:VCALENDAR
+</C:calendar-data>
+         </D:prop>
+         <D:status>HTTP/1.1 200 OK</D:status>
+       </D:propstat>
+     </D:response>
+   </D:multistatus>
+ |}
+  in
+  Alcotest.(check (result t_tree string) __LOC__
+              (Ok (tree expected))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
+
 let report_tests = [
   "Report from section 7.8.1 - first file only", `Quick, test_report_1 ;
   "Report from section 7.8.1", `Quick, test_report_7_8_1 ;
-  "Parse report query from section 7.8.2", `Quick, test_report_7_8_2 ;
-  "Parse report query from section 7.8.3", `Quick, test_report_7_8_3 ;
-(*  "Parse report query from section 7.8.4", `Quick, test_report_7_8_4 ;
-  "Parse report query from section 7.8.5", `Quick, test_report_7_8_5 ;
+  "Report from section 7.8.2", `Quick, test_report_7_8_2 ;
+  "Report from section 7.8.3", `Quick, test_report_7_8_3 ;
+  "Report from section 7.8.4", `Quick, test_report_7_8_4 ;
+(*  "Parse report query from section 7.8.5", `Quick, test_report_7_8_5 ;
   "Parse report query from section 7.8.6", `Quick, test_report_7_8_6 ;
   "Parse report query from section 7.8.7", `Quick, test_report_7_8_7 ;
   "Parse report query from section 7.8.8", `Quick, test_report_7_8_8 ;

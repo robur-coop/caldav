@@ -28,6 +28,7 @@ type comp = [ `Allcomp | `Comp of component list ]
 and prop = [ `Allprop | `Prop of (string * bool) list ]
 and component = string * prop * comp [@@deriving show, eq]
 
+(* TODO check that start is earlier than end! *)
 type timerange = (Ptime.t * bool) * (Ptime.t * bool) [@@deriving show, eq]
 
 type calendar_data =

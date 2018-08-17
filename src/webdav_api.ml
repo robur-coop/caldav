@@ -328,16 +328,16 @@ let real_event_in_timerange s e dtstart dtend duration is_datetime =
       | None -> false
       | Some dtend -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart 
 
-let fold_event f acc range exceptions (`Event (props, alarms)) = 
-  let ((s, _), (e, _)) = range in
-  let (dtstart, dtend, duration) = get_time_properties props in
-  let ts_of_dtstart = function
+let date_or_datetime_to_ptime = function
   | `Datetime (dtstart, utc) -> dtstart, true
   | `Date start -> match Ptime.of_date_time (start, ((0, 0, 0), 0)) with
     | None -> assert false
     | Some dtstart -> dtstart, false
-  in 
-  let dtstart', is_datetime = ts_of_dtstart dtstart in
+
+let fold_event f acc range exceptions (`Event (props, alarms)) =
+  let ((s, _), (e, _)) = range in
+  let (dtstart, dtend, duration) = get_time_properties props in
+  let dtstart', is_datetime = date_or_datetime_to_ptime dtstart in
   let rrule = List.find_opt (function `Rrule _ -> true | _ -> false) props in
   let next_event = match rrule with
   | None -> (fun () -> None)
@@ -361,9 +361,22 @@ let fold_event f acc range exceptions (`Event (props, alarms)) =
 let event_in_timerange range exceptions e =
   let f acc _ = true in
   fold_event f false range exceptions e
- 
+
+let freebusy_in_timerange ((s, _), (e, _)) fb =
+  match
+    List.find_opt (function `Dtstart _ -> true | _ -> false) fb,
+    List.find_opt (function `Dtend _ -> true | _ -> false) fb
+  with
+  | Some (`Dtstart (_, dtstart)), Some (`Dtend (_, dtend)) ->
+    let dtstart', is_datetime = date_or_datetime_to_ptime dtstart
+    and dtend', _ = date_or_datetime_to_ptime dtend
+    in
+    real_event_in_timerange s e dtstart' (Some dtend') None is_datetime
+  | _ -> false
+
 let comp_in_timerange r exceptions = function
   | `Event _ as e -> event_in_timerange r exceptions e
+  | `Freebusy fb -> freebusy_in_timerange r fb
   | `Timezone _  -> true
   | _ -> false
 
@@ -415,6 +428,24 @@ let expand_comp range exceptions timezones = function
   | `Event e -> expand_event range exceptions timezones e
   | _ -> []
 
+(* TODO deal with timezones, range comes in as utc, freebusy may use other time format! *)
+let fb_in_timerange range = function
+  | `Freebusy fb ->
+    let in_range (s, e, _) =
+      let ((s_req, _), (e_req, _)) = range in
+      let (<) a b = Ptime.is_later ~than:a b in
+      let (<=) a b = a < b || Ptime.equal a b in
+      (s_req <= s && e < e_req) ||
+      (s_req <= e && e < e_req) ||
+      (s_req <= s && s < e_req)
+    in
+    let prop_in_timerange = function
+      | `Freebusy (_, ranges) -> List.exists in_range ranges
+      | _ -> true
+    in
+    [ `Freebusy (List.filter prop_in_timerange fb) ]
+  | _ -> []
+
 let select_calendar_data (calprop, (comps : Icalendar.component list)) (requested_data: Xml.calendar_data) =
   let (comp, range, freebusy) = requested_data in
   let exceptions = 
@@ -429,8 +460,13 @@ let select_calendar_data (calprop, (comps : Icalendar.component list)) (requeste
   | Some (`Limit_recurrence_set range) -> List.filter (comp_in_timerange range exceptions) comps
   | Some (`Expand range) -> List.flatten (List.map (expand_comp range exceptions timezones) comps)
   | _ -> comps in
+  let limit_freebusy_set comps = match freebusy with
+    | None -> comps
+    | Some (`Limit_freebusy_set range) ->
+      List.flatten (List.map (fb_in_timerange range) comps)
+  in
   match comp with
-  | None -> Some (calprop, limit_rec_set comps)
+  | None -> Some (calprop, limit_freebusy_set @@ limit_rec_set comps)
   | Some ("VCALENDAR", prop, comp) -> 
     let comps' = match comp with
     | `Allcomp -> comps
@@ -439,7 +475,7 @@ let select_calendar_data (calprop, (comps : Icalendar.component list)) (requeste
        let comps' = List.fold_left (fun acc c -> List.fold_left (select_and_filter c) acc cs) [] comps in
        List.rev comps'
     in
-    Some (calprop_propfilter prop calprop, limit_rec_set comps')
+    Some (calprop_propfilter prop calprop, limit_freebusy_set @@ limit_rec_set comps')
   | _ -> None
 
 
@@ -455,6 +491,7 @@ let apply_comp_filter (comp_name, comp_filter) component =
   let is_match =
     String.equal comp_name (Icalendar.component_to_ics_key component)
   in
+  Format.printf "component matches filter %s %b (component key %s)\n" comp_name is_match (Icalendar.component_to_ics_key component) ;
   match comp_filter, is_match with
   | `Is_defined, true -> true
   | `Is_not_defined, true -> false
@@ -464,7 +501,7 @@ let apply_comp_filter (comp_name, comp_filter) component =
   | `Comp_filter (tr_opt, pfs, cfs), true ->
     match tr_opt with
     | None -> true
-    | Some range -> 
+    | Some range ->
        let exceptions = [] in (* TODO *)
        comp_in_timerange range exceptions component
         (* TODO: treat pfs and cfs *)
@@ -482,13 +519,13 @@ let apply_comp_filter_to_vcalendar filter data =
   | ("VCALENDAR", `Is_not_defined), data -> None
   | ( _ , `Is_defined), data -> None
   | ( _ , `Is_not_defined), data -> Some data
-    (*`Comp_filter of timerange option * prop_filter list * component_filter list*) 
+    (*`Comp_filter of timerange option * prop_filter list * component_filter list*)
   | ("VCALENDAR", `Comp_filter (tr_opt, pfs, cfs)), (props, comps) ->
     let comps' = match tr_opt with
-    | None -> comps
-    | Some range -> 
-      let exceptions = [] in (* TODO *)
-      if List.exists (comp_in_timerange range exceptions) comps then comps else []
+      | None -> comps
+      | Some range ->
+        let exceptions = [] in (* TODO *)
+        if List.exists (comp_in_timerange range exceptions) comps then comps else []
     in
     let comps'' =
       (* TODO abstract *)
@@ -500,8 +537,6 @@ let apply_comp_filter_to_vcalendar filter data =
     then Some (props, comps'')
     else None
   | _ -> Printf.printf "something else\n" ; None
-
-
 
 let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.component_filter) data map =
   let filtered_data = apply_comp_filter_to_vcalendar filter data in
@@ -521,10 +556,10 @@ let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.compon
      let ok_props, rest_props = List.partition (fun (st, _) -> st = `OK) found_props in
      let ok_props' = List.flatten (List.map snd ok_props) in
      let calendars = List.flatten @@ List.map
-       (fun c -> 
-         match snd c with 
-         | [] -> [] 
-         | _  -> 
+       (fun c ->
+         match snd c with
+         | [] -> []
+         | _  ->
            let ics = Icalendar.to_ics ~cr:false c in
            [ Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata ics] ]
        )
@@ -551,7 +586,7 @@ let report state ~prefix ~name req =
         | Ok ics ->
           match apply_to_vcalendar query ics map with
           | [] -> Lwt.return (Ok None)
-          | xs -> 
+          | xs ->
             let filename = Fs.to_string (`File f) in
             Format.printf "xs for %s are:\n%a\n" filename
               Fmt.(list ~sep:(unit "\n\n") Xml.pp_tree) (List.map propstat_node xs) ;
