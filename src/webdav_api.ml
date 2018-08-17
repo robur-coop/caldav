@@ -487,7 +487,7 @@ type comp_filter = [
 ]
 and component_filter = string * comp_filter
 *)
-let apply_comp_filter (comp_name, comp_filter) component =
+let matches_comp_filter (comp_name, comp_filter) component =
   let is_match =
     String.equal comp_name (Icalendar.component_to_ics_key component)
   in
@@ -504,7 +504,7 @@ let apply_comp_filter (comp_name, comp_filter) component =
     | Some range ->
        let exceptions = [] in (* TODO *)
        comp_in_timerange range exceptions component
-        (* TODO: treat pfs and cfs *)
+    (* TODO: treat pfs and cfs *)
 
 let get_timezones_for_resp calendar tzids =
   let get_timezone tzid =
@@ -512,35 +512,32 @@ let get_timezones_for_resp calendar tzids =
     List.find (function `Timezone props -> has_matching_tzid props | _ -> false ) (snd calendar) in
   List.map get_timezone @@ Astring.String.Set.elements tzids
 
-let apply_comp_filter_to_vcalendar filter data =
+(* returns the entire calendar if any component matches the component filter.
+   this is fine, because in caldav rfc and apple testsuite, each calendar only uses one component per file *)
+let vcalendar_matches_comp_filter filter (props, comps) =
   Format.printf "apply to vcalendar, snd query is %a\n" Xml.pp_component_filter filter ;
-  match filter, data with
-  | ("VCALENDAR", `Is_defined), data -> Some data
-  | ("VCALENDAR", `Is_not_defined), data -> None
-  | ( _ , `Is_defined), data -> None
-  | ( _ , `Is_not_defined), data -> Some data
+  match filter with
+  | ("VCALENDAR", `Is_defined) -> true
+  | ("VCALENDAR", `Is_not_defined) -> false
+  | ( _ , `Is_defined) -> false
+  | ( _ , `Is_not_defined) -> true
     (*`Comp_filter of timerange option * prop_filter list * component_filter list*)
-  | ("VCALENDAR", `Comp_filter (tr_opt, pfs, cfs)), (props, comps) ->
-    let comps' = match tr_opt with
-      | None -> comps
+  | ("VCALENDAR", `Comp_filter (tr_opt, pfs, cfs)) ->
+    let matches_timerange = match tr_opt with
+      | None -> true
       | Some range ->
         let exceptions = [] in (* TODO *)
-        if List.exists (comp_in_timerange range exceptions) comps then comps else []
+        List.exists (comp_in_timerange range exceptions) comps
     in
-    let comps'' =
+    let matches_cfs =
       (* TODO abstract *)
-      if List.exists (fun c -> List.exists (fun cf -> apply_comp_filter cf c) cfs) comps'
-      then comps'
-      else []
+      List.exists (fun c -> List.exists (fun cf -> matches_comp_filter cf c) cfs) comps
     in
-    if List.for_all (apply_to_props props) pfs
-    then Some (props, comps'')
-    else None
-  | _ -> Printf.printf "something else\n" ; None
+    let matches_pfs = List.for_all (apply_to_props props) pfs in
+    matches_timerange && matches_cfs && matches_pfs
+  | _ -> Printf.printf "something else\n" ; false
 
 let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.component_filter) data map =
-  let filtered_data = apply_comp_filter_to_vcalendar filter data in
-  Format.printf "filtered data is %a" Fmt.(option ~none:(unit "none") Icalendar.pp) filtered_data ;
   let apply_transformation t d = match t with
   | `All_props -> [`OK, Xml.props_to_tree map]
   | `Proplist ps ->
@@ -567,10 +564,10 @@ let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.compon
        begin match calendars with [] -> [] | cs -> [`OK, ok_props' @ cs ] @ rest_props end
   | `Propname -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings map)]
   in
-  match transform, filtered_data with
-  | None, Some c -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics ~cr:false c)]]]
-  | _ , None -> []
-  | Some t, Some d -> apply_transformation t d
+  match transform, vcalendar_matches_comp_filter filter data with
+  | None, true -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics ~cr:false data)]]]
+  | _ , false -> []
+  | Some t, true -> apply_transformation t data
 
 let report state ~prefix ~name req =
   let report_one query = function

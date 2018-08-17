@@ -319,8 +319,8 @@ let parse_report_query_7_8_4 () =
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
-let parse_report_query_7_8_5 () =
-  let xml = header ^ {|<C:calendar-query xmlns:C="urn:ietf:params:xml:ns:caldav">
+let report_7_8_5 =
+  header ^ {|<C:calendar-query xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:prop xmlns:D="DAV:">
        <D:getetag/>
        <C:calendar-data/>
@@ -336,6 +336,10 @@ let parse_report_query_7_8_5 () =
        </C:comp-filter>
      </C:filter>
    </C:calendar-query>|}
+
+
+let parse_report_query_7_8_5 () =
+  let xml = report_7_8_5
   and expected =
     Ok (Some (`Proplist [ `Prop (Xml.dav_ns, "getetag"); `Calendar_data (None, None, None)]),
         ("VCALENDAR", `Comp_filter (None, [], [ ("VTODO", `Comp_filter ((None, [],
@@ -903,14 +907,54 @@ END:VCALENDAR
               (Ok (tree expected))
               (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
 
+let test_report_7_8_5 () =
+  let xml = report_7_8_5
+  and expected = header ^ {|
+<D:multistatus xmlns:D="DAV:"
+                  xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd4.ics</D:href>
+       <D:propstat>
+         <D:prop>
+           <D:getetag>"fffff-abcd4"</D:getetag>
+           <C:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VTODO
+DTSTAMP:20060205T235300Z
+DUE;TZID=US/Eastern:20060106T120000
+LAST-MODIFIED:20060205T235308Z
+SEQUENCE:1
+STATUS:NEEDS-ACTION
+SUMMARY:Task #2
+UID:E10BA47467C5C69BB74E8720@example.com
+BEGIN:VALARM
+ACTION:AUDIO
+TRIGGER;RELATED=START:-PT10M
+END:VALARM
+END:VTODO
+END:VCALENDAR
+</C:calendar-data>
+         </D:prop>
+         <D:status>HTTP/1.1 200 OK</D:status>
+       </D:propstat>
+     </D:response>
+   </D:multistatus>
+ |}
+  in
+  Alcotest.(check (result t_tree string) __LOC__
+              (Ok (tree expected))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
+
+
 let report_tests = [
   "Report from section 7.8.1 - first file only", `Quick, test_report_1 ;
   "Report from section 7.8.1", `Quick, test_report_7_8_1 ;
   "Report from section 7.8.2", `Quick, test_report_7_8_2 ;
   "Report from section 7.8.3", `Quick, test_report_7_8_3 ;
   "Report from section 7.8.4", `Quick, test_report_7_8_4 ;
-(*  "Parse report query from section 7.8.5", `Quick, test_report_7_8_5 ;
-  "Parse report query from section 7.8.6", `Quick, test_report_7_8_6 ;
+  "Report from section 7.8.5", `Quick, test_report_7_8_5 ;
+(*  "Parse report query from section 7.8.6", `Quick, test_report_7_8_6 ;
   "Parse report query from section 7.8.7", `Quick, test_report_7_8_7 ;
   "Parse report query from section 7.8.8", `Quick, test_report_7_8_8 ;
   "Parse report query from section 7.8.9", `Quick, test_report_7_8_9 ;
