@@ -295,11 +295,21 @@ let select_component component ((name, prop, comp): Xml.component) =
   | `Timezone props, "VTIMEZONE" -> Some(`Timezone (timezone_propfilter prop props))
   | _ -> None
 
-let get_time_properties (props:Icalendar.eventprop list) =
+let get_time_properties props =
   let dtstart = match List.find_opt (function `Dtstart _ -> true | _ -> false) props with
-  | None -> assert false
-  | Some (`Dtstart (_, startdate)) -> startdate
+  | None -> None
+  | Some (`Dtstart (_, startdate)) -> Some startdate
+  | _ -> assert false
   in
+  let duration = match List.find_opt (function `Duration _ -> true | _ -> false) props with
+  | None -> None
+  | Some (`Duration (_, s)) -> Some s
+  | _ -> assert false
+  in (dtstart, duration)
+
+let get_event_time_properties props =
+  let (dtstart, duration) = get_time_properties props in
+  let dtstart' = match dtstart with None -> assert false | Some d -> d in
   let dtend = match List.find_opt (function `Dtend _ -> true | _ -> false) props with
   | Some (`Dtend (_, `Date enddate)) -> begin match Ptime.of_date_time (enddate, ((0, 0, 0), 0)) with
     | None -> assert false
@@ -307,26 +317,23 @@ let get_time_properties (props:Icalendar.eventprop list) =
   end 
   | Some (`Dtend (_, `Datetime (ts, utc))) -> Some ts
   | None -> None
-  in 
-  let duration = match List.find_opt (function `Duration _ -> true | _ -> false) props with
-  | None -> None
-  | Some (`Duration (_, s)) -> Some s
-  in (dtstart, dtend, duration)
+  | _ -> assert false
+  in (dtstart', dtend, duration)
 
-let real_event_in_timerange s e dtstart dtend duration is_datetime =
-  match dtend, duration with
-  | Some dtend, None -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart
+let real_event_in_timerange range_start range_end comp_start comp_end comp_duration is_datetime =
+  match comp_end, comp_duration with
+  | Some comp_end, None -> Ptime.is_earlier range_start ~than:comp_end && Ptime.is_later range_end ~than:comp_start
   | None, Some secs when secs > 0 -> 
-    begin match Ptime.add_span dtstart (Ptime.Span.of_int_s secs) with
+    begin match Ptime.add_span comp_start (Ptime.Span.of_int_s secs) with
     | None -> false
-    | Some dtend -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart
+    | Some comp_end -> Ptime.is_earlier range_start ~than:comp_end && Ptime.is_later range_end ~than:comp_start
     end
-  | None, Some 0 -> (Ptime.is_earlier s ~than:dtstart || Ptime.equal s dtstart) && Ptime.is_later e ~than:dtstart
+  | None, Some 0 -> (Ptime.is_earlier range_start ~than:comp_start || Ptime.equal range_start comp_start) && Ptime.is_later range_end ~than:comp_start
   | None, None -> if is_datetime 
-    then (Ptime.is_earlier s ~than:dtstart || Ptime.equal s dtstart) && Ptime.is_later e ~than:dtstart 
-    else match Ptime.add_span dtstart (Ptime.Span.of_int_s (24 * 60 * 60)) with
+    then (Ptime.is_earlier range_start ~than:comp_start || Ptime.equal range_start comp_start) && Ptime.is_later range_end ~than:comp_start 
+    else match Ptime.add_span comp_start (Ptime.Span.of_int_s (24 * 60 * 60)) with
       | None -> false
-      | Some dtend -> Ptime.is_earlier s ~than:dtend && Ptime.is_later e ~than:dtstart 
+      | Some comp_end -> Ptime.is_earlier range_start ~than:comp_end && Ptime.is_later range_end ~than:comp_start 
 
 let date_or_datetime_to_ptime = function
   | `Datetime (dtstart, utc) -> dtstart, true
@@ -336,12 +343,13 @@ let date_or_datetime_to_ptime = function
 
 let fold_event f acc range exceptions (`Event (props, alarms)) =
   let ((s, _), (e, _)) = range in
-  let (dtstart, dtend, duration) = get_time_properties props in
+  let (dtstart, dtend, duration) = get_event_time_properties props in
   let dtstart', is_datetime = date_or_datetime_to_ptime dtstart in
   let rrule = List.find_opt (function `Rrule _ -> true | _ -> false) props in
   let next_event = match rrule with
   | None -> (fun () -> None)
   | Some (`Rrule (_, rrule)) -> Icalendar.recur_events dtstart' rrule
+  | _ -> assert false
   in
   let rec next_r () = match next_event () with 
   | None -> None 
@@ -374,6 +382,7 @@ let freebusy_in_timerange ((s, _), (e, _)) fb =
     real_event_in_timerange s e dtstart' (Some dtend') None is_datetime
   | _ -> false
 
+(* TODO `Todo is missing *)
 let comp_in_timerange r exceptions = function
   | `Event _ as e -> event_in_timerange r exceptions e
   | `Freebusy fb -> freebusy_in_timerange r fb
@@ -487,7 +496,46 @@ type comp_filter = [
 ]
 and component_filter = string * comp_filter
 *)
-let matches_comp_filter (comp_name, comp_filter) component =
+
+let ts_in_range ts range =
+  let ((s, _), (e, _)) = range in
+  Ptime.is_later ~than:s ts && Ptime.is_later ~than:ts e
+
+let alarm_in_timerange range alarm by_parent =
+  let trigger = match alarm with
+  | `Email e -> e.Icalendar.trigger
+  | `Audio a -> a.Icalendar.trigger
+  | `Display d -> d.Icalendar.trigger
+  in
+  match snd trigger with
+  | `Datetime (ts, utc) -> ts_in_range ts range 
+  | `Duration d -> (* is start or end; get duration, add to start / end *)
+    let d' = Ptime.Span.of_int_s d in
+    let trig_rel = match Icalendar.Params.find Icalendar.Related (fst trigger) with
+    | None -> `Start
+    | Some x -> x
+    in
+    by_parent range d' trig_rel
+   
+
+let matches_alarm_filter by_parent alarm (comp_name, comp_filter) =
+  let is_match = String.equal comp_name "VALARM" in
+  match comp_filter, is_match with
+  | `Is_defined, true -> true
+  | `Is_not_defined, true -> false
+  | `Is_defined, false -> false
+  | `Is_not_defined, false -> true
+  | `Comp_filter (_, _, _), false -> false
+  | `Comp_filter (tr_opt, pfs, cfs), true ->
+    match tr_opt with
+    | None -> true
+    | Some range -> alarm_in_timerange range alarm by_parent
+
+let add_span ts span = match Ptime.add_span ts span with
+  | None -> assert false
+  | Some ts' -> ts'
+
+let matches_comp_filter timezones component (comp_name, comp_filter) =
   let is_match =
     String.equal comp_name (Icalendar.component_to_ics_key component)
   in
@@ -499,12 +547,62 @@ let matches_comp_filter (comp_name, comp_filter) component =
   | `Is_not_defined, false -> true
   | `Comp_filter (_, _, _), false -> false
   | `Comp_filter (tr_opt, pfs, cfs), true ->
-    match tr_opt with
+    let matches_timerange = match tr_opt with
     | None -> true
     | Some range ->
-       let exceptions = [] in (* TODO *)
-       comp_in_timerange range exceptions component
+      let exceptions = [] in (* TODO *)
+      comp_in_timerange range exceptions component in
+    let matches_cfs = match cfs, component with
+    | [], _ -> true
+    | _, `Todo (props, alarms) ->
+      let by_parent range d trigrel = 
+        let (dtstart_opt, duration) = get_time_properties props in
+        match trigrel with
+          | `Start -> 
+            (match dtstart_opt with
+            | None -> assert false
+            | Some dtstart ->
+            let todo_start, _ = date_or_datetime_to_ptime dtstart in
+            let alarm_start = add_span todo_start d in
+            ts_in_range alarm_start range)
+          | `End -> 
+            let due = List.find_opt (function `Due _ -> true | _ -> false) props in
+            match due, dtstart_opt, duration with
+            | Some (`Due (_, date_or_time)), _, _ -> 
+              let todo_end, _ = date_or_datetime_to_ptime date_or_time in
+              let alarm_start = add_span todo_end d in
+              ts_in_range alarm_start range
+            | None, Some dtstart, Some duration -> 
+              let todo_start, _ = date_or_datetime_to_ptime dtstart in
+              let todo_end = add_span todo_start (Ptime.Span.of_int_s duration) in
+              let alarm_start = add_span todo_end d in
+              ts_in_range alarm_start range
+            | _ -> assert false
+          in
+           
+      List.exists (fun alarm -> List.exists (matches_alarm_filter by_parent alarm) cfs) alarms 
+    | _, `Event (props, alarms) -> 
+      let exceptions = [] in
+      let by_parent range d trigrel = 
+        let events = expand_event range exceptions timezones (props, alarms) in
+        List.exists (fun (`Event (eventprops, _)) -> 
+          let (dtstart, dtend, duration) = get_event_time_properties eventprops in
+          let event_start, _ = date_or_datetime_to_ptime dtstart in
+          match trigrel with
+          | `Start -> 
+            let alarm_start = add_span event_start d in
+            ts_in_range alarm_start range
+          | `End ->  
+            let event_end = match dtend, duration with
+            | Some dtend, _ -> dtend
+            | None, Some duration -> add_span event_start (Ptime.Span.of_int_s duration) in
+            let alarm_start = add_span event_end d in
+            ts_in_range alarm_start range) events in
+            
+      List.exists (fun alarm -> List.exists (matches_alarm_filter by_parent alarm) cfs) alarms 
+    | _, _ -> false in
     (* TODO: treat pfs and cfs *)
+    matches_timerange && matches_cfs
 
 let get_timezones_for_resp calendar tzids =
   let get_timezone tzid =
@@ -531,7 +629,8 @@ let vcalendar_matches_comp_filter filter (props, comps) =
     in
     let matches_cfs =
       (* TODO abstract *)
-      List.exists (fun c -> List.exists (fun cf -> matches_comp_filter cf c) cfs) comps
+      let timezones = List.flatten @@ List.map (function `Timezone tz -> [tz] | _ -> []) comps in
+      List.exists (fun c -> List.exists (matches_comp_filter timezones c) cfs) comps
     in
     let matches_pfs = List.for_all (apply_to_props props) pfs in
     matches_timerange && matches_cfs && matches_pfs

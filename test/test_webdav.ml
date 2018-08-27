@@ -913,13 +913,31 @@ let test_report_7_8_5 () =
 <D:multistatus xmlns:D="DAV:"
                   xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd4.ics</D:href>
+       <D:href>http://cal.example.com/bernard/work/abcd5.ics</D:href>
        <D:propstat>
          <D:prop>
-           <D:getetag>"fffff-abcd4"</D:getetag>
+           <D:getetag>"fffff-abcd5"</D:getetag>
            <C:calendar-data>BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VTIMEZONE
+LAST-MODIFIED:20040110T032845Z
+TZID:US/Eastern
+BEGIN:DAYLIGHT
+DTSTART:20000404T020000
+RRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=4
+TZNAME:EDT
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0400
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20001026T020000
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10
+TZNAME:EST
+TZOFFSETFROM:-0400
+TZOFFSETTO:-0500
+END:STANDARD
+END:VTIMEZONE
 BEGIN:VTODO
 DTSTAMP:20060205T235300Z
 DUE;TZID=US/Eastern:20060106T120000
@@ -930,7 +948,7 @@ SUMMARY:Task #2
 UID:E10BA47467C5C69BB74E8720@example.com
 BEGIN:VALARM
 ACTION:AUDIO
-TRIGGER;RELATED=START:-PT10M
+TRIGGER;RELATED=END:-PT10M
 END:VALARM
 END:VTODO
 END:VCALENDAR

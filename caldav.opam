@@ -15,7 +15,8 @@ depends: [
 ]
 
 build: [
-  [ "ocaml" "pkg/pkg.ml" "build" "--pinned" "%{pinned}%" "--tests" "false" ]
+  ["jbuilder" "subst" "-p" name]{pinned}
+  ["jbuilder" "build" "-p" name "-j" jobs]
 ]
 build-test: [
   [ "ocaml" "pkg/pkg.ml" "build" "--pinned" "%{pinned}%" "--tests" "true" ]
