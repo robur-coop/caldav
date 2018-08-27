@@ -321,14 +321,15 @@ let get_event_time_properties props =
   in (dtstart', dtend, duration)
 
 let real_event_in_timerange range_start range_end comp_start comp_end comp_duration is_datetime =
+  let is_positive s = Ptime.Span.compare Ptime.Span.zero s = -1 in
   match comp_end, comp_duration with
   | Some comp_end, None -> Ptime.is_earlier range_start ~than:comp_end && Ptime.is_later range_end ~than:comp_start
-  | None, Some secs when secs > 0 -> 
-    begin match Ptime.add_span comp_start (Ptime.Span.of_int_s secs) with
+  | None, Some secs when is_positive secs -> 
+    begin match Ptime.add_span comp_start secs with
     | None -> false
     | Some comp_end -> Ptime.is_earlier range_start ~than:comp_end && Ptime.is_later range_end ~than:comp_start
     end
-  | None, Some 0 -> (Ptime.is_earlier range_start ~than:comp_start || Ptime.equal range_start comp_start) && Ptime.is_later range_end ~than:comp_start
+  | None, Some _ -> (Ptime.is_earlier range_start ~than:comp_start || Ptime.equal range_start comp_start) && Ptime.is_later range_end ~than:comp_start
   | None, None -> if is_datetime 
     then (Ptime.is_earlier range_start ~than:comp_start || Ptime.equal range_start comp_start) && Ptime.is_later range_end ~than:comp_start 
     else match Ptime.add_span comp_start (Ptime.Span.of_int_s (24 * 60 * 60)) with
@@ -510,12 +511,11 @@ let alarm_in_timerange range alarm by_parent =
   match snd trigger with
   | `Datetime (ts, utc) -> ts_in_range ts range 
   | `Duration d -> (* is start or end; get duration, add to start / end *)
-    let d' = Ptime.Span.of_int_s d in
     let trig_rel = match Icalendar.Params.find Icalendar.Related (fst trigger) with
     | None -> `Start
     | Some x -> x
     in
-    by_parent range d' trig_rel
+    by_parent range d trig_rel
    
 
 let matches_alarm_filter by_parent alarm (comp_name, comp_filter) =
@@ -574,7 +574,7 @@ let matches_comp_filter timezones component (comp_name, comp_filter) =
               ts_in_range alarm_start range
             | None, Some dtstart, Some duration -> 
               let todo_start, _ = date_or_datetime_to_ptime dtstart in
-              let todo_end = add_span todo_start (Ptime.Span.of_int_s duration) in
+              let todo_end = add_span todo_start duration in
               let alarm_start = add_span todo_end d in
               ts_in_range alarm_start range
             | _ -> assert false
@@ -595,7 +595,7 @@ let matches_comp_filter timezones component (comp_name, comp_filter) =
           | `End ->  
             let event_end = match dtend, duration with
             | Some dtend, _ -> dtend
-            | None, Some duration -> add_span event_start (Ptime.Span.of_int_s duration) in
+            | None, Some duration -> add_span event_start duration in
             let alarm_start = add_span event_end d in
             ts_in_range alarm_start range) events in
             
