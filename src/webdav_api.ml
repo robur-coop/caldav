@@ -318,19 +318,6 @@ let get_time_properties props =
   | _ -> assert false
   in (dtstart, duration)
 
-let get_event_time_properties props =
-  let (dtstart, duration) = get_time_properties props in
-  let dtstart' = match dtstart with None -> assert false | Some d -> d in
-  let dtend = match List.find_opt (function `Dtend _ -> true | _ -> false) props with
-  | Some (`Dtend (_, `Date enddate)) -> begin match Ptime.of_date_time (enddate, ((0, 0, 0), 0)) with
-    | None -> assert false
-    | Some end_ts -> Some end_ts
-  end
-  | Some (`Dtend (_, `Datetime (ts, utc))) -> Some ts
-  | None -> None
-  | _ -> assert false
-  in (dtstart', dtend, duration)
-
 let add_span ts span = match Ptime.add_span ts span with
   | None -> assert false
   | Some ts' -> ts'
