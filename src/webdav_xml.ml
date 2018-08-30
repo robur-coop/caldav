@@ -205,7 +205,6 @@ let props_to_tree m =
 
 let props_to_string m =
   let c = props_to_tree m in
-  Format.printf "map is %a\n" Fmt.(list ~sep:(unit "\n") pp_tree) c ;
   tree_to_string (node ~ns:dav_ns "prop" c)
 
 let find_props ps m =
@@ -599,7 +598,6 @@ let parse_calendar_query_xml tree : (calendar_query, string) result =
       ((report_prop_parser >>~ fun p -> Ok (`Report p))
        ||| (filter_parser >>~ fun f -> Ok (`Filter f)))
   in
-  Format.printf "input tree: (%a)@." pp_tree tree ;
   run tree_grammar tree
 
 let proppatch_prop_parser f =

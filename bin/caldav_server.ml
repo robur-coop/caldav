@@ -106,7 +106,6 @@ class handler prefix fs = object(self)
     match Icalendar.parse body with
     | Error e ->
       Printf.printf "error %s while parsing calendar\n" e ;
-      Format.printf "write_calendar end, fs is now: %a\n" Mirage_fs_mem.pp fs ;
       Wm.continue false rd
     | Ok cal ->
       let ics = Icalendar.to_ics cal in
@@ -120,7 +119,6 @@ class handler prefix fs = object(self)
             let header' = Cohttp.Header.remove header "ETag" in
             Cohttp.Header.add header' "Etag" etag) rd
         in
-        Format.printf "write_calendar end, fs is now: %a\n" Mirage_fs_mem.pp fs ;
         Wm.continue true rd
 
   method private read_calendar rd =
@@ -142,8 +140,6 @@ class handler prefix fs = object(self)
 
     Fs.from_string fs file >>== function
     | `Dir dir ->
-      (* TODO: append / to name! *)
-      Printf.printf "is a directory\n" ;
       if gecko then
         directory_as_html prefix fs (`Dir dir) >>= fun listing ->
         Wm.continue (`String listing) rd
@@ -193,6 +189,7 @@ class handler prefix fs = object(self)
   method private process_propfind rd name =
     let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    Printf.printf "PROPFIND: %s\n%!" body;
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
@@ -204,7 +201,7 @@ class handler prefix fs = object(self)
 
   method private process_proppatch rd name =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
-    Printf.printf "PROPPATCH:%s\n" body;
+    Printf.printf "PROPPATCH: %s\n%!" body;
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
@@ -234,6 +231,7 @@ class handler prefix fs = object(self)
 
   method create_collection rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    Printf.printf "MKCOL/MKCALENDAR: %s\n%!" body;
     let body' = match rd.Wm.Rd.meth with
     | `Other "MKCALENDAR" -> calendar_to_collection body
     | `Other "MKCOL" -> Ok body 
@@ -252,12 +250,10 @@ class handler prefix fs = object(self)
         | Error `Bad_request -> Wm.continue `Conflict rd
 
   method delete_resource rd =
-    Format.printf "deleting %s in FS %a\n" (self#id rd) Mirage_fs_mem.pp fs ;
     Fs.from_string fs (self#id rd) >>= function
     | Error _ -> Wm.continue false rd
     | Ok f_or_d ->
       Dav.delete fs ~name:f_or_d >>= fun _ ->
-      Format.printf "deleted - FS now: %a\n" Mirage_fs_mem.pp fs ;
       Wm.continue true rd
 
   method last_modified rd =
@@ -297,22 +293,16 @@ class handler prefix fs = object(self)
       Wm.Rd.with_resp_headers add_headers rd
     else
       rd in
-    Printf.printf "returning %s\n%!"
-      (Cohttp.Header.to_string rd'.Wm.Rd.resp_headers) ;
     Wm.continue () rd'
 
   method private id rd =
     let url = Uri.path (rd.Wm.Rd.uri) in
     let pl = String.length prefix in
-    let path =
-      let p = String.sub url pl (String.length url - pl) in
-      if String.length p > 0 && String.get p 0 = '/' then
-        String.sub p 1 (String.length p - 1)
-      else
-        p
-    in
-    (* Printf.printf "path is %s\n" path ; *)
-    path
+    let p = String.sub url pl (String.length url - pl) in
+    if String.length p > 0 && String.get p 0 = '/' then
+      String.sub p 1 (String.length p - 1)
+    else
+      p
 end
 
 let initialise_fs fs =
@@ -320,7 +310,10 @@ let initialise_fs fs =
     Xml.create_properties ~content_type
       is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length name
   in
-  let props = create_properties "/" "text/directory" true 0 in
+  let props = 
+    let p = create_properties "/" "text/directory" true 0 in
+    Xml.PairMap.add (Xml.caldav_ns, "calendar-home-set") ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata "http://127.0.0.1:8080/calendars"]]) p
+  in
   Fs.write_property_map fs (`Dir []) props >>= fun _ ->
   let create_dir name =
     let dir = Fs.dir_from_string name in
@@ -332,7 +325,6 @@ let initialise_fs fs =
   create_dir "__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
   create_dir "__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
   create_dir "__uids__/10000000-0000-0000-0000-000000000001/tasks" >>= fun _ ->
-  Format.printf "FS is:\n%a\n" Mirage_fs_mem.pp fs ;
   Lwt.return_unit
 
 let main () =
@@ -352,7 +344,7 @@ let main () =
     (* Perform route dispatch. If [None] is returned, then the URI path did not
      * match any of the route patterns. In this case the server should return a
      * 404 [`Not_found]. *)
-    Printf.printf "resource %s meth %s headers %s\n"
+    Printf.printf "resource %s meth %s headers %s\n%!"
       (Request.resource request)
       (Code.string_of_method (Request.meth request))
       (Header.to_string (Request.headers request)) ;
@@ -374,7 +366,7 @@ let main () =
         | _ -> Printf.sprintf " - %s" (String.concat ", " path)
         | exception Not_found   -> ""
       in
-      Printf.eprintf "%d - %s %s%s, body: %s\n"
+      Printf.printf "%d - %s %s%s, body: %s\n%!"
         (Code.code_of_status status)
         (Code.string_of_method (Request.meth request))
         (Uri.path (Request.uri request))

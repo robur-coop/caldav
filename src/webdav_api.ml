@@ -70,11 +70,9 @@ let propfind_request_to_selector = function
   | `Props ps -> (fun m -> Xml.find_props ps m)
 
 let property_selector fs prefix request f_or_d =
-  Printf.printf "processing properties of %s\n" (Fs.to_string f_or_d) ;
   Fs.get_property_map fs f_or_d >|= function
   | None -> `Not_found
   | Some map ->
-    Printf.printf "read map %s\n" (Xml.props_to_string map) ;
     let propstats = (propfind_request_to_selector request) map in
     let ps = List.map propstat_node propstats in
     let selected_properties =
@@ -587,7 +585,6 @@ let get_timezones_for_resp calendar tzids =
 (* returns the entire calendar if any component matches the component filter.
    this is fine, because in caldav rfc and apple testsuite, each calendar only uses one component per file *)
 let vcalendar_matches_comp_filter filter (props, comps) =
-  Format.printf "apply to vcalendar, snd query is %a\n" Xml.pp_component_filter filter ;
   match filter with
   | ("VCALENDAR", `Is_defined) -> true
   | ("VCALENDAR", `Is_not_defined) -> false
@@ -608,7 +605,7 @@ let vcalendar_matches_comp_filter filter (props, comps) =
     in
     let matches_pfs = List.for_all (apply_to_props props) pfs in
     matches_timerange && matches_cfs && matches_pfs
-  | _ -> Printf.printf "something else\n" ; false
+  | _ -> false
 
 let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.component_filter) data map =
   let apply_transformation t d = match t with

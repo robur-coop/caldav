@@ -79,10 +79,7 @@ let write_property_map fs f_or_d map =
   in
   let data = Xml.props_to_string map' in
   let filename = to_string (propfilename f_or_d) in
-  Printf.printf "writing %s, content: %s\n" filename data ;
-  Fs.write fs filename 0 (Cstruct.of_string data) >|= fun r ->
-  Format.printf "file system %a" Mirage_fs_mem.pp fs ;
-  r
+  Fs.write fs filename 0 (Cstruct.of_string data)
 
 let size fs (`File file) =
   let name = to_string (`File file) in
@@ -135,7 +132,6 @@ let get_raw_property_map fs f_or_d =
 
 (* property getlastmodified does not exist for directories *)
 let last_modified_as_ptime fs f_or_d =
-  Printf.printf "last_modified_as_ptime for %s\n" (to_string f_or_d) ;
   get_raw_property_map fs f_or_d >|= function
   | None ->
     Printf.printf "invalid XML!\n" ;
@@ -153,7 +149,6 @@ let last_modified_as_ptime fs f_or_d =
 
 (* we only take depth 1 into account when computing the overall last modified *)
 let last_modified_of_dir map fs (`Dir dir) =
-  Printf.printf "last_modified_of_dir %s\n" (to_string (`Dir dir)) ;
   let start = match Xml.get_prop (Xml.dav_ns, "creationdate") map with
     | Some (_, [ Xml.Pcdata date ]) ->
       begin match Ptime.of_rfc3339 date with
@@ -165,19 +160,13 @@ let last_modified_of_dir map fs (`Dir dir) =
   listdir fs (`Dir dir) >>= function
   | Error _ -> Lwt.return (Xml.ptime_to_http_date start)
   | Ok files ->
-    Printf.printf "last_modified_of_dir found %d files\n" (List.length files) ;
     Lwt_list.map_p (last_modified_as_ptime fs) files >>= fun last_modifieds ->
     let lms = List.fold_left (fun acc -> function None -> acc | Some lm -> lm :: acc) [] last_modifieds in
-    let max_mtime a b =
-      Printf.printf "max_mtime a %s b %s, is_later %b\n"
-        (Ptime.to_rfc3339 a) (Ptime.to_rfc3339 b)
-        (Ptime.is_later ~than:a b) ;
-      if Ptime.is_later ~than:a b then b else a
+    let max_mtime a b = if Ptime.is_later ~than:a b then b else a
     in
     Lwt.return (Xml.ptime_to_http_date @@ List.fold_left max_mtime start lms)
 
 let get_etag fs f_or_d =
-  Printf.printf "etag for %s\n" (to_string f_or_d) ;
   get_raw_property_map fs f_or_d >|= function
   | None ->
     Printf.printf "invalid XML!\n" ;
@@ -187,11 +176,9 @@ let get_etag fs f_or_d =
     | _ -> Some (to_string f_or_d)
 
 let etag_of_dir fs (`Dir dir) =
-  Printf.printf "etag_of_dir %s\n" (to_string (`Dir dir)) ;
   listdir fs (`Dir dir) >>= function
   | Error _ -> Lwt.return ""
   | Ok files ->
-    Printf.printf "get_etag_of_dir found %d files\n" (List.length files) ;
     Lwt_list.map_p (get_etag fs) files >>= fun etags ->
     let some_etags = List.fold_left (fun acc -> function None -> acc | Some x -> x :: acc) [] etags in
     let data = String.concat ":" some_etags in
