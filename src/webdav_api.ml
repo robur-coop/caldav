@@ -495,7 +495,7 @@ let fb_in_timerange range = function
 
 (* transformation step *)
 let select_calendar_data (calprop, (comps : Icalendar.component list)) (requested_data: Xml.calendar_data) =
-  let (comp, range, freebusy) = requested_data in
+  let (_, range, freebusy) = requested_data in
   let exceptions =
     let events =
       List.filter (function
@@ -522,19 +522,7 @@ let select_calendar_data (calprop, (comps : Icalendar.component list)) (requeste
     | Some (`Limit_freebusy_set range) ->
       List.flatten (List.map (fb_in_timerange range) comps)
   in
-  match comp with
-  | None -> Some (calprop, limit_freebusy_set @@ limit_rec_set comps)
-  | Some ("VCALENDAR", prop, comp) ->
-    let comps' = match comp with
-    | `Allcomp -> comps
-    | `Comp cs ->
-       let select_and_filter c acc' comp = match select_component c comp with None -> acc' | Some c -> c :: acc' in
-       let comps' = List.fold_left (fun acc c -> List.fold_left (select_and_filter c) acc cs) [] comps in
-       List.rev comps'
-    in
-    Some (calprop_propfilter prop calprop, limit_freebusy_set @@ limit_rec_set comps')
-  | _ -> None
-
+  (calprop, limit_freebusy_set @@ limit_rec_set comps)
 
 (*
 type comp_filter = [
@@ -687,29 +675,29 @@ let vcalendar_matches_comp_filter filter (props, comps) =
 let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.component_filter) data map =
   let apply_transformation t d = match t with
   | `All_props -> [`OK, Xml.props_to_tree map]
+  | `Propname -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings map)]
   | `Proplist ps ->
-     let props, calendar_data = List.fold_left (fun (ps, cs) -> function
-        | `Calendar_data c -> (ps, c :: cs)
-        | `Prop p -> (p :: ps, cs)) ([], []) ps
+     let props, calendar_data_transform = List.partition (function `Prop _ -> true | _ -> false) ps in
+     let calendar_data_transform' = match calendar_data_transform with
+       | [ `Calendar_data c ] -> Some c
+       | [] -> None
+       | _ -> assert false
      in
-     let outputs = List.fold_left (fun acc c -> match select_calendar_data d c with
-         | None -> acc
-         | Some c -> c :: acc) [] calendar_data
+     let props' = List.map (function `Prop p -> p | _ -> assert false) props in
+     let output, filter = match calendar_data_transform' with
+       | None -> d, None
+       | Some ((filter, _, _) as tr) -> select_calendar_data d tr, filter
      in
-     let found_props = Xml.find_props props map in
+
+     let found_props = Xml.find_props props' map in
      let ok_props, rest_props = List.partition (fun (st, _) -> st = `OK) found_props in
      let ok_props' = List.flatten (List.map snd ok_props) in
-     let calendars = List.flatten @@ List.map
-       (fun c ->
-         match snd c with
-         | [] -> []
-         | _  ->
-           let ics = Icalendar.to_ics ~cr:false c in
-           [ Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata ics] ]
-       )
-       outputs in
-       begin match calendars with [] -> [] | cs -> [`OK, ok_props' @ cs ] @ rest_props end
-  | `Propname -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings map)]
+     match snd output with (* kill whole calendar if comps are empty *)
+     | [] -> []
+     | _ -> 
+       let ics = Icalendar.to_ics ~cr:false ~filter output in
+       let cs = [ Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata ics] ] in
+       [`OK, ok_props' @ cs ] @ rest_props 
   in
   match transform, vcalendar_matches_comp_filter filter data with
   | None, true -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics ~cr:false data)]]]
