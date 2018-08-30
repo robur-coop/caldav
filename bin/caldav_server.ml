@@ -312,18 +312,24 @@ let initialise_fs fs =
   in
   let props = 
     let p = create_properties "/" "text/directory" true 0 in
-    Xml.PairMap.add (Xml.caldav_ns, "calendar-home-set") ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata "http://127.0.0.1:8080/calendars"]]) p
+    Xml.PairMap.add (Xml.caldav_ns, "calendar-home-set") ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata "http://127.0.0.1:8080/calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar"]]) p
   in
   Fs.write_property_map fs (`Dir []) props >>= fun _ ->
-  let create_dir name =
+  let create_dir ?(props=[]) name =
     let dir = Fs.dir_from_string name in
-    let props = create_properties name "text/directory" true 0 in
-    Fs.mkdir fs dir props
+    let propmap = create_properties name "text/directory" true 0 in
+    let propmap' = List.fold_left (fun p (k, v) -> Xml.PairMap.add k v p) propmap props in
+    Fs.mkdir fs dir propmap'
+  in
+  let create_calendar name =
+    let props = [(Xml.dav_ns, "resourcetype"), ([], [Xml.node ~ns:Xml.caldav_ns "calendar" []; Xml.node ~ns:Xml.dav_ns "collection" []])] in
+    create_dir ~props name
   in
   create_dir "users" >>= fun _ ->
   create_dir "__uids__" >>= fun _ ->
   create_dir "__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
   create_dir "__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
+  create_calendar "__uids__/10000000-0000-0000-0000-000000000001/calendar/geburtstage" >>= fun _ ->
   create_dir "__uids__/10000000-0000-0000-0000-000000000001/tasks" >>= fun _ ->
   Lwt.return_unit
 

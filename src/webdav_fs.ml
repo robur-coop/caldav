@@ -155,7 +155,7 @@ let last_modified_of_dir map fs (`Dir dir) =
         | Error _ -> assert false
         | Ok (ts, _, _) -> ts
       end
-    | _ -> assert false
+    | _ -> Ptime.epoch
   in
   listdir fs (`Dir dir) >>= function
   | Error _ -> Lwt.return (Xml.ptime_to_http_date start)
