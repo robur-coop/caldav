@@ -244,68 +244,6 @@ let apply_to_props props =
     | None -> false
     | Some p -> text_matches substring collate negate p && apply_to_params pfs p)
 
-(*
-type comp = [ `Allcomp | `Comp of component list ]
-and prop = [ `Allprop | `Prop of (string * bool) list ]
-and component = string * prop * comp [@@deriving show, eq]
-
-type timerange = string * string [@@deriving show, eq]
-
-type calendar_data =
-  component option *
-  [ `Expand of timerange | `Limit_recurrence_set of timerange ] option *
-  [ `Limit_freebusy_set of timerange ] option [@@deriving show, eq]
-
-type report_prop = [
-  | `All_props
-  | `Proplist of [ `Calendar_data of calendar_data | `Prop of fqname ] list
-  | `Propname
-] [@@deriving show, eq]
-*)
-
-let propfilter to_key req_data prop = match req_data with
-  | `Allprop | `Prop [] -> [ prop ]
-  | `Prop ps ->
-    if List.exists (fun (key, _) -> String.equal (to_key prop) key) ps
-    then [ prop ]
-    else []
-
-let propfilters to_key req_data props =
-  List.flatten (List.map (propfilter to_key req_data) props)
-
-let event_propfilter req_data event =
-  let props = propfilters Icalendar.Writer.eventprop_to_ics_key req_data event.Icalendar.props in
-  (* TODO needs to filter other fields (rrule, dtstamp, ...) as well *)
-  { event with Icalendar.props }
-
-let todo_propfilter = propfilters Icalendar.Writer.todoprop_to_ics_key
-let freebusy_propfilter = propfilters Icalendar.Writer.freebusyprop_to_ics_key
-let timezone_propfilter = propfilters Icalendar.Writer.timezoneprop_to_ics_key
-let calprop_propfilter = propfilters Icalendar.Writer.calprop_to_ics_key
-
-let alarm_compfilter (comp: Xml.comp) alarms =
-  match comp with
-  | `Allcomp -> alarms
-  | `Comp [("VALARM", _, _)] -> alarms
-  | _ -> []
-(*
-  match alarms with
-  | `Audio a -> Some(`Audio (audio_propfilter prop a))
-  | `Display d -> Some(`Display (display_propfilter prop d))
-  | `Email e -> Some(`Email (email_propfilter prop e))
-*)
-
-let select_component component ((name, prop, comp): Xml.component) =
-  match component, name with
-  | `Event event, "VEVENT" ->
-    let alarms' = alarm_compfilter comp event.Icalendar.alarms in
-    let event' = event_propfilter prop event in
-    Some (`Event { event' with Icalendar.alarms = alarms' })
-  | `Todo (props, alarms), "VTODO" -> Some (`Todo (todo_propfilter prop props, alarm_compfilter comp alarms))
-  | `Freebusy props, "VFREEBUSY" -> Some (`Freebusy (freebusy_propfilter prop props))
-  | `Timezone props, "VTIMEZONE" -> Some (`Timezone (timezone_propfilter prop props))
-  | _ -> None
-
 let get_time_properties props =
   let dtstart = match List.find_opt (function `Dtstart _ -> true | _ -> false) props with
   | None -> None
