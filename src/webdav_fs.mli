@@ -1,6 +1,6 @@
 val (>>==) : ('a, 'b) result Lwt.t -> ('a -> ('c, 'b) result Lwt.t) -> ('c, 'b) result Lwt.t
 
-module Fs = Mirage_fs_mem
+module Fs = FS_unix
 
 type t = Fs.t
 
@@ -51,4 +51,4 @@ val pp_error : Fs.error Fmt.t
 
 val pp_write_error : Fs.write_error Fmt.t
 
-val connect : unit -> t Lwt.t
+val connect : string -> t Lwt.t

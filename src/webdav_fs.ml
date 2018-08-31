@@ -1,5 +1,5 @@
 open Lwt.Infix
-module Fs = Mirage_fs_mem
+module Fs = FS_unix
 
 module Xml = Webdav_xml
 
@@ -229,7 +229,9 @@ let mkdir fs (`Dir dir) propmap =
   write_property_map fs (`Dir dir) propmap
 
 let write fs (`File file) data propmap =
-  Fs.write fs (to_string (`File file)) 0 data >>== fun () ->
+  let filename = to_string (`File file) in
+  Fs.destroy fs filename >>= fun _ ->
+  Fs.write fs filename 0 data >>== fun () ->
   write_property_map fs (`File file) propmap
 
 let destroy fs f_or_d =
@@ -237,7 +239,7 @@ let destroy fs f_or_d =
   Fs.destroy fs (to_string propfile) >>== fun () ->
   Fs.destroy fs (to_string f_or_d)
 
-let connect () = Fs.connect ""
+let connect = Fs.connect
 
 let pp_error = Fs.pp_error
 let pp_write_error = Fs.pp_write_error

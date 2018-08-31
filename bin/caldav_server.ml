@@ -399,7 +399,7 @@ let main () =
   (* listen on port 8080 *)
   let port = 8080 in
   (* create the file system *)
-  Fs.connect () >>= fun fs ->
+  Fs.connect "/tmp/calendar" >>= fun fs ->
   (* the route table *)
   let routes = [
     ("/", fun () -> new handler "/" fs) ;

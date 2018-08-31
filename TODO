@@ -15,7 +15,6 @@
 
 - client interoperability: android? thunderbird! calendar.app!
 - user management (config file: users, hostname, routing, etc.)
-- persistent storage (irmin/git?)
 - timezone and date normalisation
 - slash normalisation with prefix
 - research scope of implementing calendar sharing
@@ -34,3 +33,6 @@
 - report CalDAV 7.8.6 - 7.8.10
 - attachments
 - recurrence < daily
+
+
+- persistent storage (irmin/git?) (mirage-fs-unix works for us!)

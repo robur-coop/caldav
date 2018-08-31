@@ -8,6 +8,7 @@ depends: [
   "ptime" 
   "cohttp-lwt-unix"
   "mirage-fs-mem"
+  "mirage-fs-unix"
   "xmlm"
   "tyxml"
   "icalendar"
