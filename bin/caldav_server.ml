@@ -110,16 +110,17 @@ class handler prefix fs = object(self)
       Wm.continue false rd
     | Ok cal ->
       let ics = Icalendar.to_ics cal in
+      let etag = etag ics in
       let file = Fs.file_from_string name in
-      Dav.write fs ~name:file ~content_type ics >>= function
-      | Error e ->
-        Wm.respond (to_status e) rd
+      Dav.write fs ~name:file ~etag ~content_type ics >>= function
+      | Error e -> Wm.respond (to_status e) rd
       | Ok _ ->
         Printf.printf "wrote calendar %s\n%!" name ;
-        let etag = etag ics in
         let rd = Wm.Rd.with_resp_headers (fun header ->
             let header' = Cohttp.Header.remove header "ETag" in
-            Cohttp.Header.add header' "Etag" etag) rd
+            let header'' = Cohttp.Header.add header' "Etag" etag in
+            Cohttp.Header.add header'' "Location" ("http://127.0.0.1:8080" ^ prefix ^ "/" ^ name)
+          ) rd
         in
         Wm.continue true rd
 
@@ -299,11 +300,13 @@ class handler prefix fs = object(self)
           | Some (_, [ Xml.Pcdata etag ]) -> Some etag
           | _ -> None
         in
+        Printf.printf "etag of %s is %s\n%!" (Fs.to_string f_or_d)
+          (match etag with None -> "none" | Some x -> x) ;
         Wm.continue etag rd'
 
   method finish_request rd =
     let rd' = if rd.Wm.Rd.meth = `OPTIONS then
-      let add_headers h = Cohttp.Header.add_list h [ ("DAV", "1, extended-mkcol") ] in
+      let add_headers h = Cohttp.Header.add_list h [ ("DAV", "1, extended-mkcol, calendar-access, access-control") ] in
       Wm.Rd.with_resp_headers add_headers rd
     else
       rd in
@@ -336,14 +339,35 @@ let initialise_fs fs =
     Fs.mkdir fs dir propmap'
   in
   let create_calendar name =
-    let props = [(Xml.dav_ns, "resourcetype"), ([], [Xml.node ~ns:Xml.caldav_ns "calendar" []; Xml.node ~ns:Xml.dav_ns "collection" []])] in
+    let props =
+      let reports = [
+        Xml.caldav_ns, "calendar-query" ;
+        Xml.caldav_ns, "calendar-multiget"
+      ] in
+      let report_nodes =
+        List.map (fun s ->
+            Xml.node ~ns:Xml.dav_ns "supported-report"
+              [ Xml.node ~ns:Xml.dav_ns "report"
+                  [ Xml.node ~ns:Xml.caldav_ns s [] ] ])
+          reports
+      in
+      let comps =
+        List.map (fun s ->
+            Xml.node ~ns:Xml.caldav_ns "comp" ~a:[(("", "name"), s)] [])
+          [ "VEVENT" ; "VTODO" ; "VTIMEZONE" ; "VFREEBUSY" ]
+      in
+      [
+      (Xml.dav_ns, "resourcetype"), ([], [Xml.node ~ns:Xml.caldav_ns "calendar" []; Xml.node ~ns:Xml.dav_ns "collection" []]) ;
+      (Xml.dav_ns, "supported-report-set"), ([], report_nodes) ;
+      (Xml.caldav_ns, "supported-calendar-component-set"), ([], comps)
+    ] in
     create_dir ~props name
   in
   create_dir "users" >>= fun _ ->
   create_dir "__uids__" >>= fun _ ->
   create_dir "__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
-  create_dir "__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
-  create_calendar "__uids__/10000000-0000-0000-0000-000000000001/calendar/geburtstage" >>= fun _ ->
+  create_calendar "__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
+  (*  create_calendar "__uids__/10000000-0000-0000-0000-000000000001/calendar/geburtstage" >>= fun _ -> *)
   create_dir "__uids__/10000000-0000-0000-0000-000000000001/tasks" >>= fun _ ->
   Lwt.return_unit
 

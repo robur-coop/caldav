@@ -21,6 +21,7 @@ let write state ~name ?etag ~content_type data =
     | true ->
       let props =
         let etag = match etag with None -> compute_etag data | Some e -> e in
+        Printf.printf "writing etag for %s: %s\n%!" (Fs.to_string (`File file)) etag ;
         Xml.create_properties ~content_type false
           ~etag (Ptime.to_rfc3339 (Ptime_clock.now ()))
           (String.length data) (Fs.to_string (`File file))
@@ -687,7 +688,13 @@ let handle_calendar_query_report calendar_query state prefix name =
 
 let handle_calendar_multiget_report (transformation, filenames) state prefix name =
   let report_one (filename : string) =
-    let file = Fs.file_from_string filename in
+    Printf.printf "calendar_multiget: filename %s prefix %s\n%!" filename prefix ;
+    let filename' = match Astring.String.cut ~sep:prefix filename with
+      | None -> filename
+      | Some ("", rest) -> rest
+      | Some _ -> assert false
+    in
+    let file = Fs.file_from_string filename' in
     Fs.read state file >|= function
     | Error _ ->
       let node =

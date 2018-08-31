@@ -79,6 +79,7 @@ let write_property_map fs f_or_d map =
   in
   let data = Xml.props_to_string map' in
   let filename = to_string (propfilename f_or_d) in
+  Printf.printf "writing property map %s: %s\n%!" filename data ;
   Fs.write fs filename 0 (Cstruct.of_string data)
 
 let size fs (`File file) =
