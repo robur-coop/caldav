@@ -10,3 +10,27 @@
 - service discovery of calendars
 - Persistent storage
 - WebUI
+
+-- 31st August 2018:
+
+- client interoperability: android? thunderbird! calendar.app!
+- user management (config file: users, hostname, routing, etc.)
+- persistent storage (irmin/git?)
+- timezone and date normalisation
+- slash normalisation with prefix
+- research scope of implementing calendar sharing
+- internationalisation (unicode)
+- access control (WebDAV)
+- report text-match
+- sync-collection (WebDAV) ctag
+- webUI
+- recurence exdate, rdate
+- calendar sharing
+  - free-busy-query report
+  - [locking (WebDAV)]
+  - inboxes
+- more tests from apple's test suite
+- component_in_timerange implementations (todo/freebusy)
+- report CalDAV 7.8.6 - 7.8.10
+- attachments
+- recurrence < daily
