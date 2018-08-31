@@ -582,7 +582,7 @@ let t_tree =
 let report name request data =
   let open Lwt.Infix in
   Lwt_main.run (
-    Dav.report data ~prefix:"http://cal.example.com/" ~name request >|= function
+    Dav.report data ~prefix:"http://cal.example.com" ~name request >|= function
     | Ok t -> Ok (tree (Xml.tree_to_string t))
     | Error _ -> Error "failed")
 

@@ -660,7 +660,7 @@ let handle_calendar_query_report calendar_query state prefix name =
               Fmt.(list ~sep:(unit "\n\n") Xml.pp_tree) (List.map propstat_node xs) ;
             let node =
               Xml.dav_node "response"
-                (Xml.dav_node "href" [ Xml.pcdata (prefix ^ filename) ]
+                (Xml.dav_node "href" [ Xml.pcdata (prefix ^ "/" ^ filename) ]
                  :: List.map propstat_node xs)
             in
             Ok (Some node)
@@ -699,7 +699,7 @@ let handle_calendar_multiget_report (transformation, filenames) state prefix nam
     | Error _ ->
       let node =
         Xml.dav_node "response"
-          [ Xml.dav_node "href" [ Xml.pcdata (prefix ^ (Fs.to_string (file :> Fs.file_or_dir))) ] ;
+          [ Xml.dav_node "href" [ Xml.pcdata (prefix ^ "/" ^ (Fs.to_string (file :> Fs.file_or_dir))) ] ;
             Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Not_found) ] ]
       in
       Ok node
@@ -712,7 +712,7 @@ let handle_calendar_multiget_report (transformation, filenames) state prefix nam
         let xs = apply_transformation transformation ics map in
         let node =
           Xml.dav_node "response"
-            (Xml.dav_node "href" [ Xml.pcdata (prefix ^ (Fs.to_string (file :> Fs.file_or_dir))) ]
+            (Xml.dav_node "href" [ Xml.pcdata (prefix ^ "/" ^ (Fs.to_string (file :> Fs.file_or_dir))) ]
              :: List.map propstat_node xs)
         in
         Ok node

@@ -117,9 +117,9 @@ class handler prefix fs = object(self)
       | Ok _ ->
         Printf.printf "wrote calendar %s\n%!" name ;
         let rd = Wm.Rd.with_resp_headers (fun header ->
-            let header' = Cohttp.Header.remove header "ETag" in
-            let header'' = Cohttp.Header.add header' "Etag" etag in
-            Cohttp.Header.add header'' "Location" ("http://127.0.0.1:8080" ^ prefix ^ "/" ^ name)
+            (* let header' = Cohttp.Header.remove header "ETag" in
+             * let header'' = Cohttp.Header.add header' "Etag" etag in *)
+            Cohttp.Header.add header "Location" ("http://127.0.0.1:8080" ^ prefix ^ "/" ^ name)
           ) rd
         in
         Wm.continue true rd
@@ -306,7 +306,14 @@ class handler prefix fs = object(self)
 
   method finish_request rd =
     let rd' = if rd.Wm.Rd.meth = `OPTIONS then
-      let add_headers h = Cohttp.Header.add_list h [ ("DAV", "1, extended-mkcol, calendar-access, access-control") ] in
+        let add_headers h = Cohttp.Header.add_list h [ ("DAV", "1, extended-mkcol, calendar-access") ] in
+        (* access-control, access-control, calendar-access, calendar-schedule, calendar-auto-schedule,
+           calendar-availability, inbox-availability, calendar-proxy, calendarserver-private-events,
+           calendarserver-private-comments, calendarserver-sharing, calendarserver-sharing-no-scheduling,
+           calendarserver-group-sharee, calendar-query-extended, calendar-default-alarms,
+           calendar-managed-attachments, calendarserver-partstat-changes, calendarserver-group-attendee,
+           calendar-no-timezone, calendarserver-recurrence-split, addressbook, addressbook, extended-mkcol,
+           calendarserver-principal-property-search, calendarserver-principal-search, calendarserver-home-sync *)
       Wm.Rd.with_resp_headers add_headers rd
     else
       rd in
@@ -322,14 +329,19 @@ class handler prefix fs = object(self)
       p
 end
 
+let server_ns = "http://calendarserver.org/ns/"
+let carddav_ns = "urn:ietf:params:xml:ns:carddav"
+
 let initialise_fs fs =
   let create_properties name content_type is_dir length =
     Xml.create_properties ~content_type
       is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length name
   in
-  let props = 
+  let props =
     let p = create_properties "/" "text/directory" true 0 in
-    Xml.PairMap.add (Xml.caldav_ns, "calendar-home-set") ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata "http://127.0.0.1:8080/calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar"]]) p
+    Xml.PairMap.add (Xml.caldav_ns, "calendar-home-set")
+      ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata "http://127.0.0.1:8080/calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar"]])
+      p
   in
   Fs.write_property_map fs (`Dir []) props >>= fun _ ->
   let create_dir ?(props=[]) name =
@@ -342,13 +354,22 @@ let initialise_fs fs =
     let props =
       let reports = [
         Xml.caldav_ns, "calendar-query" ;
-        Xml.caldav_ns, "calendar-multiget"
+        Xml.caldav_ns, "calendar-multiget" ;
+(*        Xml.dav_ns, "acl-principal-prop-set" ;
+        Xml.dav_ns, "principal-match" ;
+        Xml.dav_ns, "principal-property-search" ;
+        Xml.dav_ns, "expand-property" ;
+        server_ns, "calendarserver-principal-search" ;
+        Xml.caldav_ns, "free-busy-query" ;
+        carddav_ns, "addressbook-query" ;
+          carddav_ns, "addressbook-multiget" *)
+        (* Xml.dav_ns, "sync-collection" *)
       ] in
       let report_nodes =
-        List.map (fun s ->
+        List.map (fun (ns, s) ->
             Xml.node ~ns:Xml.dav_ns "supported-report"
               [ Xml.node ~ns:Xml.dav_ns "report"
-                  [ Xml.node ~ns:Xml.caldav_ns s [] ] ])
+                  [ Xml.node ~ns s [] ] ])
           reports
       in
       let comps =
@@ -359,7 +380,10 @@ let initialise_fs fs =
       [
       (Xml.dav_ns, "resourcetype"), ([], [Xml.node ~ns:Xml.caldav_ns "calendar" []; Xml.node ~ns:Xml.dav_ns "collection" []]) ;
       (Xml.dav_ns, "supported-report-set"), ([], report_nodes) ;
-      (Xml.caldav_ns, "supported-calendar-component-set"), ([], comps)
+      (Xml.caldav_ns, "supported-calendar-component-set"), ([], comps) ;
+      (* (server_ns, "getctag"), ([], [ Xml.pcdata "hallo" ]) *)
+      (* (Xml.dav_ns, "owner"), ([], [ Xml.pcdata "/principals/__uids__/10000000-0000-0000-0000-000000000001" ]) ; *)
+      (* (Xml.dav_ns, "current-user-principal"), ([], [ Xml.pcdata "/principals/__uids__/10000000-0000-0000-0000-000000000001" ]) ; *)
     ] in
     create_dir ~props name
   in
