@@ -395,6 +395,11 @@ let initialise_fs fs =
   create_dir "__uids__/10000000-0000-0000-0000-000000000001/tasks" >>= fun _ ->
   Lwt.return_unit
 
+type config = {
+  users : string list ;
+  hostname : string ;
+}
+
 let main () =
   (* listen on port 8080 *)
   let port = 8080 in
