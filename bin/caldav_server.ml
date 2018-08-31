@@ -97,6 +97,7 @@ class handler prefix fs = object(self)
 
   method private write_calendar rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    Printf.printf "write_calendar: %s\n%!" body ;
     let name = self#id rd in
     let content_type =
       match Cohttp.Header.get rd.Wm.Rd.req_headers "Content-Type" with
@@ -114,6 +115,7 @@ class handler prefix fs = object(self)
       | Error e ->
         Wm.respond (to_status e) rd
       | Ok _ ->
+        Printf.printf "wrote calendar %s\n%!" name ;
         let etag = etag ics in
         let rd = Wm.Rd.with_resp_headers (fun header ->
             let header' = Cohttp.Header.remove header "ETag" in
@@ -178,11 +180,13 @@ class handler prefix fs = object(self)
 
   method content_types_provided rd =
     Wm.continue [
+      "text/xml", self#read_calendar ;
       "text/calendar", self#read_calendar
     ] rd
 
   method content_types_accepted rd =
     Wm.continue [
+      "text/xml", self#write_calendar ;
       "text/calendar", self#write_calendar
     ] rd
 
@@ -221,7 +225,17 @@ class handler prefix fs = object(self)
       | _ -> assert false
 
   method report rd =
-    Wm.continue `Multistatus rd
+    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    Printf.printf "REPORT: %s\n%!" body;
+    Fs.from_string fs (self#id rd) >>= function
+    | Error _ -> Wm.respond (to_status `Bad_request) rd
+    | Ok f_or_d ->
+      match Xml.string_to_tree body with
+      | None -> Wm.respond (to_status `Bad_request) rd
+      | Some tree ->
+        Dav.report fs ~prefix ~name:f_or_d tree >>= function
+        | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
+        | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
   method cannot_create rd =
     let xml = Xml.node ~ns:Xml.dav_ns "error" [Xml.node ~ns:Xml.dav_ns "resource-must-be-null" []] in
@@ -350,9 +364,9 @@ let main () =
     (* Perform route dispatch. If [None] is returned, then the URI path did not
      * match any of the route patterns. In this case the server should return a
      * 404 [`Not_found]. *)
-    Printf.printf "resource %s meth %s headers %s\n%!"
-      (Request.resource request)
+    Printf.printf "REQUEST %s %s headers %s\n%!"
       (Code.string_of_method (Request.meth request))
+      (Request.resource request)
       (Header.to_string (Request.headers request)) ;
     Wm.dispatch' routes ~body ~request
     >|= begin function
@@ -372,7 +386,7 @@ let main () =
         | _ -> Printf.sprintf " - %s" (String.concat ", " path)
         | exception Not_found   -> ""
       in
-      Printf.printf "%d - %s %s%s, body: %s\n%!"
+      Printf.printf "\nRESPONSE %d - %s %s%s, body: %s\n\n%!"
         (Code.code_of_status status)
         (Code.string_of_method (Request.meth request))
         (Uri.path (Request.uri request))

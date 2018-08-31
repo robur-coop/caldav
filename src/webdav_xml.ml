@@ -67,6 +67,8 @@ and component_filter = string * comp_filter [@@deriving show, eq]
 
 type calendar_query = report_prop option * component_filter [@@deriving show, eq]
 
+type calendar_multiget = report_prop option * string list [@@deriving show, eq]
+
 let caldav_ns = "urn:ietf:params:xml:ns:caldav"
 let dav_ns = "DAV:"
 
@@ -597,6 +599,31 @@ let parse_calendar_query_xml tree : (calendar_query, string) result =
       (name_ns "calendar-query" caldav_ns)
       ((report_prop_parser >>~ fun p -> Ok (`Report p))
        ||| (filter_parser >>~ fun f -> Ok (`Filter f)))
+  in
+  run tree_grammar tree
+
+let href_parser =
+  tree_lift
+    (fun _ c -> exactly_one c)
+    (name_ns "href" dav_ns)
+    extract_pcdata
+
+let parse_calendar_multiget_xml tree : (calendar_multiget, string) result =
+  let tree_grammar =
+    tree_lift
+      (fun _ c ->
+         let prop, rest = match c with
+           | `Report r :: xs -> Some r, xs
+           | xs -> None, xs
+         in
+         let hrefs =
+           (* TODO error handling, incomplete pattern match *)
+           List.map (function `Href h -> h | _ -> assert false) rest
+         in
+         Ok (prop, hrefs))
+      (name_ns "calendar-multiget" caldav_ns)
+      ((report_prop_parser >>~ fun p -> Ok (`Report p))
+       ||| (href_parser >>~ fun f -> Ok (`Href f)))
   in
   run tree_grammar tree
 

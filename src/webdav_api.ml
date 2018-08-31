@@ -607,52 +607,52 @@ let vcalendar_matches_comp_filter filter (props, comps) =
     matches_timerange && matches_cfs && matches_pfs
   | _ -> false
 
+let apply_transformation (t : Xml.report_prop option) d map = match t with
+  | None -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics ~cr:false d)]]]
+  | Some `All_props -> [`OK, Xml.props_to_tree map]
+  | Some `Propname -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings map)]
+  | Some `Proplist ps ->
+    let props, calendar_data_transform = List.partition (function `Prop _ -> true | _ -> false) ps in
+    let calendar_data_transform' = match calendar_data_transform with
+      | [ `Calendar_data c ] -> Some c
+      | [] -> None
+      | _ -> assert false
+    in
+    let props' = List.map (function `Prop p -> p | _ -> assert false) props in
+    let output, filter = match calendar_data_transform' with
+      | None -> d, None
+      | Some ((filter, _, _) as tr) -> select_calendar_data d tr, filter
+    in
+    let found_props = Xml.find_props props' map in
+    let ok_props, rest_props = List.partition (fun (st, _) -> st = `OK) found_props in
+    let ok_props' = List.flatten (List.map snd ok_props) in
+    match snd output with (* kill whole calendar if comps are empty *)
+    | [] -> []
+    | _ ->
+      let ics = Icalendar.to_ics ~cr:false ~filter output in
+      let cs = [ Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata ics] ] in
+      [`OK, ok_props' @ cs ] @ rest_props
+
 let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.component_filter) data map =
-  let apply_transformation t d = match t with
-  | `All_props -> [`OK, Xml.props_to_tree map]
-  | `Propname -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings map)]
-  | `Proplist ps ->
-     let props, calendar_data_transform = List.partition (function `Prop _ -> true | _ -> false) ps in
-     let calendar_data_transform' = match calendar_data_transform with
-       | [ `Calendar_data c ] -> Some c
-       | [] -> None
-       | _ -> assert false
-     in
-     let props' = List.map (function `Prop p -> p | _ -> assert false) props in
-     let output, filter = match calendar_data_transform' with
-       | None -> d, None
-       | Some ((filter, _, _) as tr) -> select_calendar_data d tr, filter
-     in
+  if vcalendar_matches_comp_filter filter data then
+    apply_transformation transform data map
+  else
+    []
 
-     let found_props = Xml.find_props props' map in
-     let ok_props, rest_props = List.partition (fun (st, _) -> st = `OK) found_props in
-     let ok_props' = List.flatten (List.map snd ok_props) in
-     match snd output with (* kill whole calendar if comps are empty *)
-     | [] -> []
-     | _ -> 
-       let ics = Icalendar.to_ics ~cr:false ~filter output in
-       let cs = [ Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata ics] ] in
-       [`OK, ok_props' @ cs ] @ rest_props 
-  in
-  match transform, vcalendar_matches_comp_filter filter data with
-  | None, true -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics ~cr:false data)]]]
-  | _ , false -> []
-  | Some t, true -> apply_transformation t data
-
-let report state ~prefix ~name req =
+let handle_calendar_query_report calendar_query state prefix name =
   let report_one query = function
     | `Dir _ -> Lwt.return (Error `Bad_request)
     | `File f ->
-      Fs.read state (`File f) >>= function
-      | Error _ -> Lwt.return (Error `Bad_request)
+      Fs.read state (`File f) >|= function
+      | Error _ -> Error `Bad_request
       | Ok (data, map) ->
         match Icalendar.parse (Cstruct.to_string data) with
         | Error e ->
           Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
-          Lwt.return (Error `Bad_request)
+          Error `Bad_request
         | Ok ics ->
           match apply_to_vcalendar query ics map with
-          | [] -> Lwt.return (Ok None)
+          | [] -> Ok None
           | xs ->
             let filename = Fs.to_string (`File f) in
             Format.printf "xs for %s are:\n%a\n" filename
@@ -662,26 +662,65 @@ let report state ~prefix ~name req =
                 (Xml.dav_node "href" [ Xml.pcdata (prefix ^ filename) ]
                  :: List.map propstat_node xs)
             in
-            Lwt.return (Ok (Some node)) in
-  match Xml.parse_calendar_query_xml req with
-  | Error e -> Lwt.return (Error `Bad_request)
-  | Ok calendar_query -> match name with
-    | `File f ->
-      begin
-        report_one calendar_query (`File f) >|= function
-        | Ok (Some node) -> Ok (multistatus [ node ])
-        | Ok None -> Ok (multistatus [])
-        | Error e -> Error e
-      end
-    | `Dir d ->
-      Fs.listdir state (`Dir d) >>= function
-      | Error _ -> Lwt.return (Error `Bad_request)
-      | Ok files ->
-        Lwt_list.map_p (report_one calendar_query) files >>= fun reports ->
-        (* TODO we remove individual file errors, should we report them back?
-           be consistent in respect to other HTTP verbs taking directories (e.g. propfind) *)
-        let report' = List.fold_left (fun acc -> function
-            | Ok (Some r) -> r :: acc
-            | Ok None -> acc
-            | Error _ -> acc) [] reports in
-        Lwt.return (Ok (multistatus report'))
+            Ok (Some node)
+  in
+  match name with
+  | `File f ->
+    begin
+      report_one calendar_query (`File f) >|= function
+      | Ok (Some node) -> Ok (multistatus [ node ])
+      | Ok None -> Ok (multistatus [])
+      | Error e -> Error e
+    end
+  | `Dir d ->
+    Fs.listdir state (`Dir d) >>= function
+    | Error _ -> Lwt.return (Error `Bad_request)
+    | Ok files ->
+      Lwt_list.map_p (report_one calendar_query) files >>= fun responses ->
+      (* TODO we remove individual file errors, should we report them back?
+         be consistent in respect to other HTTP verbs taking directories (e.g. propfind) *)
+      let responses' = List.fold_left (fun acc -> function
+          | Ok (Some r) -> r :: acc
+          | Ok None -> acc
+          | Error _ -> acc) [] responses in
+      Lwt.return (Ok (multistatus responses'))
+
+let handle_calendar_multiget_report (transformation, filenames) state prefix name =
+  let report_one (filename : string) =
+    let file = Fs.file_from_string filename in
+    Fs.read state file >|= function
+    | Error _ ->
+      let node =
+        Xml.dav_node "response"
+          [ Xml.dav_node "href" [ Xml.pcdata (prefix ^ (Fs.to_string (file :> Fs.file_or_dir))) ] ;
+            Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Not_found) ] ]
+      in
+      Ok node
+    | Ok (data, map) ->
+      match Icalendar.parse (Cstruct.to_string data) with
+      | Error e ->
+        Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
+        Error `Bad_request
+      | Ok ics ->
+        let xs = apply_transformation transformation ics map in
+        let node =
+          Xml.dav_node "response"
+            (Xml.dav_node "href" [ Xml.pcdata (prefix ^ (Fs.to_string (file :> Fs.file_or_dir))) ]
+             :: List.map propstat_node xs)
+        in
+        Ok node
+  in
+  Lwt_list.map_p report_one filenames >>= fun responses ->
+  (* TODO we remove individual file parse errors, should we report them back? *)
+  let responses' = List.fold_left (fun acc -> function
+      | Ok r -> r :: acc
+      | Error _ -> acc) [] responses in
+  Lwt.return (Ok (multistatus @@ List.rev responses'))
+
+let report state ~prefix ~name req =
+  match Xml.parse_calendar_query_xml req, Xml.parse_calendar_multiget_xml req with
+  | Ok calendar_query, _ -> handle_calendar_query_report calendar_query state prefix name
+  | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget state prefix name
+  | Error e, Error _ -> Lwt.return (Error `Bad_request)
+
+

@@ -964,6 +964,90 @@ END:VCALENDAR
               (Ok (tree expected))
               (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
 
+let multiget_7_9_1 = header ^ {|
+   <C:calendar-multiget xmlns:D="DAV:"
+                    xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <D:getetag/>
+       <C:calendar-data/>
+     </D:prop>
+     <D:href>/bernard/work/abcd1.ics</D:href>
+     <D:href>/bernard/work/mtg1.ics</D:href>
+   </C:calendar-multiget>|}
+
+let calendar_multiget =
+  let module M = struct
+    type t = Xml.calendar_multiget
+    let pp = Xml.pp_calendar_multiget
+    let equal a b = compare a b = 0
+  end in
+  (module M : Alcotest.TESTABLE with type t = M.t)
+
+let test_parse_multiget_7_9_1 () =
+  let xml = multiget_7_9_1 in
+  let expected =
+    Ok
+      ((Some (`Proplist ([`Prop (("DAV:", "getetag"));
+                          `Calendar_data ((None, None, None))]))),
+       ["/bernard/work/abcd1.ics"; "/bernard/work/mtg1.ics"])
+  in
+  Alcotest.(check (result calendar_multiget string) __LOC__ expected
+              (Xml.parse_calendar_multiget_xml (tree xml)))
+
+let test_multiget_7_9_1 () =
+  let xml = multiget_7_9_1
+  and expected = header ^ {|
+   <D:multistatus xmlns:D="DAV:"
+                  xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd1.ics</D:href>
+       <D:propstat>
+         <D:prop>
+           <D:getetag>"fffff-abcd1"</D:getetag>
+           <C:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VTIMEZONE
+LAST-MODIFIED:20040110T032845Z
+TZID:US/Eastern
+BEGIN:DAYLIGHT
+DTSTART:20000404T020000
+RRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=4
+TZNAME:EDT
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0400
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20001026T020000
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10
+TZNAME:EST
+TZOFFSETFROM:-0400
+TZOFFSETTO:-0500
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:74855313FA803DA593CD579A@example.com
+DTSTAMP:20060206T001102Z
+DTSTART;TZID=US/Eastern:20060102T100000
+DURATION:PT1H
+SUMMARY:Event #1
+Description:Go Steelers!
+END:VEVENT
+END:VCALENDAR
+</C:calendar-data>
+         </D:prop>
+         <D:status>HTTP/1.1 200 OK</D:status>
+       </D:propstat>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/mtg1.ics</D:href>
+       <D:status>HTTP/1.1 404 Not Found</D:status>
+     </D:response>
+   </D:multistatus>|}
+  in
+  Alcotest.(check (result t_tree string) __LOC__
+              (Ok (tree expected))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
 
 let report_tests = [
   "Report from section 7.8.1 - first file only", `Quick, test_report_1 ;
@@ -977,8 +1061,9 @@ let report_tests = [
   "Parse report query from section 7.8.8", `Quick, test_report_7_8_8 ;
   "Parse report query from section 7.8.9", `Quick, test_report_7_8_9 ;
     "Parse report query from section 7.8.10", `Quick, test_report_7_8_10 *)
+  "Parse multiget report 7.9.1", `Quick, test_parse_multiget_7_9_1 ;
+  "Multiget report 7.9.1", `Quick, test_multiget_7_9_1 ;
 ]
-
 
 let propupdate =
   let module M = struct
