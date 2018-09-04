@@ -69,7 +69,7 @@ let propfind_request_to_selector = function
   | `All_prop includes -> (fun m -> [`OK, Xml.props_to_tree m]) (* TODO: finish this *)
   | `Props ps -> (fun m -> Xml.find_props ps m)
 
-let property_selector fs prefix request f_or_d =
+let property_selector fs hostname request f_or_d =
   Fs.get_property_map fs f_or_d >|= function
   | None -> `Not_found
   | Some map ->
@@ -77,7 +77,7 @@ let property_selector fs prefix request f_or_d =
     let ps = List.map propstat_node propstats in
     let selected_properties =
       Xml.dav_node "response"
-        (Xml.dav_node "href" [ Xml.Pcdata (prefix ^ "/" ^ (Fs.to_string f_or_d)) ] :: ps)
+        (Xml.dav_node "href" [ Xml.Pcdata (hostname ^ "/" ^ (Fs.to_string f_or_d)) ] :: ps)
     in
     `Single_response selected_properties
 
@@ -85,9 +85,9 @@ let multistatus nodes = Xml.dav_node "multistatus" nodes
 
 let error_xml element = Xml.dav_node "error" [ Xml.dav_node element [] ]
 
-let propfind fs f_or_d prefix req depth =
-  let process_files fs prefix dir req els =
-    Lwt_list.map_s (property_selector fs prefix req) (dir :: els) >|= fun answers ->
+let propfind fs f_or_d hostname req depth =
+  let process_files fs hostname dir req els =
+    Lwt_list.map_s (property_selector fs hostname req) (dir :: els) >|= fun answers ->
     (* answers : [ `Not_found | `Single_response of Tyxml.Xml.node ] list *)
     let nodes = List.fold_left (fun acc element ->
         match element with
@@ -103,23 +103,23 @@ let propfind fs f_or_d prefix req depth =
   | `Zero, _
   | _, `File _ ->
     begin
-      property_selector fs prefix req f_or_d >|= function
+      property_selector fs hostname req f_or_d >|= function
       | `Not_found -> Error `Property_not_found
       | `Single_response t -> Ok (multistatus [t])
     end
   | `One, `Dir data ->
     Fs.listdir fs (`Dir data) >>= function
     | Error _ -> assert false
-    | Ok els -> process_files fs prefix (`Dir data) req els
+    | Ok els -> process_files fs hostname (`Dir data) req els
 
-let propfind state ~prefix ~name tree ~depth =
+let propfind state ~hostname ~name tree ~depth =
   match parse_depth depth with
   | Error `Bad_request -> Lwt.return (Error `Bad_request)
   | Ok depth ->
     match Xml.parse_propfind_xml tree with
     | Error _ -> Lwt.return (Error `Property_not_found)
     | Ok req ->
-      propfind state name prefix req depth >|= function
+      propfind state name hostname req depth >|= function
       | Ok body -> Ok body
       | Error e -> Error e
 
@@ -165,7 +165,7 @@ let update_properties ?validate_key fs f_or_d updates =
     | Error e -> Error e
     | Ok () -> Ok propstats
 
-let proppatch state ~prefix ~name body =
+let proppatch state ~hostname ~name body =
   match Xml.parse_propupdate_xml body with
   | Error _ -> Lwt.return (Error `Bad_request)
   | Ok updates ->
@@ -180,7 +180,7 @@ let proppatch state ~prefix ~name body =
     | Ok propstats ->
       let nodes =
         Xml.dav_node "response"
-          (Xml.dav_node "href" [ Xml.Pcdata (prefix ^ "/" ^ (Fs.to_string name)) ] :: propstats)
+          (Xml.dav_node "href" [ Xml.Pcdata (hostname ^ "/" ^ (Fs.to_string name)) ] :: propstats)
       in
       let status = multistatus [ nodes ] in
       Ok (state, status)
@@ -639,7 +639,7 @@ let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.compon
   else
     []
 
-let handle_calendar_query_report calendar_query state prefix name =
+let handle_calendar_query_report calendar_query state hostname name =
   let report_one query = function
     | `Dir _ -> Lwt.return (Error `Bad_request)
     | `File f ->
@@ -659,7 +659,7 @@ let handle_calendar_query_report calendar_query state prefix name =
               Fmt.(list ~sep:(unit "\n\n") Xml.pp_tree) (List.map propstat_node xs) ;
             let node =
               Xml.dav_node "response"
-                (Xml.dav_node "href" [ Xml.pcdata (prefix ^ "/" ^ filename) ]
+                (Xml.dav_node "href" [ Xml.pcdata (hostname ^ "/" ^ filename) ]
                  :: List.map propstat_node xs)
             in
             Ok (Some node)
@@ -685,20 +685,15 @@ let handle_calendar_query_report calendar_query state prefix name =
           | Error _ -> acc) [] responses in
       Lwt.return (Ok (multistatus responses'))
 
-let handle_calendar_multiget_report (transformation, filenames) state prefix name =
+let handle_calendar_multiget_report (transformation, filenames) state hostname name =
   let report_one (filename : string) =
-    Printf.printf "calendar_multiget: filename %s prefix %s\n%!" filename prefix ;
-    let filename' = match Astring.String.cut ~sep:prefix filename with
-      | None -> filename
-      | Some ("", rest) -> rest
-      | Some _ -> assert false
-    in
-    let file = Fs.file_from_string filename' in
+    Printf.printf "calendar_multiget: filename %s\n%!" filename ;
+    let file = Fs.file_from_string filename in
     Fs.read state file >|= function
     | Error _ ->
       let node =
         Xml.dav_node "response"
-          [ Xml.dav_node "href" [ Xml.pcdata (prefix ^ "/" ^ (Fs.to_string (file :> Fs.file_or_dir))) ] ;
+          [ Xml.dav_node "href" [ Xml.pcdata (hostname ^ "/" ^ (Fs.to_string (file :> Fs.file_or_dir))) ] ;
             Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Not_found) ] ]
       in
       Ok node
@@ -711,7 +706,7 @@ let handle_calendar_multiget_report (transformation, filenames) state prefix nam
         let xs = apply_transformation transformation ics map in
         let node =
           Xml.dav_node "response"
-            (Xml.dav_node "href" [ Xml.pcdata (prefix ^ "/" ^ (Fs.to_string (file :> Fs.file_or_dir))) ]
+            (Xml.dav_node "href" [ Xml.pcdata (hostname ^ "/" ^ (Fs.to_string (file :> Fs.file_or_dir))) ]
              :: List.map propstat_node xs)
         in
         Ok node
@@ -723,10 +718,10 @@ let handle_calendar_multiget_report (transformation, filenames) state prefix nam
       | Error _ -> acc) [] responses in
   Lwt.return (Ok (multistatus @@ List.rev responses'))
 
-let report state ~prefix ~name req =
+let report state ~hostname ~name req =
   match Xml.parse_calendar_query_xml req, Xml.parse_calendar_multiget_xml req with
-  | Ok calendar_query, _ -> handle_calendar_query_report calendar_query state prefix name
-  | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget state prefix name
+  | Ok calendar_query, _ -> handle_calendar_query_report calendar_query state hostname name
+  | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget state hostname name
   | Error e, Error _ -> Lwt.return (Error `Bad_request)
 
 

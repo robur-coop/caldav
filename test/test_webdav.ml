@@ -535,7 +535,7 @@ let appendix_b_data =
       let ts = Ptime.v (1, 0L) in
       Ptime.to_rfc3339 ts
     in
-    Mirage_fs_mem.connect "" >>= fun res_fs ->
+    Fs.connect "/tmp/caldavtest" >>= fun res_fs ->
     let props name = Xml.create_properties true now 0 name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
@@ -556,7 +556,7 @@ let appendix_b_1_data =
       let ts = Ptime.v (1, 0L) in
       Ptime.to_rfc3339 ts
     in
-    Mirage_fs_mem.connect "" >>= fun res_fs ->
+    Fs.connect "" >>= fun res_fs ->
     let props name = Xml.create_properties true now 0 name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
@@ -582,7 +582,7 @@ let t_tree =
 let report name request data =
   let open Lwt.Infix in
   Lwt_main.run (
-    Dav.report data ~prefix:"http://cal.example.com" ~name request >|= function
+    Dav.report data ~hostname:"http://cal.example.com" ~name request >|= function
     | Ok t -> Ok (tree (Xml.tree_to_string t))
     | Error _ -> Error "failed")
 
@@ -1105,7 +1105,7 @@ let parse_propupdate_xml_tests = [
 
 let state_testable =
   let module M = struct
-    type t = Mirage_fs_mem.t
+    type t = Fs.t
     let pp = Mirage_fs_mem.pp
     let equal = Mirage_fs_mem.equal
   end in
@@ -1149,7 +1149,7 @@ let mkcol_success () =
   let res_fs, r =
     Lwt_main.run (
       let now = Ptime.v (1, 0L) in
-      Mirage_fs_mem.connect "" >>= fun res_fs ->
+      Fs.connect "" >>= fun res_fs ->
       let content = {_|<?xml version="1.0" encoding="utf-8" ?>
 <D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-02T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
       in
@@ -1169,7 +1169,7 @@ let delete_test () =
   let res_fs, r =
     Lwt_main.run (
       let open Lwt.Infix in
-      Mirage_fs_mem.connect "" >>= fun res_fs ->
+      Fs.connect "" >>= fun res_fs ->
       let content = {_|<?xml version="1.0" encoding="utf-8" ?>
 <D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-02T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
       in
@@ -1178,7 +1178,7 @@ let delete_test () =
       Mirage_fs_mem.mkdir res_fs "home" >>= fun _ ->
       Mirage_fs_mem.write res_fs "home/.prop.xml" 0
         (Cstruct.of_string content) >>= fun _ ->
-      Mirage_fs_mem.connect "" >>= fun fs ->
+      Fs.connect "" >>= fun fs ->
       let now = Ptime.v (10, 0L) in
       let content' = {_|<?xml version="1.0" encoding="utf-8" ?>
 <D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-11T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}

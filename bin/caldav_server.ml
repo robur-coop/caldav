@@ -4,6 +4,7 @@ open Lwt.Infix
 module Fs = Caldav.Webdav_fs
 module Xml = Caldav.Webdav_xml
 module Dav = Caldav.Webdav_api
+let hostname = "http://127.0.0.1:8080"
 
 (* Apply the [Webmachine.Make] functor to the Lwt_unix-based IO module
  * exported by cohttp. For added convenience, include the [Rd] module
@@ -39,15 +40,15 @@ let list_dir fs (`Dir dir) =
   | Error e -> assert false
   | Ok files -> Lwt_list.map_p list_file files
 
-let directory_as_html prefix fs (`Dir dir) =
+let directory_as_html fs (`Dir dir) =
   list_dir fs (`Dir dir) >|= fun files ->
   let print_file (file, is_dir, last_modified) =
-    Printf.sprintf "<tr><td><a href=\"%s/%s\">%s</a></td><td>%s</td><td>%s</td></tr>"
-      prefix file file (if is_dir then "directory" else "text/calendar") last_modified in
+    Printf.sprintf "<tr><td><a href=\"%s\">%s</a></td><td>%s</td><td>%s</td></tr>"
+      file file (if is_dir then "directory" else "text/calendar") last_modified in
   String.concat "\n" (List.map print_file files)
 
-let directory_etag prefix fs (`Dir dir) =
-  directory_as_html prefix fs (`Dir dir) >|= fun data ->
+let directory_etag fs (`Dir dir) =
+  directory_as_html fs (`Dir dir) >|= fun data ->
   etag data
 
 let directory_as_ics fs (`Dir dir) =
@@ -92,13 +93,13 @@ let calendar_to_collection data =
 
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
-class handler prefix fs = object(self)
+class handler fs = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
 
   method private write_calendar rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "write_calendar: %s\n%!" body ;
-    let name = self#id rd in
+    let path = self#path rd in
     let content_type =
       match Cohttp.Header.get rd.Wm.Rd.req_headers "Content-Type" with
       | None -> "text/calendar"
@@ -111,21 +112,21 @@ class handler prefix fs = object(self)
     | Ok cal ->
       let ics = Icalendar.to_ics cal in
       let etag = etag ics in
-      let file = Fs.file_from_string name in
+      let file = Fs.file_from_string path in
       Dav.write fs ~name:file ~etag ~content_type ics >>= function
       | Error e -> Wm.respond (to_status e) rd
       | Ok _ ->
-        Printf.printf "wrote calendar %s\n%!" name ;
+        Printf.printf "wrote calendar %s\n%!" path ;
         let rd = Wm.Rd.with_resp_headers (fun header ->
             let header' = Cohttp.Header.remove header "ETag" in
             let header'' = Cohttp.Header.add header' "Etag" etag in
-            Cohttp.Header.add header'' "Location" ("http://127.0.0.1:8080" ^ prefix ^ "/" ^ name)
+            Cohttp.Header.add header'' "Location" (hostname ^ "/" ^ path)
           ) rd
         in
         Wm.continue true rd
 
   method private read_calendar rd =
-    let file = self#id rd in
+    let file = self#path rd in
     let gecko =
       match Cohttp.Header.get rd.Wm.Rd.req_headers "User-Agent" with
       | None -> false
@@ -144,7 +145,7 @@ class handler prefix fs = object(self)
     Fs.from_string fs file >>== function
     | `Dir dir ->
       if gecko then
-        directory_as_html prefix fs (`Dir dir) >>= fun listing ->
+        directory_as_html fs (`Dir dir) >>= fun listing ->
         Wm.continue (`String listing) rd
       else
         (* TODO: check wheter CalDAV:calendar property is set as resourcetype!
@@ -176,7 +177,7 @@ class handler prefix fs = object(self)
     ] rd
 
   method resource_exists rd =
-    Fs.exists fs (self#id rd) >>= fun v ->
+    Fs.exists fs (self#path rd) >>= fun v ->
     Wm.continue v rd
 
   method content_types_provided rd =
@@ -198,7 +199,7 @@ class handler prefix fs = object(self)
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
-      Dav.propfind fs ~prefix ~name tree ~depth >>= function
+      Dav.propfind fs ~hostname ~name tree ~depth >>= function
       | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Property_not_found -> Wm.continue `Property_not_found rd
       | Error (`Forbidden b) -> Wm.respond ~body:(`String (Xml.tree_to_string b)) (to_status `Forbidden) rd
@@ -210,14 +211,14 @@ class handler prefix fs = object(self)
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
-      Dav.proppatch fs ~prefix ~name tree >>= function
+      Dav.proppatch fs ~hostname ~name tree >>= function
       | Ok (_, b) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
   method process_property rd =
     let replace_header h = Cohttp.Header.replace h "Content-Type" "application/xml" in
     let rd' = Wm.Rd.with_resp_headers replace_header rd in
-    Fs.from_string fs (self#id rd) >>= function
+    Fs.from_string fs (self#path rd) >>= function
     | Error _ -> Wm.respond (to_status `Bad_request) rd
     | Ok f_or_d ->
       match rd'.Wm.Rd.meth with
@@ -228,13 +229,13 @@ class handler prefix fs = object(self)
   method report rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "REPORT: %s\n%!" body;
-    Fs.from_string fs (self#id rd) >>= function
+    Fs.from_string fs (self#path rd) >>= function
     | Error _ -> Wm.respond (to_status `Bad_request) rd
     | Ok f_or_d ->
       match Xml.string_to_tree body with
       | None -> Wm.respond (to_status `Bad_request) rd
       | Some tree ->
-        Dav.report fs ~prefix ~name:f_or_d tree >>= function
+        Dav.report fs ~hostname ~name:f_or_d tree >>= function
         | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
         | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
@@ -257,7 +258,7 @@ class handler prefix fs = object(self)
       match Xml.string_to_tree body'' with
       | None when body'' <> "" -> Wm.continue `Conflict rd
       | tree ->
-        let dir = Fs.dir_from_string (self#id rd) in
+        let dir = Fs.dir_from_string (self#path rd) in
         Dav.mkcol fs dir tree >>= function
         | Ok _ -> Wm.continue `Created rd
         | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string t) }
@@ -265,14 +266,14 @@ class handler prefix fs = object(self)
         | Error `Bad_request -> Wm.continue `Conflict rd
 
   method delete_resource rd =
-    Fs.from_string fs (self#id rd) >>= function
+    Fs.from_string fs (self#path rd) >>= function
     | Error _ -> Wm.continue false rd
     | Ok f_or_d ->
       Dav.delete fs ~name:f_or_d >>= fun _ ->
       Wm.continue true rd
 
   method last_modified rd =
-    Fs.from_string fs (self#id rd) >>= function
+    Fs.from_string fs (self#path rd) >>= function
     | Error _ -> Wm.continue None rd
     | Ok f_or_d ->
       Fs.get_property_map fs f_or_d >|= (function
@@ -283,7 +284,7 @@ class handler prefix fs = object(self)
       Wm.continue res rd
 
   method generate_etag rd =
-    Fs.from_string fs (self#id rd) >>= function
+    Fs.from_string fs (self#path rd) >>= function
     | Error _ -> Wm.continue None rd
     | Ok f_or_d ->
       Fs.get_property_map fs f_or_d >>= function
@@ -319,14 +320,12 @@ class handler prefix fs = object(self)
       rd in
     Wm.continue () rd'
 
-  method private id rd =
-    let url = Uri.path (rd.Wm.Rd.uri) in
-    let pl = String.length prefix in
-    let p = String.sub url pl (String.length url - pl) in
-    if String.length p > 0 && String.get p 0 = '/' then
+  method private path rd =
+    Uri.path (rd.Wm.Rd.uri)
+    (*if String.length p > 0 && String.get p 0 = '/' then
       String.sub p 1 (String.length p - 1)
-    else
-      p
+    else 
+      p *)
 end
 
 let server_ns = "http://calendarserver.org/ns/"
@@ -407,10 +406,9 @@ let main () =
   Fs.connect "/tmp/calendar" >>= fun fs ->
   (* the route table *)
   let routes = [
-    ("/", fun () -> new handler "/" fs) ;
-    ("/principals", fun () -> new handler "/principals" fs) ;
-    ("/calendars", fun () -> new handler "/calendars" fs) ;
-    ("/calendars/*", fun () -> new handler "/calendars" fs) ;
+    ("/principals", fun () -> new handler fs) ;
+    ("/calendars", fun () -> new handler fs) ;
+    ("/calendars/*", fun () -> new handler fs) ;
   ] in
   let callback (ch, conn) request body =
     let open Cohttp in

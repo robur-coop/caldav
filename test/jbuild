@@ -1,6 +1,6 @@
 (executables
  ((names (test_webdav))
-  (libraries (caldav alcotest lwt.unix))))
+  (libraries (caldav alcotest lwt.unix mirage-fs-mem))))
 
 (alias
  ((name    runtest)

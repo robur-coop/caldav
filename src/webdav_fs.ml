@@ -1,5 +1,5 @@
 open Lwt.Infix
-module Fs = FS_unix
+module Fs = Mirage_fs_mem
 
 module Xml = Webdav_xml
 

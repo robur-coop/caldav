@@ -1,6 +1,6 @@
 val (>>==) : ('a, 'b) result Lwt.t -> ('a -> ('c, 'b) result Lwt.t) -> ('c, 'b) result Lwt.t
 
-module Fs = FS_unix
+module Fs = Mirage_fs_mem
 
 type t = Fs.t
 

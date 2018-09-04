@@ -6,13 +6,13 @@ val mkcol : ?now:Ptime.t -> state -> Webdav_fs.dir -> tree option ->
   (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
     result Lwt.t
 
-val propfind : state -> prefix:string -> name:Webdav_fs.file_or_dir -> tree -> depth:string option ->
+val propfind : state -> hostname:string -> name:Webdav_fs.file_or_dir -> tree -> depth:string option ->
   (tree, [ `Bad_request | `Forbidden of tree | `Property_not_found ]) result Lwt.t
 
-val proppatch : state -> prefix:string -> name:Webdav_fs.file_or_dir -> tree ->
+val proppatch : state -> hostname:string -> name:Webdav_fs.file_or_dir -> tree ->
   (state * tree, [ `Bad_request ]) result Lwt.t
 
-val report : state -> prefix:string -> name:Webdav_fs.file_or_dir -> tree ->
+val report : state -> hostname:string -> name:Webdav_fs.file_or_dir -> tree ->
   (tree, [`Bad_request]) result Lwt.t
 
 val write : state -> name:Webdav_fs.file -> ?etag:string -> content_type:string -> string ->
