@@ -121,16 +121,18 @@ let new_identifier map ns =
 (* apply_variables <map> <Tyxml> -> <list of trees> *)
 let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
   | Node (ns, n, a, c) ->
-    let ns_map' = List.fold_left (fun m ((ns, key), value) ->
-        (* TODO ensure uniqueness of values in map! *)
-        (* TODO correct behaviour when key already in map? *)
+    let ns_map', a' = List.fold_left (fun (m, a) ((ns, key), value as attr) ->
+        (* TODO do we reuse the same short letter (A, B, C ..)? *)
         if ns = Xmlm.ns_xmlns then
-          if key = "xmlns" then
-            M.add value "" m
-          else
-            M.add value key m
+          match M.find_opt value m with
+          | Some binding -> m, a 
+          | None ->
+            if key = "xmlns" then
+              M.add value "" m, attr :: a
+            else
+              M.add value key m, attr :: a
         else
-          m) ns_map a
+          m, attr :: a) (ns_map, []) a
     in
     let unapply ns name m = match M.find_opt ns m with
       | None when ns = "" -> (m, "", name, []) (* node has no namespace *)
@@ -143,11 +145,11 @@ let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
       | Some short -> (m, short, name, [])
     in
     let (ns_map'', ns', n', new_ns) = unapply ns n ns_map' in
-    let (ns_map''', a', new_ns') =
+    let (ns_map''', a'', new_ns') =
       List.fold_left (fun (m, attributes, new_ns) ((ns, n), value) ->
           let (m', ns', n', new_ns'') = unapply ns n m in
           m', ((ns', n'), value) :: attributes, new_ns'' @ new_ns)
-        (ns_map'', [], new_ns) a
+        (ns_map'', [], new_ns) a'
     in
     let c', ns_map'''' =
       List.fold_left
@@ -158,7 +160,7 @@ let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
         c
     in
     (* let a'' = List.map (fun (id, ns) -> (("xmlns", id), ns)) new_ns' in *)
-    node ~ns:ns' ~a:a' n' (List.rev c'), ns_map''''
+    node ~ns:ns' ~a:a'' n' (List.rev c'), ns_map''''
   | Pcdata data -> Pcdata data, ns_map
 
 let attach_namespaces tree =

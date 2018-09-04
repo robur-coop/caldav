@@ -453,7 +453,8 @@ let main () =
     Printf.printf "connection %s closed\n%!"
       (Sexplib.Sexp.to_string_hum (Conduit_lwt_unix.sexp_of_flow ch))
   in
-  initialise_fs fs >>= fun () ->
+  (* only for apple test suite *)
+  (*initialise_fs fs >>= fun () ->*)
   let config = Server.make ~callback ~conn_closed () in
   Server.create  ~mode:(`TCP(`Port port)) config
   >>= (fun () -> Printf.eprintf "hello_lwt: listening on 0.0.0.0:%d%!" port;

@@ -21,7 +21,6 @@ let write state ~name ?etag ~content_type data =
     | true ->
       let props =
         let etag = match etag with None -> compute_etag data | Some e -> e in
-        Printf.printf "writing etag for %s: %s\n%!" (Fs.to_string (`File file)) etag ;
         Xml.create_properties ~content_type false
           ~etag (Ptime.to_rfc3339 (Ptime_clock.now ()))
           (String.length data) (Fs.to_string (`File file))
@@ -130,17 +129,17 @@ let apply_updates ?(validate_key = fun _ -> Ok ()) m updates =
     | Ok () ->
       (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
       let map = Xml.PairMap.add k v m in
-      Format.printf "map after set %a %s\n" Xml.pp_fqname k (Xml.props_to_string map) ;
       Some map, (`OK, k)
   in
   (* if an update did not apply, m will be None! *)
   let apply (m, propstats) update = match m, update with
     | None, `Set (_, k, _) -> None, (`Failed_dependency, k) :: propstats
     | None, `Remove k   -> None, (`Failed_dependency, k) :: propstats
-    | Some m, `Set (a, k, v) -> let (m, p) = set_prop k (a, v) m in (m, p :: propstats)
+    | Some m, `Set (a, k, v) -> 
+      let (m, p) = set_prop k (a, v) m in 
+      (m, p :: propstats)
     | Some m, `Remove k ->
       let map = Xml.PairMap.remove k m in
-      Format.printf "map after remove %a %s\n" Xml.pp_fqname k (Xml.props_to_string map) ;
       Some map, (`OK, k) :: propstats
   in
   match List.fold_left apply (m, []) updates with
