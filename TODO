@@ -11,9 +11,12 @@
 - Persistent storage
 - WebUI
 
+DONE:
+- client interoperability: thunderbird! calendar.app! create and delete and rename event, todo
+
 -- 31st August 2018:
 
-- client interoperability: android? thunderbird! calendar.app!
+- client interoperability: android! create new todo lists and new calendars, use different users
 - user management (config file: users, hostname, routing, etc.)
 - timezone and date normalisation
 - slash normalisation with prefix

@@ -117,9 +117,9 @@ class handler prefix fs = object(self)
       | Ok _ ->
         Printf.printf "wrote calendar %s\n%!" name ;
         let rd = Wm.Rd.with_resp_headers (fun header ->
-            (* let header' = Cohttp.Header.remove header "ETag" in
-             * let header'' = Cohttp.Header.add header' "Etag" etag in *)
-            Cohttp.Header.add header "Location" ("http://127.0.0.1:8080" ^ prefix ^ "/" ^ name)
+            let header' = Cohttp.Header.remove header "ETag" in
+            let header'' = Cohttp.Header.add header' "Etag" etag in
+            Cohttp.Header.add header'' "Location" ("http://127.0.0.1:8080" ^ prefix ^ "/" ^ name)
           ) rd
         in
         Wm.continue true rd
