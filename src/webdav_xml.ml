@@ -28,8 +28,7 @@ type comp = [ `Allcomp | `Comp of component list ]
 and prop = [ `Allprop | `Prop of (string * bool) list ]
 and component = string * prop * comp [@@deriving show, eq]
 
-(* TODO check that start is earlier than end! *)
-type timerange = (Ptime.t * bool) * (Ptime.t * bool) [@@deriving show, eq]
+type timerange = Icalendar.utc_timestamp * Icalendar.utc_timestamp [@@deriving show, eq]
 
 type calendar_data =
   component option *
@@ -427,14 +426,17 @@ let rec comp_parser tree : (component, string) result =
      ||| (comp_parser >>~ fun (s, p, c) -> Ok (`Comp (s, p, c))))
     tree
 
+(* RFC 4791 Section 9.9: Both attributes MUST be specified as "date with UTC time" value. *)
 let range_parser name : tree -> (timerange, string) result =
   tree_lift
     (fun a c -> is_empty c >>= fun () -> match find_attribute "start" a, find_attribute "end" a with
        | None, _ | _, None -> Error "Missing attribute \"start\" or \"end\""
        | Some s, Some e -> match Icalendar.parse_datetime s, Icalendar.parse_datetime e with
+         | Ok (Icalendar.Utc s'), Ok (Icalendar.Utc e') ->
+           if Ptime.is_later ~than:s' e' then Ok (s', e') else Error "timerange end is before start"
          | Error e, _ -> Error e
          | _, Error e -> Error e
-         | Ok s', Ok e' -> Ok (s', e'))
+         | Ok _, Ok _ -> Error "timerange must be specified as UTC")
     (name_ns name caldav_ns >>~ extract_attributes)
     (any)
 

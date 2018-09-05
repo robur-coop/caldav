@@ -293,7 +293,8 @@ let date_or_datetime_to_ptime = function
 
 (* start and end_ mark the range,
    dtstart and dtend and duration mark the component, e.g. event *)
-let span_in_timerange start end_ dtstart dtend duration dtstart_is_datetime =
+let span_in_timerange range dtstart dtend duration dtstart_is_datetime =
+  let (start, end_) = range in
   let duration_gt_0 = match duration with
     | None -> false
     | Some d -> Ptime.Span.compare Ptime.Span.zero d = -1
@@ -313,21 +314,21 @@ let span_in_timerange start end_ dtstart dtend duration dtstart_is_datetime =
   | None, None, false, false      -> start < (dtstart + p1d) && end_ > dtstart
   | _                             -> assert false (* duration_gt_0 is dependent on duration *)
 
-let real_event_in_timerange event ((start, _), (end_, _)) =
+let real_event_in_timerange event range =
   let dtstart, dtstart_is_datetime = date_or_datetime_to_ptime (snd event.Icalendar.dtstart) in
   let dtend, duration = match event.Icalendar.dtend_or_duration with
     | None -> None, None
     | Some (`Duration (_, span)) -> None, Some span
     | Some (`Dtend (_, v)) -> Some (fst (date_or_datetime_to_ptime v)), None
   in
-  span_in_timerange start end_ dtstart dtend duration dtstart_is_datetime
+  span_in_timerange range dtstart dtend duration dtstart_is_datetime
 
 let date_or_datetime_to_date = function
   | `Date d -> d
   | `Datetime (ts, _) -> fst (Ptime.to_date_time ts)
 
 let expand_event_in_range f acc range exceptions event =
-  let ((s, _), (e, _)) = range in
+  let (s, e) = range in
   let next_event = Icalendar.recur_events event in
   let rec next_r () = match next_event () with
     | None -> None
@@ -351,7 +352,7 @@ let event_in_timerange range exceptions event =
   expand_event_in_range f false range exceptions event
 
 (* TODO does not match freebusy table in RFC 4791 Sec 9.9 *)
-let freebusy_in_timerange ((s, _), (e, _)) fb =
+let freebusy_in_timerange range fb =
   match
     List.find_opt (function `Dtstart _ -> true | _ -> false) fb,
     List.find_opt (function `Dtend _ -> true | _ -> false) fb
@@ -360,13 +361,13 @@ let freebusy_in_timerange ((s, _), (e, _)) fb =
     let dtstart', is_datetime = date_or_datetime_to_ptime dtstart
     and dtend', _ = date_or_datetime_to_ptime dtend
     in
-    span_in_timerange s e dtstart' (Some dtend') None is_datetime
+    span_in_timerange range dtstart' (Some dtend') None is_datetime
   | _ -> false
 
 (* TODO `Todo is missing *)
-let comp_in_timerange r exceptions = function
-  | `Event e -> event_in_timerange r exceptions e
-  | `Freebusy fb -> freebusy_in_timerange r fb
+let comp_in_timerange range exceptions = function
+  | `Event e -> event_in_timerange range exceptions e
+  | `Freebusy fb -> freebusy_in_timerange range fb
   | `Timezone _  -> true
   | _ -> false
 
@@ -418,7 +419,7 @@ let expand_comp range exceptions timezones = function
 let fb_in_timerange range = function
   | `Freebusy fb ->
     let in_range (s, e, _) =
-      let ((s_req, _), (e_req, _)) = range in
+      let (s_req, e_req) = range in
       let (<) a b = Ptime.is_later ~than:a b in
       let (<=) a b = a < b || Ptime.equal a b in
       (s_req <= s && e < e_req) ||
@@ -473,7 +474,7 @@ and component_filter = string * comp_filter
 *)
 
 let ts_in_range ts range =
-  let ((s, _), (e, _)) = range in
+  let (s, e) = range in
   Ptime.is_later ~than:s ts && Ptime.is_later ~than:ts e
 
 (* TODO deal with repeating alarms *)

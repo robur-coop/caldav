@@ -13,13 +13,13 @@
 
 DONE:
 - client interoperability: thunderbird! calendar.app! create and delete and rename event, todo
+- slash normalisation with prefix
 
 -- 31st August 2018:
 
 - client interoperability: android! create new todo lists and new calendars, use different users
 - user management (config file: users, hostname, routing, etc.)
 - timezone and date normalisation
-- slash normalisation with prefix
 - research scope of implementing calendar sharing
 - internationalisation (unicode)
 - access control (WebDAV)
