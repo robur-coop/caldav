@@ -9,8 +9,8 @@ type tree = Webdav_xml.tree
 
 let compute_etag str = Digest.to_hex @@ Digest.string str
 
-let write state ~name ?etag ~content_type data =
-  match name with
+let write state ~path ?etag ~content_type data =
+  match path with
   | `Dir _ -> Lwt.return (Error `Method_not_allowed)
   | `File file ->
     let parent = Fs.parent (`File file) in
@@ -29,8 +29,8 @@ let write state ~name ?etag ~content_type data =
       | Error e -> Error `Internal_server_error
       | Ok () -> Ok state
 
-let delete ?(now = Ptime_clock.now ()) state ~name =
-  Fs.destroy state name >>= fun res ->
+let delete ?(now = Ptime_clock.now ()) state ~path =
+  Fs.destroy state path >>= fun res ->
   let now = Ptime.to_rfc3339 now in
   let rec update_parent f_or_d =
     let (`Dir parent) = Fs.parent f_or_d in
@@ -44,7 +44,7 @@ let delete ?(now = Ptime_clock.now ()) state ~name =
         | [] -> Lwt.return_unit
         | dir -> update_parent (`Dir dir)
   in
-  update_parent name >|= fun () ->
+  update_parent path >|= fun () ->
   state
 
 let statuscode_to_string res =
@@ -69,7 +69,10 @@ let propfind_request_to_selector = function
   | `All_prop includes -> (fun m -> [`OK, Xml.props_to_tree m]) (* TODO: finish this *)
   | `Props ps -> (fun m -> Xml.find_props ps m)
 
-let property_selector fs hostname request f_or_d =
+let uri_string host f_or_d =
+  Uri.to_string @@ Uri.with_path host (Fs.to_string f_or_d)
+
+let property_selector fs host request f_or_d =
   Fs.get_property_map fs f_or_d >|= function
   | None -> `Not_found
   | Some map ->
@@ -77,7 +80,7 @@ let property_selector fs hostname request f_or_d =
     let ps = List.map propstat_node propstats in
     let selected_properties =
       Xml.dav_node "response"
-        (Xml.dav_node "href" [ Xml.Pcdata (hostname ^ "/" ^ (Fs.to_string f_or_d)) ] :: ps)
+        (Xml.dav_node "href" [ Xml.Pcdata (uri_string host f_or_d) ] :: ps)
     in
     `Single_response selected_properties
 
@@ -85,9 +88,9 @@ let multistatus nodes = Xml.dav_node "multistatus" nodes
 
 let error_xml element = Xml.dav_node "error" [ Xml.dav_node element [] ]
 
-let propfind fs f_or_d hostname req depth =
-  let process_files fs hostname dir req els =
-    Lwt_list.map_s (property_selector fs hostname req) (dir :: els) >|= fun answers ->
+let propfind fs f_or_d host req depth =
+  let process_files fs host dir req els =
+    Lwt_list.map_s (property_selector fs host req) (dir :: els) >|= fun answers ->
     (* answers : [ `Not_found | `Single_response of Tyxml.Xml.node ] list *)
     let nodes = List.fold_left (fun acc element ->
         match element with
@@ -103,23 +106,23 @@ let propfind fs f_or_d hostname req depth =
   | `Zero, _
   | _, `File _ ->
     begin
-      property_selector fs hostname req f_or_d >|= function
+      property_selector fs host req f_or_d >|= function
       | `Not_found -> Error `Property_not_found
       | `Single_response t -> Ok (multistatus [t])
     end
   | `One, `Dir data ->
     Fs.listdir fs (`Dir data) >>= function
     | Error _ -> assert false
-    | Ok els -> process_files fs hostname (`Dir data) req els
+    | Ok els -> process_files fs host (`Dir data) req els
 
-let propfind state ~hostname ~name tree ~depth =
+let propfind state ~host ~path tree ~depth =
   match parse_depth depth with
   | Error `Bad_request -> Lwt.return (Error `Bad_request)
   | Ok depth ->
     match Xml.parse_propfind_xml tree with
     | Error _ -> Lwt.return (Error `Property_not_found)
     | Ok req ->
-      propfind state name hostname req depth >|= function
+      propfind state path host req depth >|= function
       | Ok body -> Ok body
       | Error e -> Error e
 
@@ -165,7 +168,7 @@ let update_properties ?validate_key fs f_or_d updates =
     | Error e -> Error e
     | Ok () -> Ok propstats
 
-let proppatch state ~hostname ~name body =
+let proppatch state ~host ~path body =
   match Xml.parse_propupdate_xml body with
   | Error _ -> Lwt.return (Error `Bad_request)
   | Ok updates ->
@@ -175,12 +178,12 @@ let proppatch state ~hostname ~name body =
         | _ -> Ok ()
       else Ok ()
     in
-    update_properties ~validate_key state name updates >|= function
+    update_properties ~validate_key state path updates >|= function
     | Error _      -> Error `Bad_request
     | Ok propstats ->
       let nodes =
         Xml.dav_node "response"
-          (Xml.dav_node "href" [ Xml.Pcdata (hostname ^ "/" ^ (Fs.to_string name)) ] :: propstats)
+          (Xml.dav_node "href" [ Xml.Pcdata (uri_string host path) ] :: propstats)
       in
       let status = multistatus [ nodes ] in
       Ok (state, status)
@@ -202,7 +205,7 @@ let body_to_props body default_props =
       Error (`Forbidden xml)
     | Some map, _ -> Ok map
 
-(* assumption: name is a relative path! *)
+(* assumption: path is a relative path! *)
 let mkcol ?(now = Ptime_clock.now ()) state (`Dir dir) body =
   (* TODO: move to caller *)
   let parent = Fs.parent (`Dir dir) in
@@ -639,7 +642,7 @@ let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.compon
   else
     []
 
-let handle_calendar_query_report calendar_query state hostname name =
+let handle_calendar_query_report calendar_query state host path =
   let report_one query = function
     | `Dir _ -> Lwt.return (Error `Bad_request)
     | `File f ->
@@ -654,17 +657,14 @@ let handle_calendar_query_report calendar_query state hostname name =
           match apply_to_vcalendar query ics map with
           | [] -> Ok None
           | xs ->
-            let filename = Fs.to_string (`File f) in
-            Format.printf "xs for %s are:\n%a\n" filename
-              Fmt.(list ~sep:(unit "\n\n") Xml.pp_tree) (List.map propstat_node xs) ;
             let node =
               Xml.dav_node "response"
-                (Xml.dav_node "href" [ Xml.pcdata (hostname ^ "/" ^ filename) ]
+                (Xml.dav_node "href" [ Xml.pcdata (uri_string host (`File f)) ]
                  :: List.map propstat_node xs)
             in
             Ok (Some node)
   in
-  match name with
+  match path with
   | `File f ->
     begin
       report_one calendar_query (`File f) >|= function
@@ -685,7 +685,7 @@ let handle_calendar_query_report calendar_query state hostname name =
           | Error _ -> acc) [] responses in
       Lwt.return (Ok (multistatus responses'))
 
-let handle_calendar_multiget_report (transformation, filenames) state hostname name =
+let handle_calendar_multiget_report (transformation, filenames) state host path =
   let report_one (filename : string) =
     Printf.printf "calendar_multiget: filename %s\n%!" filename ;
     let file = Fs.file_from_string filename in
@@ -693,7 +693,7 @@ let handle_calendar_multiget_report (transformation, filenames) state hostname n
     | Error _ ->
       let node =
         Xml.dav_node "response"
-          [ Xml.dav_node "href" [ Xml.pcdata (hostname ^ "/" ^ (Fs.to_string (file :> Fs.file_or_dir))) ] ;
+          [ Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Fs.file_or_dir)) ] ;
             Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Not_found) ] ]
       in
       Ok node
@@ -706,7 +706,7 @@ let handle_calendar_multiget_report (transformation, filenames) state hostname n
         let xs = apply_transformation transformation ics map in
         let node =
           Xml.dav_node "response"
-            (Xml.dav_node "href" [ Xml.pcdata (hostname ^ "/" ^ (Fs.to_string (file :> Fs.file_or_dir))) ]
+            (Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Fs.file_or_dir)) ]
              :: List.map propstat_node xs)
         in
         Ok node
@@ -718,10 +718,10 @@ let handle_calendar_multiget_report (transformation, filenames) state hostname n
       | Error _ -> acc) [] responses in
   Lwt.return (Ok (multistatus @@ List.rev responses'))
 
-let report state ~hostname ~name req =
+let report state ~host ~path req =
   match Xml.parse_calendar_query_xml req, Xml.parse_calendar_multiget_xml req with
-  | Ok calendar_query, _ -> handle_calendar_query_report calendar_query state hostname name
-  | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget state hostname name
+  | Ok calendar_query, _ -> handle_calendar_query_report calendar_query state host path
+  | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget state host path
   | Error e, Error _ -> Lwt.return (Error `Bad_request)
 
 

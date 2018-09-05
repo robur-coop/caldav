@@ -4,7 +4,11 @@ open Lwt.Infix
 module Fs = Caldav.Webdav_fs
 module Xml = Caldav.Webdav_xml
 module Dav = Caldav.Webdav_api
-let hostname = "http://127.0.0.1:8080"
+
+type config = {
+  users : string list ;
+  host : Uri.t ;
+}
 
 (* Apply the [Webmachine.Make] functor to the Lwt_unix-based IO module
  * exported by cohttp. For added convenience, include the [Rd] module
@@ -93,7 +97,7 @@ let calendar_to_collection data =
 
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
-class handler fs = object(self)
+class handler server_config fs = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
 
   method private write_calendar rd =
@@ -113,14 +117,15 @@ class handler fs = object(self)
       let ics = Icalendar.to_ics cal in
       let etag = etag ics in
       let file = Fs.file_from_string path in
-      Dav.write fs ~name:file ~etag ~content_type ics >>= function
+      Dav.write fs ~path:file ~etag ~content_type ics >>= function
       | Error e -> Wm.respond (to_status e) rd
       | Ok _ ->
         Printf.printf "wrote calendar %s\n%!" path ;
         let rd = Wm.Rd.with_resp_headers (fun header ->
             let header' = Cohttp.Header.remove header "ETag" in
             let header'' = Cohttp.Header.add header' "Etag" etag in
-            Cohttp.Header.add header'' "Location" (hostname ^ "/" ^ path)
+            Cohttp.Header.add header'' "Location"
+              (Uri.to_string @@ Uri.with_path server_config.host path)
           ) rd
         in
         Wm.continue true rd
@@ -192,26 +197,26 @@ class handler fs = object(self)
       "text/calendar", self#write_calendar
     ] rd
 
-  method private process_propfind rd name =
+  method private process_propfind rd path =
     let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "PROPFIND: %s\n%!" body;
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
-      Dav.propfind fs ~hostname ~name tree ~depth >>= function
+      Dav.propfind fs ~host:server_config.host ~path tree ~depth >>= function
       | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Property_not_found -> Wm.continue `Property_not_found rd
       | Error (`Forbidden b) -> Wm.respond ~body:(`String (Xml.tree_to_string b)) (to_status `Forbidden) rd
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
-  method private process_proppatch rd name =
+  method private process_proppatch rd path =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "PROPPATCH: %s\n%!" body;
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
-      Dav.proppatch fs ~hostname ~name tree >>= function
+      Dav.proppatch fs ~host:server_config.host ~path tree >>= function
       | Ok (_, b) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
@@ -235,7 +240,7 @@ class handler fs = object(self)
       match Xml.string_to_tree body with
       | None -> Wm.respond (to_status `Bad_request) rd
       | Some tree ->
-        Dav.report fs ~hostname ~name:f_or_d tree >>= function
+        Dav.report fs ~host:server_config.host ~path:f_or_d tree >>= function
         | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
         | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
@@ -269,7 +274,7 @@ class handler fs = object(self)
     Fs.from_string fs (self#path rd) >>= function
     | Error _ -> Wm.continue false rd
     | Ok f_or_d ->
-      Dav.delete fs ~name:f_or_d >>= fun _ ->
+      Dav.delete fs ~path:f_or_d >>= fun _ ->
       Wm.continue true rd
 
   method last_modified rd =
@@ -394,21 +399,21 @@ let initialise_fs fs =
   create_dir "__uids__/10000000-0000-0000-0000-000000000001/tasks" >>= fun _ ->
   Lwt.return_unit
 
-type config = {
-  users : string list ;
-  hostname : string ;
-}
-
 let main () =
   (* listen on port 8080 *)
-  let port = 8080 in
+  let port = 8080
+  and scheme = "http"
+  and hostname = "127.0.0.1"
+  in
+  let host = Uri.make ~port ~scheme ~host:hostname () in
+  let server_config = { users = [] ; host } in
   (* create the file system *)
   Fs.connect "/tmp/calendar" >>= fun fs ->
   (* the route table *)
   let routes = [
-    ("/principals", fun () -> new handler fs) ;
-    ("/calendars", fun () -> new handler fs) ;
-    ("/calendars/*", fun () -> new handler fs) ;
+    ("/principals", fun () -> new handler server_config fs) ;
+    ("/calendars", fun () -> new handler server_config fs) ;
+    ("/calendars/*", fun () -> new handler server_config fs) ;
   ] in
   let callback (ch, conn) request body =
     let open Cohttp in

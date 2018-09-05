@@ -579,10 +579,10 @@ let t_tree =
   end in
   (module M : Alcotest.TESTABLE with type t = M.t)
 
-let report name request data =
+let report path request data =
   let open Lwt.Infix in
   Lwt_main.run (
-    Dav.report data ~hostname:"http://cal.example.com" ~name request >|= function
+    Dav.report data ~host:(Uri.of_string "http://cal.example.com") ~path request >|= function
     | Ok t -> Ok (tree (Xml.tree_to_string t))
     | Error _ -> Error "failed")
 
@@ -1185,7 +1185,7 @@ let delete_test () =
       in
       Mirage_fs_mem.write fs ".prop.xml" 0
         (Cstruct.of_string content') >>= fun _ ->
-      Dav.delete ~now res_fs ~name:(`Dir [ "home" ]) >|= fun r ->
+      Dav.delete ~now res_fs ~path:(`Dir [ "home" ]) >|= fun r ->
       (fs, r))
   in
   Alcotest.(check state_testable __LOC__ res_fs r)
