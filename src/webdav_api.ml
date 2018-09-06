@@ -286,10 +286,13 @@ let add_span ts span = match Ptime.add_span ts span with
 *)
 
 (* TODO get timezones, calculate, add offset for tzid *)
-let date_or_datetime_to_ptime = function
+let date_or_datetime_to_utc_ptime timezones = function
   | `Datetime (`Utc dtstart) -> dtstart, true
   | `Datetime (`Local dtstart) -> dtstart, true
-  | `Datetime (`With_tzid (dtstart, tzid)) -> dtstart, true
+  | `Datetime (`With_tzid (dtstart, tzid)) -> 
+     (match Icalendar.normalize_timezone dtstart tzid timezones with
+     | None -> dtstart, true
+     | Some ts' -> ts', true)
   | `Date start -> match Ptime.of_date_time (start, ((0, 0, 0), 0)) with
     | None -> assert false
     | Some dtstart -> dtstart, false
@@ -317,12 +320,12 @@ let span_in_timerange range dtstart dtend duration dtstart_is_datetime =
   | None, None, false, false      -> start < (dtstart + p1d) && end_ > dtstart
   | _                             -> assert false (* duration_gt_0 is dependent on duration *)
 
-let real_event_in_timerange event range =
-  let dtstart, dtstart_is_datetime = date_or_datetime_to_ptime (snd event.Icalendar.dtstart) in
+let real_event_in_timerange timezones event range =
+  let dtstart, dtstart_is_datetime = date_or_datetime_to_utc_ptime timezones (snd event.Icalendar.dtstart) in
   let dtend, duration = match event.Icalendar.dtend_or_duration with
     | None -> None, None
     | Some (`Duration (_, span)) -> None, Some span
-    | Some (`Dtend (_, v)) -> Some (fst (date_or_datetime_to_ptime v)), None
+    | Some (`Dtend (_, v)) -> Some (fst (date_or_datetime_to_utc_ptime timezones v)), None
   in
   span_in_timerange range dtstart dtend duration dtstart_is_datetime
 
@@ -333,7 +336,7 @@ let date_or_datetime_to_date = function
   | `Datetime (`Local ts) -> fst (Ptime.to_date_time ts)
   | `Datetime (`With_tzid (ts, tzid)) -> fst (Ptime.to_date_time ts)
 
-let expand_event_in_range f acc range exceptions event =
+let expand_event_in_range timezones f acc range exceptions event =
   let (s, e) = range in
   let next_event = Icalendar.recur_events event in
   let rec next_r () = match next_event () with
@@ -345,17 +348,17 @@ let expand_event_in_range f acc range exceptions event =
       else Some event
   in
   let rec in_timerange acc = function
-   | Some event when Ptime.is_earlier ~than:s (fst (date_or_datetime_to_ptime (snd event.Icalendar.dtstart))) ->
+   | Some event when Ptime.is_earlier ~than:s (fst (date_or_datetime_to_utc_ptime timezones (snd event.Icalendar.dtstart))) ->
      in_timerange acc (next_r ())
-   | Some event when real_event_in_timerange event range ->
+   | Some event when real_event_in_timerange timezones event range ->
      let acc' = f acc event in
      in_timerange acc' (next_r ())
    | _ -> acc in
   in_timerange acc (Some event)
 
-let event_in_timerange range exceptions event =
+let event_in_timerange timezones range exceptions event =
   let f _ _ = true in
-  expand_event_in_range f false range exceptions event
+  expand_event_in_range timezones f false range exceptions event
 
 (* TODO does not match freebusy table in RFC 4791 Sec 9.9 *)
 let freebusy_in_timerange range fb =
@@ -368,8 +371,8 @@ let freebusy_in_timerange range fb =
   | _ -> false
 
 (* TODO `Todo is missing *)
-let comp_in_timerange range exceptions = function
-  | `Event e -> event_in_timerange range exceptions e
+let comp_in_timerange timezones range exceptions = function
+  | `Event e -> event_in_timerange timezones range exceptions e
   | `Freebusy fb -> freebusy_in_timerange range fb
   | `Timezone _  -> true
   | _ -> false
@@ -405,7 +408,7 @@ let expand_event range exceptions timezones event =
     let props' = match event'.Icalendar.rrule with None -> props | Some _ -> recur_id :: props in
     { event' with Icalendar.dtstart ; props = props' ; rrule = None } :: acc
   in
-  expand_event_in_range add_recur_id_normalize_tz [] range exceptions event
+  expand_event_in_range timezones add_recur_id_normalize_tz [] range exceptions event
 
 let expand_comp range exceptions timezones = function
   | `Event e -> List.map (fun e -> `Event e) (expand_event range exceptions timezones e)
@@ -453,7 +456,7 @@ let select_calendar_data (calprop, (comps : Icalendar.component list)) (requeste
   in
   let timezones = List.fold_left (fun acc -> function `Timezone tz -> tz :: acc | _ -> acc) [] comps in
   let limit_rec_set comps = match range with
-    | Some (`Limit_recurrence_set range) -> List.filter (comp_in_timerange range exceptions) comps
+    | Some (`Limit_recurrence_set range) -> List.filter (comp_in_timerange timezones range exceptions) comps
     | Some (`Expand range) -> List.flatten (List.map (expand_comp range exceptions timezones) comps)
     | _ -> comps in
   let limit_freebusy_set comps = match freebusy with
@@ -523,7 +526,7 @@ let matches_comp_filter timezones component (comp_name, comp_filter) =
     | None -> true
     | Some range ->
       let exceptions = [] in (* TODO *)
-      comp_in_timerange range exceptions component in
+      comp_in_timerange timezones range exceptions component in
     let matches_cfs = match cfs, component with
     | [], _ -> true
     | _, `Todo (props, alarms) ->
@@ -534,18 +537,18 @@ let matches_comp_filter timezones component (comp_name, comp_filter) =
             (match dtstart_opt with
             | None -> assert false
             | Some dtstart ->
-            let todo_start, _ = date_or_datetime_to_ptime dtstart in
+            let todo_start, _ = date_or_datetime_to_utc_ptime timezones dtstart in
             let alarm_start = add_span todo_start d in
             ts_in_range alarm_start range)
           | `End ->
             let due = List.find_opt (function `Due _ -> true | _ -> false) props in
             match due, dtstart_opt, duration with
             | Some (`Due (_, date_or_time)), _, _ ->
-              let todo_end, _ = date_or_datetime_to_ptime date_or_time in
+              let todo_end, _ = date_or_datetime_to_utc_ptime timezones date_or_time in
               let alarm_start = add_span todo_end d in
               ts_in_range alarm_start range
             | None, Some dtstart, Some duration ->
-              let todo_start, _ = date_or_datetime_to_ptime dtstart in
+              let todo_start, _ = date_or_datetime_to_utc_ptime timezones dtstart in
               let todo_end = add_span todo_start duration in
               let alarm_start = add_span todo_end d in
               ts_in_range alarm_start range
@@ -559,14 +562,14 @@ let matches_comp_filter timezones component (comp_name, comp_filter) =
         (* TODO may miss some events if their alarm is outside of range *)
         let events = expand_event range exceptions timezones event in
         List.exists (fun event ->
-            let event_start, _ = date_or_datetime_to_ptime (snd event.Icalendar.dtstart) in
+            let event_start, _ = date_or_datetime_to_utc_ptime timezones (snd event.Icalendar.dtstart) in
             match trigrel with
             | `Start ->
               let alarm_start = add_span event_start d in
               ts_in_range alarm_start range
             | `End ->
               let event_end = match event.Icalendar.dtend_or_duration with
-                | Some (`Dtend (_, dtend)) -> fst (date_or_datetime_to_ptime dtend)
+                | Some (`Dtend (_, dtend)) -> fst (date_or_datetime_to_utc_ptime timezones dtend)
                 | Some (`Duration (_, span)) -> add_span event_start span
                 | None -> assert false
               in
@@ -595,15 +598,15 @@ let vcalendar_matches_comp_filter filter (props, comps) =
   | ( _ , `Is_not_defined) -> true
     (*`Comp_filter of timerange option * prop_filter list * component_filter list*)
   | ("VCALENDAR", `Comp_filter (tr_opt, pfs, cfs)) ->
+    let timezones = List.flatten @@ List.map (function `Timezone tz -> [tz] | _ -> []) comps in
     let matches_timerange = match tr_opt with
       | None -> true
       | Some range ->
         let exceptions = [] in (* TODO *)
-        List.exists (comp_in_timerange range exceptions) comps
+        List.exists (comp_in_timerange timezones range exceptions) comps
     in
     let matches_cfs =
       (* TODO abstract *)
-      let timezones = List.flatten @@ List.map (function `Timezone tz -> [tz] | _ -> []) comps in
       List.exists (fun c -> List.exists (matches_comp_filter timezones c) cfs) comps
     in
     let matches_pfs = List.for_all (apply_to_props props) pfs in
