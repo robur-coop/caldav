@@ -285,7 +285,6 @@ let add_span ts span = match Ptime.add_span ts span with
       +---+---+---+---+-----------------------------------------------+
 *)
 
-(* TODO get timezones, calculate, add offset for tzid *)
 let date_or_datetime_to_utc_ptime timezones = function
   | `Datetime (`Utc dtstart) -> dtstart, true
   | `Datetime (`Local dtstart) -> dtstart, true
@@ -329,20 +328,14 @@ let real_event_in_timerange timezones event range =
   in
   span_in_timerange range dtstart dtend duration dtstart_is_datetime
 
-(* TODO get timezones, calculate, add offset for tzid *)
-let date_or_datetime_to_date = function
-  | `Date d -> d
-  | `Datetime (`Utc ts) -> fst (Ptime.to_date_time ts)
-  | `Datetime (`Local ts) -> fst (Ptime.to_date_time ts)
-  | `Datetime (`With_tzid (ts, tzid)) -> fst (Ptime.to_date_time ts)
-
 let expand_event_in_range timezones f acc range exceptions event =
   let (s, e) = range in
   let next_event = Icalendar.recur_events event in
   let rec next_r () = match next_event () with
     | None -> None
     | Some event ->
-      let date = date_or_datetime_to_date (snd event.dtstart) in
+      let date_or_datetime_to_date t d = fst @@ Ptime.to_date_time @@ fst @@ date_or_datetime_to_utc_ptime t d in
+      let date = date_or_datetime_to_date timezones (snd event.dtstart) in
       if List.mem date exceptions
       then next_r ()
       else Some event
