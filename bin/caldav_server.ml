@@ -341,13 +341,6 @@ let initialise_fs fs =
     Xml.create_properties ~content_type
       is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length name
   in
-  let props =
-    let p = create_properties "/" "text/directory" true 0 in
-    Xml.PairMap.add (Xml.caldav_ns, "calendar-home-set")
-      ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata "http://127.0.0.1:8080/calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar"]])
-      p
-  in
-  Fs.write_property_map fs (`Dir []) props >>= fun _ ->
   let create_dir ?(props=[]) name =
     let dir = Fs.dir_from_string name in
     let propmap = create_properties name "text/directory" true 0 in
@@ -391,12 +384,20 @@ let initialise_fs fs =
     ] in
     create_dir ~props name
   in
-  create_dir "users" >>= fun _ ->
-  create_dir "__uids__" >>= fun _ ->
-  create_dir "__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
-  create_calendar "__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
-  (*  create_calendar "__uids__/10000000-0000-0000-0000-000000000001/calendar/geburtstage" >>= fun _ -> *)
-  create_dir "__uids__/10000000-0000-0000-0000-000000000001/tasks" >>= fun _ ->
+  create_dir "calendars" >>= fun _ ->
+  let props =
+    let p = create_properties "calendars/" "text/directory" true 0 in
+    Xml.PairMap.add (Xml.caldav_ns, "calendar-home-set")
+      ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata "http://127.0.0.1:8080/calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar"]])
+      p
+  in
+  Fs.write_property_map fs (`Dir [ "calendars" ]) props >>= fun _ ->
+  create_dir "calendars/users" >>= fun _ ->
+  create_dir "calendars/__uids__" >>= fun _ ->
+  create_dir "calendars/__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
+  create_calendar "calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
+  (*  create_calendar "calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar/geburtstage" >>= fun _ -> *)
+  create_dir "calendars/__uids__/10000000-0000-0000-0000-000000000001/tasks" >>= fun _ ->
   Lwt.return_unit
 
 let main () =
@@ -457,7 +458,7 @@ let main () =
       (Sexplib.Sexp.to_string_hum (Conduit_lwt_unix.sexp_of_flow ch))
   in
   (* only for apple test suite *)
-  (*initialise_fs fs >>= fun () ->*)
+  initialise_fs fs >>= fun () ->
   let config = Server.make ~callback ~conn_closed () in
   Server.create  ~mode:(`TCP(`Port port)) config
   >>= (fun () -> Printf.eprintf "hello_lwt: listening on 0.0.0.0:%d%!" port;
