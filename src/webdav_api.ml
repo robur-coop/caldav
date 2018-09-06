@@ -387,7 +387,9 @@ let normalize_tz timestamp params timezones =
 
 let normalize_date_or_datetime params timezones = function
   | `Datetime (`Utc ts) -> params, `Datetime (`Utc ts)
-  | `Datetime (`Local ts) -> params, `Datetime (`Local ts)
+  | `Datetime (`Local ts) -> 
+    let params', ts' = normalize_tz ts params timezones in
+    params', `Datetime (`Utc ts')
   | `Datetime (`With_tzid (ts, tzid)) ->
     let params', ts' = normalize_tz ts params timezones in
     params', `Datetime (`Utc ts')

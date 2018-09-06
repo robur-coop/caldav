@@ -222,7 +222,7 @@ let parse_report_query_7_8_1 () =
                       ("RECURRENCE-ID", false) ],
                     `Comp []) ;
                    ("VTIMEZONE", `Prop [], `Comp []) ]), None, None) ] ),
-        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ((to_ptime (2006,01,04) (00,00,00), true), (to_ptime (2006,01,05) (00,00,00), true)), [], [])) ])))
+        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some (to_ptime (2006,01,04) (00,00,00), to_ptime (2006,01,05) (00,00,00)), [], [])) ])))
   in
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
@@ -251,8 +251,8 @@ let parse_report_query_7_8_2 () =
   let xml = report_7_8_2 
   and expected =
     Ok (Some (`Proplist [
-        `Prop (("DAV:", "getetag")); `Calendar_data (None, Some (`Limit_recurrence_set ((to_ptime (2006,01,03) (00,00,00), true), (to_ptime (2006,01,05) (00,00,00), true))), None) ] ),
-        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ((to_ptime (2006,01,03) (00,00,00), true), (to_ptime (2006,01,05) (00,00,00), true)), [], [])) ])))
+        `Prop (("DAV:", "getetag")); `Calendar_data (None, Some (`Limit_recurrence_set (to_ptime (2006,01,03) (00,00,00), to_ptime (2006,01,05) (00,00,00))), None) ] ),
+        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some (to_ptime (2006,01,03) (00,00,00), to_ptime (2006,01,05) (00,00,00)), [], [])) ])))
   in
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
@@ -282,8 +282,8 @@ let parse_report_query_7_8_3 () =
   and expected =
     Ok (Some (`Proplist [
         `Prop (("DAV:", "getetag")); 
-        `Calendar_data (None, Some (`Expand ((to_ptime (2006,01,03) (00,00,00), true), (to_ptime (2006,01,05) (00,00,00), true))), None) ] ),
-        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some ((to_ptime (2006,01,03) (00,00,00), true), (to_ptime (2006,01,05) (00,00,00), true)), [], [])) ])))
+        `Calendar_data (None, Some (`Expand (to_ptime (2006,01,03) (00,00,00), to_ptime (2006,01,05) (00,00,00))), None) ] ),
+        ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some (to_ptime (2006,01,03) (00,00,00), to_ptime (2006,01,05) (00,00,00)), [], [])) ])))
   in
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
@@ -313,8 +313,8 @@ let parse_report_query_7_8_4 () =
   and expected =
     Ok (Some (`Proplist [
         `Prop (("DAV:", "getetag")); 
-        `Calendar_data (None, None, Some (`Limit_freebusy_set ((to_ptime (2006,01,02) (00,00,00), true), (to_ptime (2006,01,03) (00,00,00), true)))) ] ),
-        ("VCALENDAR", `Comp_filter (None, [], [ ("VFREEBUSY", `Comp_filter (Some ((to_ptime (2006,01,02) (00,00,00), true), (to_ptime (2006,01,03) (00,00,00), true)), [], [])) ])))
+        `Calendar_data (None, None, Some (`Limit_freebusy_set (to_ptime (2006,01,02) (00,00,00), to_ptime (2006,01,03) (00,00,00)))) ] ),
+        ("VCALENDAR", `Comp_filter (None, [], [ ("VFREEBUSY", `Comp_filter (Some (to_ptime (2006,01,02) (00,00,00), to_ptime (2006,01,03) (00,00,00)), [], [])) ])))
   in
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
@@ -344,8 +344,8 @@ let parse_report_query_7_8_5 () =
     Ok (Some (`Proplist [ `Prop (Xml.dav_ns, "getetag"); `Calendar_data (None, None, None)]),
         ("VCALENDAR", `Comp_filter (None, [], [ ("VTODO", `Comp_filter ((None, [],
                                     [("VALARM",
-                                      `Comp_filter (((Some ((to_ptime (2006,01,06) (10,00,00), true),
-                                                            (to_ptime (2006,01,07) (10,00,00), true))),
+                                      `Comp_filter (((Some (to_ptime (2006,01,06) (10,00,00),
+                                                            to_ptime (2006,01,07) (10,00,00))),
                                                      [], [])))
                                       ])))
                      ]))) 
