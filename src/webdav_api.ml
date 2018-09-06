@@ -376,38 +376,58 @@ let date_to_ptime date = match Ptime.of_date_time (date, ((0, 0, 0), 0)) with
 
 let ptime_to_date ts = fst @@ Ptime.to_date_time ts
 
-let normalize_date_or_datetime timezones = function
-  | `Date date -> `Date date
-  | `Datetime (`Utc ts) -> `Datetime (`Utc ts)
-  | `Datetime (`Local ts) -> `Datetime (`Local ts)
-  | `Datetime (`With_tzid (ts, tzid)) as d ->
+let normalize_timestamp timezones = function
+  | `Utc ts -> `Utc ts
+  | `Local ts -> `Local ts
+  | `With_tzid (ts, tzid) as d ->
     match Icalendar.normalize_timezone ts tzid timezones with
     | None -> d
-    | Some ts' -> `Datetime (`Utc ts')
+    | Some ts' -> `Utc ts'
 
-(* TODO normalise other timestamps with TZID as well: DTEND, EXDATE, RDATE, DUE *)
+let normalize_date_or_datetime timezones = function
+  | `Date date -> `Date date
+  | `Datetime dt -> `Datetime (normalize_timestamp timezones dt)
+
+let normalize_dates_or_datetimes timezones = function
+  | `Dates ds -> `Dates ds 
+  | `Datetimes dts -> `Datetimes (List.map (normalize_timestamp timezones) dts)
+
+let normalize_dates_or_datetimes_or_periods timezones = function
+  | #Icalendar.dates_or_datetimes as ds_or_dts -> normalize_dates_or_datetimes timezones ds_or_dts
+  | `Periods ps -> `Periods (List.map (fun (ts, span, was_explicit) -> (normalize_timestamp timezones ts, span, was_explicit)) ps)
+
 let expand_event range exceptions timezones event =
+  let normalize = normalize_date_or_datetime timezones in
+  let normalize' = normalize_dates_or_datetimes timezones in
+  let normalize'' = normalize_dates_or_datetimes_or_periods timezones in
   let add_recur_id_normalize_tz acc event' =
     let dtstart =
       let params, value = event'.Icalendar.dtstart in
-      params, normalize_date_or_datetime timezones value
+      params, normalize value
     in
+    let dtend_or_duration = match event'.Icalendar.dtend_or_duration with
+    | None -> None
+    | Some (`Duration d) -> Some (`Duration d)
+    | Some (`Dtend (params, v)) -> Some (`Dtend (params, normalize v)) in
     let props = List.map (function
-        | `Recur_id (params, v) ->
-          `Recur_id (params, normalize_date_or_datetime timezones v)
+        | `Recur_id (params, v) -> `Recur_id (params, normalize v)
+        | `Rdate (params, v) -> `Rdate (params, normalize'' v)
+        | `Exdate (params, v) -> `Exdate (params, normalize' v)
         | x -> x) event'.Icalendar.props
     in
     let recur_id : Icalendar.event_prop = `Recur_id dtstart in
     let props' = match event'.Icalendar.rrule with None -> props | Some _ -> recur_id :: props in
-    { event' with Icalendar.dtstart ; props = props' ; rrule = None } :: acc
+    { event' with Icalendar.dtstart ; dtend_or_duration ; props = props' ; rrule = None } :: acc
   in
   expand_event_in_range timezones add_recur_id_normalize_tz [] range exceptions event
 
 let expand_comp range exceptions timezones = function
   | `Event e -> List.map (fun e -> `Event e) (expand_event range exceptions timezones e)
+  (* TODO normalise other timestamps with TZID as well: DUE *)
+  (*| `Todo e -> List.map (fun e -> `Todo e) (expand_todo range exceptions timezones e)*)
   | _ -> []
 
-(* TODO deal with timezones, range comes in as utc, freebusy may use other time format! *)
+(* both range and freebusy are in utc *)
 let fb_in_timerange range = function
   | `Freebusy fb ->
     let in_range (s, span, was_explicit) =
@@ -497,8 +517,8 @@ let matches_alarm_filter by_parent alarm (comp_name, comp_filter) =
   | `Is_defined, false -> false
   | `Is_not_defined, false -> true
   | `Comp_filter (_, _, _), false -> false
-  | `Comp_filter (tr_opt, pfs, cfs), true ->
-    (* TODO handle pfs, no more components as subtree of alarm *)
+  (* no further cfs below alarm, and pfs is handled by Icalendar.to_ics (filtering on output) *)
+  | `Comp_filter (tr_opt, _, _), true ->
     match tr_opt with
     | None -> true
     | Some range -> alarm_in_timerange range alarm by_parent
