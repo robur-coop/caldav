@@ -432,7 +432,7 @@ let range_parser name : tree -> (timerange, string) result =
     (fun a c -> is_empty c >>= fun () -> match find_attribute "start" a, find_attribute "end" a with
        | None, _ | _, None -> Error "Missing attribute \"start\" or \"end\""
        | Some s, Some e -> match Icalendar.parse_datetime s, Icalendar.parse_datetime e with
-         | Ok (Icalendar.Utc s'), Ok (Icalendar.Utc e') ->
+         | Ok (`Utc s'), Ok (`Utc e') ->
            if Ptime.is_later ~than:s' e' then Ok (s', e') else Error "timerange end is before start"
          | Error e, _ -> Error e
          | _, Error e -> Error e

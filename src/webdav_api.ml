@@ -228,7 +228,7 @@ let apply_to_params pfs p = true
 let text_matches s c n p = true
 
 let apply_to_props props =
-  let key p = Icalendar.Writer.calprop_to_ics_key p in
+  let key p = Icalendar.Writer.cal_prop_to_ics_key p in
   function
   | (name, `Is_defined) ->
     List.exists (String.equal name) (List.map key props)
@@ -286,7 +286,9 @@ let add_span ts span = match Ptime.add_span ts span with
 *)
 
 let date_or_datetime_to_ptime = function
-  | `Datetime (dtstart, utc) -> dtstart, true
+  | `Datetime (`Utc dtstart) -> dtstart, true
+  | `Datetime (`Local dtstart) -> dtstart, true
+  | `Datetime (`With_tzid (dtstart, tzid)) -> dtstart, true
   | `Date start -> match Ptime.of_date_time (start, ((0, 0, 0), 0)) with
     | None -> assert false
     | Some dtstart -> dtstart, false
@@ -325,7 +327,9 @@ let real_event_in_timerange event range =
 
 let date_or_datetime_to_date = function
   | `Date d -> d
-  | `Datetime (ts, _) -> fst (Ptime.to_date_time ts)
+  | `Datetime (`Utc ts) -> fst (Ptime.to_date_time ts)
+  | `Datetime (`Local ts) -> fst (Ptime.to_date_time ts)
+  | `Datetime (`With_tzid (ts, tzid)) -> fst (Ptime.to_date_time ts)
 
 let expand_event_in_range f acc range exceptions event =
   let (s, e) = range in
@@ -354,14 +358,11 @@ let event_in_timerange range exceptions event =
 (* TODO does not match freebusy table in RFC 4791 Sec 9.9 *)
 let freebusy_in_timerange range fb =
   match
-    List.find_opt (function `Dtstart _ -> true | _ -> false) fb,
-    List.find_opt (function `Dtend _ -> true | _ -> false) fb
+    List.find_opt (function `Dtstart_utc _ -> true | _ -> false) fb,
+    List.find_opt (function `Dtend_utc _ -> true | _ -> false) fb
   with
-  | Some (`Dtstart (_, dtstart)), Some (`Dtend (_, dtend)) ->
-    let dtstart', is_datetime = date_or_datetime_to_ptime dtstart
-    and dtend', _ = date_or_datetime_to_ptime dtend
-    in
-    span_in_timerange range dtstart' (Some dtend') None is_datetime
+  | Some (`Dtstart_utc (_, dtstart)), Some (`Dtend_utc (_, dtend)) ->
+    span_in_timerange range dtstart (Some dtend) None true
   | _ -> false
 
 (* TODO `Todo is missing *)
@@ -385,9 +386,11 @@ let normalize_tz timestamp params timezones =
       params', Icalendar.normalize_timezone timestamp tzid timezones
 
 let normalize_date_or_datetime params timezones = function
-  | `Datetime (ts, utc) ->
+  | `Datetime (`Utc ts) -> params, `Datetime (`Utc ts)
+  | `Datetime (`Local ts) -> params, `Datetime (`Local ts)
+  | `Datetime (`With_tzid (ts, tzid)) ->
     let params', ts' = normalize_tz ts params timezones in
-    params', `Datetime (ts', utc)
+    params', `Datetime (`Utc ts')
   | `Date date ->
     let ts = date_to_ptime date in
     let params', ts' = normalize_tz ts params timezones in
@@ -405,7 +408,7 @@ let expand_event range exceptions timezones event =
           `Recur_id (normalize_date_or_datetime params timezones v)
         | x -> x) event'.Icalendar.props
     in
-    let recur_id : Icalendar.eventprop = `Recur_id dtstart in
+    let recur_id : Icalendar.event_prop = `Recur_id dtstart in
     let props' = match event'.Icalendar.rrule with None -> props | Some _ -> recur_id :: props in
     { event' with Icalendar.dtstart ; props = props' ; rrule = None } :: acc
   in
@@ -418,7 +421,8 @@ let expand_comp range exceptions timezones = function
 (* TODO deal with timezones, range comes in as utc, freebusy may use other time format! *)
 let fb_in_timerange range = function
   | `Freebusy fb ->
-    let in_range (s, e, _) =
+    let in_range (s, span) =
+      let e = add_span s span in
       let (s_req, e_req) = range in
       let (<) a b = Ptime.is_later ~than:a b in
       let (<=) a b = a < b || Ptime.equal a b in
@@ -447,7 +451,9 @@ let select_calendar_data (calprop, (comps : Icalendar.component list)) (requeste
         | `Event event ->
           begin match event.Icalendar.dtstart with
             | (_, `Date d)          -> d
-            | (_, `Datetime (d, _)) -> fst @@ Ptime.to_date_time d
+            | (_, `Datetime (`Utc d)) -> fst @@ Ptime.to_date_time d
+            | (_, `Datetime (`Local d)) -> fst @@ Ptime.to_date_time d
+            | (_, `Datetime (`With_tzid (d, tzid))) -> fst @@ Ptime.to_date_time d
           end
         | _ -> assert false)
       events
@@ -485,7 +491,7 @@ let alarm_in_timerange range alarm by_parent =
   | `Display d -> d.Icalendar.trigger
   in
   match snd trigger with
-  | `Datetime (ts, utc) -> ts_in_range ts range
+  | `Datetime ts -> ts_in_range ts range
   | `Duration d -> (* is start or end; get duration, add to start / end *)
     let trig_rel = match Icalendar.Params.find Icalendar.Related (fst trigger) with
     | None -> `Start
