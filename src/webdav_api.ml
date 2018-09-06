@@ -423,7 +423,7 @@ let expand_comp range exceptions timezones = function
 (* TODO deal with timezones, range comes in as utc, freebusy may use other time format! *)
 let fb_in_timerange range = function
   | `Freebusy fb ->
-    let in_range (s, span) =
+    let in_range (s, span, was_explicit) =
       let e = add_span s span in
       let (s_req, e_req) = range in
       let (<) a b = Ptime.is_later ~than:a b in

@@ -28,7 +28,7 @@ type comp = [ `Allcomp | `Comp of component list ]
 and prop = [ `Allprop | `Prop of (string * bool) list ]
 and component = string * prop * comp [@@deriving show, eq]
 
-type timerange = Icalendar.utc_timestamp * Icalendar.utc_timestamp [@@deriving show, eq]
+type timerange = Icalendar.timestamp_utc * Icalendar.timestamp_utc [@@deriving show, eq]
 
 type calendar_data =
   component option *
