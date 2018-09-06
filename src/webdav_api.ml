@@ -285,6 +285,7 @@ let add_span ts span = match Ptime.add_span ts span with
       +---+---+---+---+-----------------------------------------------+
 *)
 
+(* TODO get timezones, calculate, add offset for tzid *)
 let date_or_datetime_to_ptime = function
   | `Datetime (`Utc dtstart) -> dtstart, true
   | `Datetime (`Local dtstart) -> dtstart, true
@@ -325,6 +326,7 @@ let real_event_in_timerange event range =
   in
   span_in_timerange range dtstart dtend duration dtstart_is_datetime
 
+(* TODO get timezones, calculate, add offset for tzid *)
 let date_or_datetime_to_date = function
   | `Date d -> d
   | `Datetime (`Utc ts) -> fst (Ptime.to_date_time ts)
@@ -378,36 +380,25 @@ let date_to_ptime date = match Ptime.of_date_time (date, ((0, 0, 0), 0)) with
 
 let ptime_to_date ts = fst @@ Ptime.to_date_time ts
 
-let normalize_tz timestamp params timezones =
-  match Icalendar.Params.find Icalendar.Tzid params with
-  | None -> params, timestamp
-  | Some tzid ->
-      let params' = Icalendar.Params.remove Icalendar.Tzid params in
-      params', Icalendar.normalize_timezone timestamp tzid timezones
-
-let normalize_date_or_datetime params timezones = function
-  | `Datetime (`Utc ts) -> params, `Datetime (`Utc ts)
-  | `Datetime (`Local ts) -> 
-    let params', ts' = normalize_tz ts params timezones in
-    params', `Datetime (`Utc ts')
-  | `Datetime (`With_tzid (ts, tzid)) ->
-    let params', ts' = normalize_tz ts params timezones in
-    params', `Datetime (`Utc ts')
-  | `Date date ->
-    let ts = date_to_ptime date in
-    let params', ts' = normalize_tz ts params timezones in
-    params', `Date (ptime_to_date ts')
+let normalize_date_or_datetime timezones = function
+  | `Date date -> `Date date
+  | `Datetime (`Utc ts) -> `Datetime (`Utc ts)
+  | `Datetime (`Local ts) -> `Datetime (`Local ts)
+  | `Datetime (`With_tzid (ts, tzid)) as d ->
+    match Icalendar.normalize_timezone ts tzid timezones with
+    | None -> d
+    | Some ts' -> `Datetime (`Utc ts')
 
 (* TODO normalise other timestamps with TZID as well: DTEND, EXDATE, RDATE, DUE *)
 let expand_event range exceptions timezones event =
   let add_recur_id_normalize_tz acc event' =
     let dtstart =
       let params, value = event'.Icalendar.dtstart in
-      normalize_date_or_datetime params timezones value
+      params, normalize_date_or_datetime timezones value
     in
     let props = List.map (function
         | `Recur_id (params, v) ->
-          `Recur_id (normalize_date_or_datetime params timezones v)
+          `Recur_id (params, normalize_date_or_datetime timezones v)
         | x -> x) event'.Icalendar.props
     in
     let recur_id : Icalendar.event_prop = `Recur_id dtstart in
