@@ -1049,6 +1049,62 @@ END:VCALENDAR
               (Ok (tree expected))
               (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
 
+let report_7_8_2_range = 
+  header ^ {|<C:calendar-query xmlns:D="DAV:"
+                     xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:prop>
+       <D:getetag/>
+       <C:calendar-data>
+       </C:calendar-data>
+     </D:prop>
+     <C:filter>
+       <C:comp-filter name="VCALENDAR">
+         <C:comp-filter name="VEVENT">
+           <C:time-range start="20060102T143000Z"
+                         end="20060102T153000Z"/>
+         </C:comp-filter>
+       </C:comp-filter>
+     </C:filter>
+                          </C:calendar-query>|}
+
+let test_report_7_8_2_range () =
+  let xml = report_7_8_2_range
+  and expected = (Xml.Node ("DAV:", "multistatus",
+     [(("http://www.w3.org/2000/xmlns/", "D"), "DAV:");
+       (("http://www.w3.org/2000/xmlns/", "C"),
+        "urn:ietf:params:xml:ns:caldav")
+       ],
+     [(Xml.Node ("DAV:", "response", [],
+         [(Xml.Node ("DAV:", "href", [],
+             [(Xml.Pcdata
+                 "http://cal.example.com/bernard/work/abcd1.ics")
+               ]
+             ));
+           (Xml.Node ("DAV:", "propstat", [],
+              [(Xml.Node ("DAV:", "prop", [],
+                  [(Xml.Node ("DAV:", "getetag", [],
+                      [(Xml.Pcdata "\"fffff-abcd1\"")]));
+                    (Xml.Node ("urn:ietf:params:xml:ns:caldav",
+                       "calendar-data", [],
+                       [(Xml.Pcdata
+                           "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Example Corp.//CalDAV Client//EN\nBEGIN:VTIMEZONE\nLAST-MODIFIED:20040110T032845Z\nTZID:US/Eastern\nBEGIN:DAYLIGHT\nDTSTART:20000404T020000\nRRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=4\nTZNAME:EDT\nTZOFFSETFROM:-0500\nTZOFFSETTO:-0400\nEND:DAYLIGHT\nBEGIN:STANDARD\nDTSTART:20001026T020000\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10\nTZNAME:EST\nTZOFFSETFROM:-0400\nTZOFFSETTO:-0500\nEND:STANDARD\nEND:VTIMEZONE\nBEGIN:VEVENT\nUID:74855313FA803DA593CD579A@example.com\nDTSTAMP:20060206T001102Z\nDTSTART;TZID=US/Eastern:20060102T100000\nDURATION:PT1H\nSUMMARY:Event #1\nDescription:Go Steelers!\nEND:VEVENT\nEND:VCALENDAR\n")
+                         ]
+                       ))
+                    ]
+                  ));
+                (Xml.Node ("DAV:", "status", [],
+                   [(Xml.Pcdata "HTTP/1.1 200 OK")]))
+                ]
+              ))
+           ]
+         ))
+       ]
+     ))  in
+  Alcotest.(check (result t_tree string) __LOC__
+              (Ok expected)
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
+
+
 let report_tests = [
   "Report from section 7.8.1 - first file only", `Quick, test_report_1 ;
   "Report from section 7.8.1", `Quick, test_report_7_8_1 ;
@@ -1063,6 +1119,7 @@ let report_tests = [
     "Parse report query from section 7.8.10", `Quick, test_report_7_8_10 *)
   "Parse multiget report 7.9.1", `Quick, test_parse_multiget_7_9_1 ;
   "Multiget report 7.9.1", `Quick, test_multiget_7_9_1 ;
+  "Test range for report 7.8.2, modified", `Quick, test_report_7_8_2_range ;
 ]
 
 let propupdate =
