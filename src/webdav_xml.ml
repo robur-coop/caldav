@@ -83,7 +83,23 @@ type principal = [
   | `Self
 ] [@@deriving show]
 
-type ace = principal * [ `Grant | `Deny ] [@@deriving show]
+type privilege = [
+  | `Read
+  | `Write
+  | `Write_content
+  | `Write_properties
+  | `Unlock
+  | `Read_acl
+  | `Read_current_user_privilege_set
+  | `Write_acl
+  | `Bind
+  | `Unbind
+  | `All
+] [@@deriving show]
+
+type ace =
+  principal * [ `Grant of privilege list | `Deny of privilege list ]
+  [@@deriving show]
 
 let caldav_ns = "urn:ietf:params:xml:ns:caldav"
 let dav_ns = "DAV:"
@@ -369,6 +385,34 @@ let href_parser =
     (name_ns "href" dav_ns)
     extract_pcdata
 
+let privilege_children_parser =
+  (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Read)
+     (name_ns "read" dav_ns) any)
+  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Write)
+         (name_ns "write" dav_ns) any)
+  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Write_content)
+         (name_ns "write-content" dav_ns) any)
+  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Write_properties)
+         (name_ns "write-properties" dav_ns) any)
+  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Unlock)
+         (name_ns "unlock" dav_ns) any)
+  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Read_acl)
+         (name_ns "read-acl" dav_ns) any)
+  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Read_current_user_privilege_set)
+         (name_ns "read-current-user-privilege-set" dav_ns) any)
+  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Write_acl)
+         (name_ns "write-acl" dav_ns) any)
+  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Bind)
+         (name_ns "bind" dav_ns) any)
+  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Unbind)
+         (name_ns "unbind" dav_ns) any)
+  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `All)
+         (name_ns "all" dav_ns) any)
+
+let privilege_parser =
+  tree_lift (fun _ c -> non_empty c >>| fun () -> c)
+    (name_ns "privilege" dav_ns) privilege_children_parser
+
 let xml_to_ace : tree -> (ace, string) result =
   let principal = (* TODO other principals, property, invert *)
     tree_lift
@@ -385,10 +429,10 @@ let xml_to_ace : tree -> (ace, string) result =
        ||| (href_parser >>~ fun href -> Ok (`Href (Uri.of_string href))))
   and grant_or_deny =
     tree_lift
-      (fun _ c -> is_empty c >>| fun () -> `Grant)
-      (name_ns "grant" dav_ns) any
-    ||| tree_lift (fun _ c -> is_empty c >>| fun () -> `Deny)
-      (name_ns "deny" dav_ns) any
+      (fun _ c -> exactly_one c >>| fun c' -> `Grant c')
+      (name_ns "grant" dav_ns) privilege_parser
+    ||| tree_lift (fun _ c -> exactly_one c >>| fun c' -> `Deny c')
+      (name_ns "deny" dav_ns) privilege_parser
   in
   tree_lift (fun _ c ->
       match List.partition (function `Principal _ -> true | _ -> false) c with
@@ -413,10 +457,30 @@ let principal_to_xml p =
     dav_node name children
   ]
 
+let priv_to_xml p =
+  let name = match p with
+  | `Read -> "read"
+  | `Write -> "write"
+  | `Write_content -> "write-content"
+  | `Write_properties -> "write-properties"
+  | `Unlock -> "unlock"
+  | `Read_acl -> "read-acl"
+  | `Read_current_user_privilege_set -> "read-current-user-privilege-set"
+  | `Write_acl -> "write-acl"
+  | `Bind -> "bind"
+  | `Unbind -> "unbind"
+  | `All -> "all"
+  in
+  dav_node name []
+
 let ace_to_xml (principal, grant_or_deny) =
   let g_or_d_node =
-    let name = match grant_or_deny with `Grant -> "grant" | `Deny -> "deny" in
-    dav_node name []
+    let name, privs = match grant_or_deny with
+      | `Grant privs -> "grant", privs
+      | `Deny privs -> "deny", privs
+    in
+    let privs' = dav_node "privilege" (List.map priv_to_xml privs) in
+    dav_node name [ privs' ]
   in
   dav_node "ace" [ principal_to_xml principal ; g_or_d_node ]
 

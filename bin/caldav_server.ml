@@ -25,6 +25,43 @@ let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 
 let etag str = Digest.to_hex @@ Digest.string str
 
+let http_verb_needs_privileges target parent body = function
+  | `GET -> `Read target
+  | `HEAD -> `Read target
+  | `OPTIONS -> `Read target
+  | `PUT (* target exists *) -> `Write_content target
+  | `PUT (* no target exists *) -> `Bind parent
+  | `Other "PROPPATCH" -> `Write_properties target
+  | `Other "ACL" -> `Write_acl target
+  | `Other "PROPFIND" -> `Read target (* plus <D:read-acl> and <D:read-current-user-privilege-set> as needed *)
+  | `DELETE -> `Unbind parent
+  | `Other "MKCOL" -> `Bind parent
+  | `Other "MKCALENDAR" -> `Bind parent
+  | `Other "REPORT" -> `Read target (* referenced_resources body *)
+(* | COPY (target exists)            | <D:read>, <D:write-content> and |
+   |                                 | <D:write-properties> on target  |
+   |                                 | resource                        |
+   | COPY (no target exists)         | <D:read>, <D:bind> on target    |
+   |                                 | collection                      |
+   | MOVE (no target exists)         | <D:unbind> on source collection |
+   |                                 | and <D:bind> on target          |
+   |                                 | collection                      |
+   | MOVE (target exists)            | As above, plus <D:unbind> on    |
+   |                                 | the target collection           |
+   | LOCK (target exists)            | <D:write-content>               |
+   | LOCK (no target exists)         | <D:bind> on parent collection   |
+   | UNLOCK                          | <D:unlock>                      |
+   | CHECKOUT                        | <D:write-properties>            |
+   | CHECKIN                         | <D:write-properties>            |
+   | VERSION-CONTROL                 | <D:write-properties>            |
+   | MERGE                           | <D:write-content>               |
+   | MKWORKSPACE                     | <D:write-content> on parent     |
+   |                                 | collection                      |
+   | BASELINE-CONTROL                | <D:write-properties> and        |
+   |                                 | <D:write-content>               |
+   | MKACTIVITY                      | <D:write-content> on parent     |
+   |                                 | collection                      | *)
+
 (* TODO groups only one level deep right now *)
 let identities props =
   let url = function
@@ -40,7 +77,15 @@ let identities props =
   | Some (_, principal), Some (_, groups) -> urls principal @ urls groups
   | Some (_, principal), None -> urls principal
 
-let evaluate_acl auth_user_props (_, aces) =
+let privilege_met verb privs =
+  List.exists (fun priv -> match verb, priv with
+      | _, `All -> true
+      | `GET, `Read -> true
+      | `HEAD, `Read -> true
+      | `OPTIONS, `Read -> true
+      | _ -> false) privs
+
+let evaluate_acl http_verb auth_user_props (_, aces) =
   let aces' = List.map Xml.xml_to_ace aces in
   let aces'' = List.fold_left (fun acc -> function Ok ace -> ace :: acc | Error _ -> acc) [] aces' in (* TODO malformed ace? *)
   let aces''' = List.filter (function
@@ -53,7 +98,7 @@ let evaluate_acl auth_user_props (_, aces) =
   then true
   else
     let at_least_one_granted =
-      List.exists (function (_, `Grant) -> true | _ -> false) aces'''
+      List.exists (function (_, `Grant privs) -> privilege_met http_verb privs | _ -> false) aces'''
     in
     not at_least_one_granted
 
@@ -227,10 +272,10 @@ class handler config fs = object(self)
       Wm.continue (`String (Cstruct.to_string data)) rd
 
   method allowed_methods rd =
-    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL"; `Other "MKCALENDAR" ; `Other "REPORT" ] rd
+    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL"; `Other "MKCALENDAR" ; `Other "REPORT" ; `Other "ACL" ] rd
 
   method known_methods rd =
-    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL"; `Other "MKCALENDAR" ; `Other "REPORT" ] rd
+    Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "COPY" ; `Other "MOVE"; `Other "MKCOL"; `Other "MKCALENDAR" ; `Other "REPORT" ; `Other "ACL"] rd
 
   method charsets_provided rd =
     Wm.continue [
@@ -301,7 +346,7 @@ class handler config fs = object(self)
             | Some v -> v
           in
           get_property_map_for_user user >>= fun auth_user_props ->
-          let forbidden = evaluate_acl auth_user_props aces in
+          let forbidden = evaluate_acl rd.Wm.Rd.meth auth_user_props aces in
           Wm.continue forbidden rd
 
   method private process_propfind rd path =
@@ -461,10 +506,10 @@ let make_dir_if_not_present fs ?resourcetype ?props dir =
 
 let grant_test config =
   let url = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; "test" ])) in
-  (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`Href url, `Grant) ])
+  (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`Href url, `Grant [ `Read ]) ])
 
-let deny_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Deny) ])
-let grant_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Grant) ])
+let deny_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Deny [ `All ]) ])
+let grant_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Grant [ `All ]) ])
 
 let initialise_fs fs config =
   let create_calendar fs name =
