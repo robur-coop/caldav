@@ -123,6 +123,12 @@ let directory_as_ics fs (`Dir dir) =
       Lwt_list.map_p calendar_components files >|= fun components ->
       Icalendar.to_ics (calprops, List.flatten components)
 
+let hash_password password =
+  let server_secret = "server_secret--" in
+  Cstruct.to_string @@
+  Nocrypto.Hash.SHA256.digest @@
+  Cstruct.of_string (server_secret ^ password)
+
 let verify_auth_header user_password v =
   match Astring.String.cut ~sep:"Basic " v with
   | Some ("", b64) ->
@@ -132,7 +138,10 @@ let verify_auth_header user_password v =
         | None -> Error "invalid user:password encoding"
         | Some (user, password) ->
           Printf.printf "user is %s, password %s\n%!" user password ;
-          if List.mem (user, password) user_password then Ok user else Error "invalid user or wrong password"
+          let hashed = hash_password password in
+          if List.mem (user, hashed) user_password
+          then Ok user
+          else Error "invalid user or wrong password"
     end
   | _ -> Error "bad header"
 
@@ -570,7 +579,10 @@ let main () =
     principals = "principals" ;
     calendars = "calendars" ;
     host ;
-    user_password = [ ("test", "password") ; ("root", "toor") ; ("nobody", "1") ]
+    user_password = [
+      ("test", hash_password "password") ;
+      ("root", hash_password "toor") ;
+      ("nobody", hash_password "1") ]
   } in
   (* create the file system *)
   Fs.connect "/tmp/calendar" >>= fun fs ->
