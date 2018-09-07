@@ -336,18 +336,14 @@ end
 let server_ns = "http://calendarserver.org/ns/"
 let carddav_ns = "urn:ietf:params:xml:ns:carddav"
 
+let create_dir fs ?(props=[]) name =
+  let dir = Fs.dir_from_string name in
+  let propmap = Xml.create_properties ~content_type:"text/directory" true (Ptime.to_rfc3339 (Ptime_clock.now ())) 0 name in
+  let propmap' = List.fold_left (fun p (k, v) -> Xml.PairMap.add k v p) propmap props in
+  Fs.mkdir fs dir propmap'
+
 let initialise_fs fs =
-  let create_properties name content_type is_dir length =
-    Xml.create_properties ~content_type
-      is_dir (Ptime.to_rfc3339 (Ptime_clock.now ())) length name
-  in
-  let create_dir ?(props=[]) name =
-    let dir = Fs.dir_from_string name in
-    let propmap = create_properties name "text/directory" true 0 in
-    let propmap' = List.fold_left (fun p (k, v) -> Xml.PairMap.add k v p) propmap props in
-    Fs.mkdir fs dir propmap'
-  in
-  let create_calendar name =
+  let create_calendar fs name =
     let props =
       let reports = [
         Xml.caldav_ns, "calendar-query" ;
@@ -382,23 +378,28 @@ let initialise_fs fs =
       (* (Xml.dav_ns, "owner"), ([], [ Xml.pcdata "/principals/__uids__/10000000-0000-0000-0000-000000000001" ]) ; *)
       (* (Xml.dav_ns, "current-user-principal"), ([], [ Xml.pcdata "/principals/__uids__/10000000-0000-0000-0000-000000000001" ]) ; *)
     ] in
-    create_dir ~props name
+    create_dir fs ~props name
   in
-  create_dir "calendars" >>= fun _ ->
-  let props =
-    let p = create_properties "calendars/" "text/directory" true 0 in
-    Xml.PairMap.add (Xml.caldav_ns, "calendar-home-set")
-      ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata "http://127.0.0.1:8080/calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar"]])
-      p
-  in
-  Fs.write_property_map fs (`Dir [ "calendars" ]) props >>= fun _ ->
-  create_dir "calendars/users" >>= fun _ ->
-  create_dir "calendars/__uids__" >>= fun _ ->
-  create_dir "calendars/__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
-  create_calendar "calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
-  (*  create_calendar "calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar/geburtstage" >>= fun _ -> *)
-  create_dir "calendars/__uids__/10000000-0000-0000-0000-000000000001/tasks" >>= fun _ ->
+  let calendars_properties = [
+    (Xml.caldav_ns, "calendar-home-set"),
+    ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata "http://127.0.0.1:8080/calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar"]])
+  ] in
+  create_dir fs ~props:calendars_properties "calendars" >>= fun _ ->
+  create_dir fs "calendars/users" >>= fun _ ->
+  create_dir fs "calendars/__uids__" >>= fun _ ->
+  create_dir fs "calendars/__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
+  create_calendar fs "calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
+  create_dir fs "calendars/__uids__/10000000-0000-0000-0000-000000000001/tasks" >>= fun _ ->
   Lwt.return_unit
+
+(*
+let make_dir_if_not_present dir =
+  if not (dir_exists dir) then
+    create_dir dir
+
+let make_user name =
+  create_dir "principals"
+*)
 
 let main () =
   (* listen on port 8080 *)

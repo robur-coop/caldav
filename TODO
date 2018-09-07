@@ -14,12 +14,12 @@
 DONE:
 - client interoperability: thunderbird! calendar.app! create and delete and rename event, todo
 - slash normalisation with prefix
+- timezone and date normalisation
 
 -- 31st August 2018:
 
 - client interoperability: android! create new todo lists and new calendars, use different users
 - user management (config file: users, hostname, routing, etc.)
-- timezone and date normalisation
 - research scope of implementing calendar sharing
 - internationalisation (unicode)
 - access control (WebDAV)
@@ -36,6 +36,6 @@ DONE:
 - report CalDAV 7.8.6 - 7.8.10
 - attachments
 - recurrence < daily
-
+- freebusy in timerange / todo in timerange
 
 - persistent storage (irmin/git?) (mirage-fs-unix works for us!)
