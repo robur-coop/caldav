@@ -23,15 +23,21 @@ let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 
 let etag str = Digest.to_hex @@ Digest.string str
 
-(* let ace_matches auth_user = function
-  
-
-let is_forbidden auth_user aces =
-  let aces' = List.filter (ace_matches auth_user) aces in
-  match aces' with
-  | [ Xml.Node (ns, name, _, subtree) ] ->
-    if ns = Xml.dav_ns && name = "ace" then
-*)
+let evaluate_acl auth_user (_, aces) =
+  let aces' = List.map Xml.xml_to_ace aces in
+  let aces'' = List.fold_left (fun acc -> function Ok ace -> ace :: acc | Error _ -> acc) [] aces' in (* TODO malformed ace? *)
+  let aces''' = List.filter (function
+      | `All, _ -> true
+      | `Href uri, _ -> Uri.equal uri auth_user
+      | _ -> assert false)  aces''
+  in
+  if aces''' = []
+  then true
+  else
+    let at_least_one_granted =
+      List.exists (function (_, `Grant) -> true | _ -> false) aces'''
+    in
+    not at_least_one_granted
 
 (* assumption: path is a directory - otherwise we return none *)
 (* out: ( name * typ * last_modified ) list - non-recursive *)
@@ -215,18 +221,23 @@ class handler server_config fs = object(self)
   method forbidden rd =
     let path = self#path rd in
     Fs.from_string fs path >>= function
-    | Error _ -> Wm.continue true rd
+    | Error _ ->
+      Printf.printf "forbidden: couldn't transform path %s\n" path ;
+      Wm.continue true rd
     | Ok f_or_d ->
       Fs.get_property_map fs f_or_d >>= function
-      | None -> Wm.continue true rd
+      | None ->
+        Printf.printf "forbidden: no property map found!\n" ;
+        Wm.continue true rd
       | Some props ->
         match Xml.get_prop (Xml.dav_ns, "acl") props with
         | None ->
           Printf.printf "ACL not present for %s\n" path ;
           Wm.continue true rd
         | Some aces ->
-          let result = false (* is_forbidden aces *) in
-          Wm.continue result rd
+          let auth_user = Uri.of_string "http://127.0.0.1:8080/principals/test" in
+          let forbidden = evaluate_acl auth_user aces in
+          Wm.continue forbidden rd
 
   method private process_propfind rd path =
     let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
@@ -383,7 +394,7 @@ let make_dir_if_not_present fs ?resourcetype ?props dir =
   else
     Lwt.return_unit
 
-let deny_all = Xml.ace_to_xml (`All, `Deny)
+let deny_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Deny) ])
 
 let initialise_fs fs =
   let create_calendar fs name =

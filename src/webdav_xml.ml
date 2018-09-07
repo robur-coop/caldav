@@ -364,7 +364,7 @@ let href_parser =
     (name_ns "href" dav_ns)
     extract_pcdata
 
-let xml_to_ace =
+let xml_to_ace : tree -> (ace, string) result =
   let principal = (* TODO other principals, property, invert *)
     tree_lift
       (fun _ c -> exactly_one c >>| fun c' -> `Principal c')
@@ -388,13 +388,13 @@ let xml_to_ace =
   tree_lift (fun _ c ->
       match List.partition (function `Principal _ -> true | _ -> false) c with
       | [ `Principal p ], rest ->
-        begin match List.partition (function `Grant | `Deny -> true | _ -> false) c with
-          | [ grant_or_deny ], rest' -> Ok (p, grant_or_deny)
+        begin match List.partition (function `Grant_or_deny _ -> true | _ -> false) c with
+          | [ `Grant_or_deny grant_or_deny ], rest' -> Ok (p, grant_or_deny)
           | _ -> Error "couldn't parse ace"
         end
       | _ -> Error "couldn't find principal in ace")
     (name_ns "ace" dav_ns)
-    (principal ||| grant_or_deny)
+    (principal ||| (grant_or_deny >>~ fun g_or_d -> Ok (`Grant_or_deny g_or_d)))
 
 let principal_to_xml p =
   let name, children = match p with
