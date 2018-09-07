@@ -23,6 +23,16 @@ let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 
 let etag str = Digest.to_hex @@ Digest.string str
 
+(* let ace_matches auth_user = function
+  
+
+let is_forbidden auth_user aces =
+  let aces' = List.filter (ace_matches auth_user) aces in
+  match aces' with
+  | [ Xml.Node (ns, name, _, subtree) ] ->
+    if ns = Xml.dav_ns && name = "ace" then
+*)
+
 (* assumption: path is a directory - otherwise we return none *)
 (* out: ( name * typ * last_modified ) list - non-recursive *)
 let list_dir fs (`Dir dir) =
@@ -197,6 +207,27 @@ class handler server_config fs = object(self)
       "text/calendar", self#write_calendar
     ] rd
 
+  method is_authorized rd =
+    (* (1) check which resource is accessed - do i need to be authorized *)
+    (* (2) check whether authorisation headers are present and valid? *)
+    Wm.continue `Authorized rd
+
+  method forbidden rd =
+    let path = self#path rd in
+    Fs.from_string fs path >>= function
+    | Error _ -> Wm.continue true rd
+    | Ok f_or_d ->
+      Fs.get_property_map fs f_or_d >>= function
+      | None -> Wm.continue true rd
+      | Some props ->
+        match Xml.get_prop (Xml.dav_ns, "acl") props with
+        | None ->
+          Printf.printf "ACL not present for %s\n" path ;
+          Wm.continue true rd
+        | Some aces ->
+          let result = false (* is_forbidden aces *) in
+          Wm.continue result rd
+
   method private process_propfind rd path =
     let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
@@ -352,6 +383,8 @@ let make_dir_if_not_present fs ?resourcetype ?props dir =
   else
     Lwt.return_unit
 
+let deny_all = Xml.ace_to_xml (`All, `Deny)
+
 let initialise_fs fs =
   let create_calendar fs name =
     let props =
@@ -388,7 +421,7 @@ let initialise_fs fs =
       (* (Xml.dav_ns, "current-user-principal"), ([], [ Xml.pcdata "/principals/__uids__/10000000-0000-0000-0000-000000000001" ]) ; *)
     ] in
     let resourcetype = [ Xml.node ~ns:Xml.caldav_ns "calendar" [] ] in
-    make_dir_if_not_present fs ~resourcetype ~props name
+    make_dir_if_not_present fs ~resourcetype ~props:(deny_all :: props) name
   in
   let calendars_properties = [
     (Xml.caldav_ns, "calendar-home-set"),

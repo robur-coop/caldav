@@ -21,7 +21,7 @@ type propfind = [
 type propupdate = [
   | `Set of attribute list * fqname * tree list
   | `Remove of fqname
-] [@@deriving show, eq] 
+] [@@deriving show, eq]
 
 (* TODO this actually belongs to CalDAV! this is Webdav_xml module! *)
 type comp = [ `Allcomp | `Comp of component list ]
@@ -67,6 +67,18 @@ and component_filter = string * comp_filter [@@deriving show, eq]
 type calendar_query = report_prop option * component_filter [@@deriving show, eq]
 
 type calendar_multiget = report_prop option * string list [@@deriving show, eq]
+
+(* access control *)
+type principal = [
+  | `Href of Uri.t
+  | `All
+  | `Authenticated
+  | `Unauthenticated
+  (*  | `Property *)
+  | `Self
+]
+
+type ace = principal * [ `Grant | `Deny ]
 
 let caldav_ns = "urn:ietf:params:xml:ns:caldav"
 let dav_ns = "DAV:"
@@ -342,6 +354,67 @@ let non_empty = function
 
 let run p tree = p tree
 
+let exactly_one = function
+  | [ x ] -> Ok x
+  | _     -> Error "expected exactly one child"
+
+let href_parser =
+  tree_lift
+    (fun _ c -> exactly_one c)
+    (name_ns "href" dav_ns)
+    extract_pcdata
+
+let xml_to_ace =
+  let principal = (* TODO other principals, property, invert *)
+    tree_lift
+      (fun _ c -> exactly_one c >>| fun c' -> `Principal c')
+      (name_ns "principal" dav_ns)
+      ((tree_lift (fun _ c -> is_empty c >>| fun () -> `All)
+          (name_ns "all" dav_ns) any)
+       ||| (tree_lift (fun _ c -> is_empty c >>| fun () -> `Authenticated)
+              (name_ns "authenticated" dav_ns) any)
+       ||| (tree_lift (fun _ c -> is_empty c >>| fun () -> `Unauthenticated)
+              (name_ns "unauthenticated" dav_ns) any)
+       ||| (tree_lift (fun _ c -> is_empty c >>| fun () -> `Self)
+              (name_ns "self" dav_ns) any)
+       ||| (href_parser >>~ fun href -> Ok (`Href (Uri.of_string href))))
+  and grant_or_deny =
+    tree_lift
+      (fun _ c -> is_empty c >>| fun () -> `Grant)
+      (name_ns "grant" dav_ns) any
+    ||| tree_lift (fun _ c -> is_empty c >>| fun () -> `Deny)
+      (name_ns "deny" dav_ns) any
+  in
+  tree_lift (fun _ c ->
+      match List.partition (function `Principal _ -> true | _ -> false) c with
+      | [ `Principal p ], rest ->
+        begin match List.partition (function `Grant | `Deny -> true | _ -> false) c with
+          | [ grant_or_deny ], rest' -> Ok (p, grant_or_deny)
+          | _ -> Error "couldn't parse ace"
+        end
+      | _ -> Error "couldn't find principal in ace")
+    (name_ns "ace" dav_ns)
+    (principal ||| grant_or_deny)
+
+let principal_to_xml p =
+  let name, children = match p with
+    | `All -> "all", []
+    | `Authenticated -> "authenticated", []
+    | `Unauthenticated -> "unauthenticated", []
+    | `Self -> "self", []
+    | `Href url -> "href", [ pcdata (Uri.to_string url) ]
+  in
+  dav_node "principal" [
+    dav_node name children
+  ]
+
+let ace_to_xml (principal, grant_or_deny) =
+  let g_or_d_node =
+    let name = match grant_or_deny with `Grant -> "grant" | `Deny -> "deny" in
+    dav_node name []
+  in
+  dav_node "ace" [ principal_to_xml principal ; g_or_d_node ]
+
 let propfind_prop_parser : tree -> ([ propfind | `Include of string list ], string) result =
   ((tree_lift
       (fun _ c -> is_empty c >>| fun () -> `Propname)
@@ -477,10 +550,6 @@ let extract_and_tag_prop = function
   | Node (ns, name, _, _) -> Ok (`Prop (ns, name))
   | Pcdata _ -> Error "expected node"
 
-let exactly_one = function
-  | [ x ] -> Ok x
-  | _     -> Error "expected exactly one child"
-
 let report_prop_parser : tree -> (report_prop, string) result =
   (tree_lift
      (fun _ c -> is_empty c >>| fun () -> `Propname)
@@ -604,12 +673,6 @@ let parse_calendar_query_xml tree : (calendar_query, string) result =
        ||| (filter_parser >>~ fun f -> Ok (`Filter f)))
   in
   run tree_grammar tree
-
-let href_parser =
-  tree_lift
-    (fun _ c -> exactly_one c)
-    (name_ns "href" dav_ns)
-    extract_pcdata
 
 let parse_calendar_multiget_xml tree : (calendar_multiget, string) result =
   let tree_grammar =
