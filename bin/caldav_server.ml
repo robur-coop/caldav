@@ -6,7 +6,8 @@ module Xml = Caldav.Webdav_xml
 module Dav = Caldav.Webdav_api
 
 type config = {
-  users : string list ;
+  principals : string ;
+  calendars : string ;
   host : Uri.t ;
 }
 
@@ -23,14 +24,29 @@ let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 
 let etag str = Digest.to_hex @@ Digest.string str
 
-let evaluate_acl auth_user (_, aces) =
+let identities props =
+  let url = function
+    | Xml.Node (_, "href", _, [ Xml.Pcdata url ]) -> [ Uri.of_string url ]
+    | _ -> []
+  in
+  let urls n = List.flatten (List.map url n) in
+  match
+    Xml.get_prop (Xml.dav_ns, "principal-URL") props,
+    Xml.get_prop (Xml.dav_ns, "group-membership") props
+  with
+  | None, _ -> []
+  | Some (_, principal), Some (_, groups) -> urls principal @ urls groups
+  | Some (_, principal), None -> urls principal
+
+let evaluate_acl auth_user_props (_, aces) =
   let aces' = List.map Xml.xml_to_ace aces in
   let aces'' = List.fold_left (fun acc -> function Ok ace -> ace :: acc | Error _ -> acc) [] aces' in (* TODO malformed ace? *)
   let aces''' = List.filter (function
       | `All, _ -> true
-      | `Href uri, _ -> Uri.equal uri auth_user
+      | `Href principal, _ -> List.exists (Uri.equal principal) (identities auth_user_props)
       | _ -> assert false)  aces''
   in
+  Format.printf "aces''' is %a\n%!" Fmt.(list ~sep:(unit "; ") Xml.pp_ace) aces''' ;
   if aces''' = []
   then true
   else
@@ -113,7 +129,7 @@ let calendar_to_collection data =
 
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
-class handler server_config fs = object(self)
+class handler config fs = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
 
   method private write_calendar rd =
@@ -141,7 +157,7 @@ class handler server_config fs = object(self)
             let header' = Cohttp.Header.remove header "ETag" in
             let header'' = Cohttp.Header.add header' "Etag" etag in
             Cohttp.Header.add header'' "Location"
-              (Uri.to_string @@ Uri.with_path server_config.host path)
+              (Uri.to_string @@ Uri.with_path config.host path)
           ) rd
         in
         Wm.continue true rd
@@ -235,8 +251,14 @@ class handler server_config fs = object(self)
           Printf.printf "ACL not present for %s\n" path ;
           Wm.continue true rd
         | Some aces ->
-          let auth_user = Uri.of_string "http://127.0.0.1:8080/principals/test" in
-          let forbidden = evaluate_acl auth_user aces in
+          let get_property_map_for_user name =
+            let user_path = `Dir [ config.principals ; name ] in
+            Fs.get_property_map fs user_path >|= function
+            | None -> Xml.PairMap.empty
+            | Some x -> x
+          in
+          get_property_map_for_user "test" >>= fun auth_user_props ->
+          let forbidden = evaluate_acl auth_user_props aces in
           Wm.continue forbidden rd
 
   method private process_propfind rd path =
@@ -246,7 +268,7 @@ class handler server_config fs = object(self)
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
-      Dav.propfind fs ~host:server_config.host ~path tree ~depth >>= function
+      Dav.propfind fs ~host:config.host ~path tree ~depth >>= function
       | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Property_not_found -> Wm.continue `Property_not_found rd
       | Error (`Forbidden b) -> Wm.respond ~body:(`String (Xml.tree_to_string b)) (to_status `Forbidden) rd
@@ -258,7 +280,7 @@ class handler server_config fs = object(self)
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
-      Dav.proppatch fs ~host:server_config.host ~path tree >>= function
+      Dav.proppatch fs ~host:config.host ~path tree >>= function
       | Ok (_, b) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
@@ -282,7 +304,7 @@ class handler server_config fs = object(self)
       match Xml.string_to_tree body with
       | None -> Wm.respond (to_status `Bad_request) rd
       | Some tree ->
-        Dav.report fs ~host:server_config.host ~path:f_or_d tree >>= function
+        Dav.report fs ~host:config.host ~path:f_or_d tree >>= function
         | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
         | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
@@ -389,14 +411,19 @@ let make_dir fs ?(resourcetype = []) ?(props=[]) dir =
 
 let make_dir_if_not_present fs ?resourcetype ?props dir =
   Fs.dir_exists fs dir >>= fun exists ->
-  if not exists then
+  (*  if not exists then *)
     make_dir fs ?resourcetype ?props dir >|= fun _ -> ()
-  else
-    Lwt.return_unit
+(*  else
+    Lwt.return_unit *)
+
+let grant_test config =
+  let url = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; "test" ])) in
+  (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`Href url, `Grant) ])
 
 let deny_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Deny) ])
+let grant_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Grant) ])
 
-let initialise_fs fs =
+let initialise_fs fs config =
   let create_calendar fs name =
     let props =
       let reports = [
@@ -432,33 +459,71 @@ let initialise_fs fs =
       (* (Xml.dav_ns, "current-user-principal"), ([], [ Xml.pcdata "/principals/__uids__/10000000-0000-0000-0000-000000000001" ]) ; *)
     ] in
     let resourcetype = [ Xml.node ~ns:Xml.caldav_ns "calendar" [] ] in
-    make_dir_if_not_present fs ~resourcetype ~props:(deny_all :: props) name
+    make_dir_if_not_present fs ~resourcetype ~props:(grant_test config :: props) name
   in
-  let calendars_properties = [
+  let calendars_properties =
+    let url = Uri.with_path config.host (config.calendars ^ "/__uids__/10000000-0000-0000-0000-000000000001/calendar") in
+    [
     (Xml.caldav_ns, "calendar-home-set"),
-    ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata "http://127.0.0.1:8080/calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar"]])
+    ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata (Uri.to_string url) ]])
   ] in
-  make_dir_if_not_present fs ~props:calendars_properties (`Dir ["calendars"]) >>= fun _ ->
-  make_dir_if_not_present fs (`Dir ["calendars" ; "users"]) >>= fun _ ->
-  make_dir_if_not_present fs (`Dir ["calendars" ; "__uids__"]) >>= fun _ ->
-  make_dir_if_not_present fs (`Dir ["calendars" ; "__uids__" ; "10000000-0000-0000-0000-000000000001"]) >>= fun _ ->
-  create_calendar fs (`Dir ["calendars" ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "calendar" ]) >>= fun _ ->
-  make_dir_if_not_present fs (`Dir ["calendars" ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "tasks"]) >>= fun _ ->
+  make_dir_if_not_present fs ~props:calendars_properties (`Dir [config.calendars]) >>= fun _ ->
+  make_dir_if_not_present fs (`Dir [config.calendars ; "users"]) >>= fun _ ->
+  make_dir_if_not_present fs (`Dir [config.calendars ; "__uids__"]) >>= fun _ ->
+  make_dir_if_not_present fs (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001"]) >>= fun _ ->
+  create_calendar fs (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "calendar" ]) >>= fun _ ->
+  make_dir_if_not_present fs (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "tasks"]) >>= fun _ ->
   Lwt.return_unit
 
-let make_user fs server_config name =
-  make_dir_if_not_present fs (`Dir ["principals"]) >>= fun _ ->
+let make_user ?(props = []) fs config name =
+  make_dir_if_not_present fs (`Dir [ config.principals ]) >>= fun _ ->
   let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
-  let user_home = `Dir ["principals" ; name ] in
-  let url = Uri.with_path server_config.host (Fs.to_string (user_home :> Fs.file_or_dir)) in
-  let props = [ (Xml.dav_ns, "principal-URL"), ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata (Uri.to_string url) ] ]) ] in
-  make_dir_if_not_present fs ~resourcetype ~props user_home >>= fun _ ->
+  let user_home = `Dir [ config.principals ; name ] in
+  let url = Uri.with_path config.host (Fs.to_string (user_home :> Fs.file_or_dir)) in
+  let props' =
+    ((Xml.dav_ns, "principal-URL"),
+     ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata (Uri.to_string url) ] ]))
+    :: props
+  in
+  make_dir_if_not_present fs ~resourcetype ~props:props' user_home >>= fun _ ->
   Lwt.return_unit
 
-let init_users fs server_config =
-  make_user fs server_config "root" >>= fun () ->
-  make_user fs server_config "nobody" >>= fun () ->
-  make_user fs server_config "test"
+let make_group fs config name members =
+  let principal_path user = Fs.to_string (`Dir [ config.principals ; user ]) in
+  let new_member_paths = List.map principal_path members in
+  let new_member_urls =
+    List.map
+      (fun path -> Uri.to_string @@ Uri.with_path config.host path)
+      new_member_paths
+  in
+  let group_props = [
+    (Xml.dav_ns, "group-member-set"),
+    ([], List.map (fun u -> Xml.dav_node "href" [ Xml.pcdata u ]) new_member_urls)
+  ] in
+  make_user ~props:group_props fs config name >>= fun () ->
+  let group_node =
+    Xml.dav_node "href"
+      [ Xml.pcdata (Uri.to_string @@ Uri.with_path config.host (principal_path name)) ]
+  in
+  let group_key = (Xml.dav_ns, "group-membership") in
+  Lwt_list.iter_p (fun path ->
+      let f_or_d = (Fs.dir_from_string path :> Fs.file_or_dir) in
+      Fs.get_property_map fs f_or_d >>= function
+      | None -> Lwt.return_unit
+      | Some props ->
+        let props' = match Xml.get_prop group_key props with
+          | None -> Xml.PairMap.add group_key ([], [ group_node ]) props
+          | Some (attrs, groups) -> Xml.PairMap.add group_key (attrs, group_node :: groups) props
+        in
+        Fs.write_property_map fs f_or_d props' >>= fun _ ->
+        Lwt.return_unit)
+    new_member_paths
+
+let init_users fs config =
+  make_user fs config "root" >>= fun () ->
+  make_user fs config "nobody" >>= fun () ->
+  make_user fs config "test" >>= fun () ->
+  make_group fs config "group" ["root" ; "test"]
 
 let main () =
   (* listen on port 8080 *)
@@ -467,17 +532,21 @@ let main () =
   and hostname = "127.0.0.1"
   in
   let host = Uri.make ~port ~scheme ~host:hostname () in
-  let server_config = { users = [] ; host } in
+  let config = {
+    principals = "principals" ;
+    calendars = "calendars" ;
+    host
+  } in
   (* create the file system *)
   Fs.connect "/tmp/calendar" >>= fun fs ->
   (* only for apple test suite *)
-  initialise_fs fs >>= fun () ->
-  init_users fs server_config >>= fun () ->
+  initialise_fs fs config >>= fun () ->
+  init_users fs config >>= fun () ->
   (* the route table *)
   let routes = [
-    ("/principals", fun () -> new handler server_config fs) ;
-    ("/calendars", fun () -> new handler server_config fs) ;
-    ("/calendars/*", fun () -> new handler server_config fs) ;
+    ("/" ^ config.principals, fun () -> new handler config fs) ;
+    ("/" ^ config.calendars, fun () -> new handler config fs) ;
+    ("/" ^ config.calendars ^ "/*", fun () -> new handler config fs) ;
   ] in
   let callback (ch, conn) request body =
     let open Cohttp in

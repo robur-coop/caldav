@@ -68,6 +68,11 @@ type calendar_query = report_prop option * component_filter [@@deriving show, eq
 
 type calendar_multiget = report_prop option * string list [@@deriving show, eq]
 
+module Uri = struct
+  include Uri
+  let pp = pp_hum
+end
+
 (* access control *)
 type principal = [
   | `Href of Uri.t
@@ -76,9 +81,9 @@ type principal = [
   | `Unauthenticated
   (*  | `Property *)
   | `Self
-]
+] [@@deriving show]
 
-type ace = principal * [ `Grant | `Deny ]
+type ace = principal * [ `Grant | `Deny ] [@@deriving show]
 
 let caldav_ns = "urn:ietf:params:xml:ns:caldav"
 let dav_ns = "DAV:"
