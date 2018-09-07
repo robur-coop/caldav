@@ -1,6 +1,6 @@
 val (>>==) : ('a, 'b) result Lwt.t -> ('a -> ('c, 'b) result Lwt.t) -> ('c, 'b) result Lwt.t
 
-module Fs = Mirage_fs_mem
+module Fs = FS_unix
 
 type t = Fs.t
 
@@ -9,6 +9,8 @@ type file = [ `File of string list ]
 type dir = [ `Dir of string list ]
 
 type file_or_dir = [ file | dir ]
+
+val basename : file_or_dir -> string
 
 val create_file : dir -> string -> file
 

@@ -336,19 +336,19 @@ end
 let server_ns = "http://calendarserver.org/ns/"
 let carddav_ns = "urn:ietf:params:xml:ns:carddav"
 
-let make_dir fs ?(props=[]) name =
-  let dir = Fs.dir_from_string name in
+let make_dir fs ?(resourcetype = []) ?(props=[]) dir =
   let propmap =
-    Xml.create_properties ~content_type:"text/directory" true
-      (Ptime.to_rfc3339 (Ptime_clock.now ())) 0 name
+    let resourcetype' = Xml.node ~ns:Xml.dav_ns "collection" [] :: resourcetype in
+    Xml.create_properties ~content_type:"text/directory" ~resourcetype:resourcetype'
+      (Ptime.to_rfc3339 (Ptime_clock.now ())) 0 (Fs.basename (dir :> Fs.file_or_dir))
   in
   let propmap' = List.fold_left (fun p (k, v) -> Xml.PairMap.add k v p) propmap props in
   Fs.mkdir fs dir propmap'
 
-let make_dir_if_not_present fs ?props dirname =
-  Fs.dir_exists fs (Fs.dir_from_string dirname) >>= fun exists ->
+let make_dir_if_not_present fs ?resourcetype ?props dir =
+  Fs.dir_exists fs dir >>= fun exists ->
   if not exists then
-    make_dir fs ?props dirname >|= fun _ -> ()
+    make_dir fs ?resourcetype ?props dir >|= fun _ -> ()
   else
     Lwt.return_unit
 
@@ -381,29 +381,40 @@ let initialise_fs fs =
           [ "VEVENT" ; "VTODO" ; "VTIMEZONE" ; "VFREEBUSY" ]
       in
       [
-      (Xml.dav_ns, "resourcetype"), ([], [Xml.node ~ns:Xml.caldav_ns "calendar" []; Xml.node ~ns:Xml.dav_ns "collection" []]) ;
       (Xml.dav_ns, "supported-report-set"), ([], report_nodes) ;
       (Xml.caldav_ns, "supported-calendar-component-set"), ([], comps) ;
       (* (server_ns, "getctag"), ([], [ Xml.pcdata "hallo" ]) *)
       (* (Xml.dav_ns, "owner"), ([], [ Xml.pcdata "/principals/__uids__/10000000-0000-0000-0000-000000000001" ]) ; *)
       (* (Xml.dav_ns, "current-user-principal"), ([], [ Xml.pcdata "/principals/__uids__/10000000-0000-0000-0000-000000000001" ]) ; *)
     ] in
-    make_dir_if_not_present fs ~props name
+    let resourcetype = [ Xml.node ~ns:Xml.caldav_ns "calendar" [] ] in
+    make_dir_if_not_present fs ~resourcetype ~props name
   in
   let calendars_properties = [
     (Xml.caldav_ns, "calendar-home-set"),
     ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata "http://127.0.0.1:8080/calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar"]])
   ] in
-  make_dir_if_not_present fs ~props:calendars_properties "calendars" >>= fun _ ->
-  make_dir_if_not_present fs "calendars/users" >>= fun _ ->
-  make_dir_if_not_present fs "calendars/__uids__" >>= fun _ ->
-  make_dir_if_not_present fs "calendars/__uids__/10000000-0000-0000-0000-000000000001" >>= fun _ ->
-  create_calendar fs "calendars/__uids__/10000000-0000-0000-0000-000000000001/calendar" >>= fun _ ->
-  make_dir_if_not_present fs "calendars/__uids__/10000000-0000-0000-0000-000000000001/tasks" >>= fun _ ->
+  make_dir_if_not_present fs ~props:calendars_properties (`Dir ["calendars"]) >>= fun _ ->
+  make_dir_if_not_present fs (`Dir ["calendars" ; "users"]) >>= fun _ ->
+  make_dir_if_not_present fs (`Dir ["calendars" ; "__uids__"]) >>= fun _ ->
+  make_dir_if_not_present fs (`Dir ["calendars" ; "__uids__" ; "10000000-0000-0000-0000-000000000001"]) >>= fun _ ->
+  create_calendar fs (`Dir ["calendars" ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "calendar" ]) >>= fun _ ->
+  make_dir_if_not_present fs (`Dir ["calendars" ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "tasks"]) >>= fun _ ->
   Lwt.return_unit
 
-(*let make_user name =
-  create_dir "principals"*)
+let make_user fs server_config name =
+  make_dir_if_not_present fs (`Dir ["principals"]) >>= fun _ ->
+  let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
+  let user_home = `Dir ["principals" ; name ] in
+  let url = Uri.with_path server_config.host (Fs.to_string (user_home :> Fs.file_or_dir)) in
+  let props = [ (Xml.dav_ns, "principal-URL"), ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata (Uri.to_string url) ] ]) ] in
+  make_dir_if_not_present fs ~resourcetype ~props user_home >>= fun _ ->
+  Lwt.return_unit
+
+let init_users fs server_config =
+  make_user fs server_config "root" >>= fun () ->
+  make_user fs server_config "nobody" >>= fun () ->
+  make_user fs server_config "test"
 
 let main () =
   (* listen on port 8080 *)
@@ -415,6 +426,9 @@ let main () =
   let server_config = { users = [] ; host } in
   (* create the file system *)
   Fs.connect "/tmp/calendar" >>= fun fs ->
+  (* only for apple test suite *)
+  initialise_fs fs >>= fun () ->
+  init_users fs server_config >>= fun () ->
   (* the route table *)
   let routes = [
     ("/principals", fun () -> new handler server_config fs) ;
@@ -462,8 +476,6 @@ let main () =
     Printf.printf "connection %s closed\n%!"
       (Sexplib.Sexp.to_string_hum (Conduit_lwt_unix.sexp_of_flow ch))
   in
-  (* only for apple test suite *)
-  initialise_fs fs >>= fun () ->
   let config = Server.make ~callback ~conn_closed () in
   Server.create  ~mode:(`TCP(`Port port)) config
   >>= (fun () -> Printf.eprintf "hello_lwt: listening on 0.0.0.0:%d%!" port;

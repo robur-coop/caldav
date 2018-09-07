@@ -223,8 +223,7 @@ let find_props ps m =
   | f, [] -> [ (`OK, f) ]
   | f, nf -> [ (`OK, f) ; (`Not_found, nf) ]
 
-let create_properties ?(content_type = "text/html") ?(language = "en") is_dir ?etag timestamp length filename =
-  let rtype = if is_dir then [ node ~ns:dav_ns "collection" [] ] else [] in
+let create_properties ?(content_type = "text/html") ?(language = "en") ?etag ?(resourcetype = []) timestamp length filename =
   let filename = if filename = "" then "hinz und kunz" else filename in
   let etag' m = match etag with None -> m | Some e -> PairMap.add (dav_ns, "getetag") ([], [ Pcdata e ]) m in
   etag' @@
@@ -235,7 +234,7 @@ let create_properties ?(content_type = "text/html") ?(language = "en") is_dir ?e
   PairMap.add (dav_ns, "getcontentlength") ([], [ Pcdata (string_of_int length) ]) @@
   PairMap.add (dav_ns, "getlastmodified") ([], [ Pcdata timestamp ]) @@
   (* PairMap.add "lockdiscovery" *)
-  PairMap.add (dav_ns, "resourcetype") ([], rtype) PairMap.empty
+  PairMap.add (dav_ns, "resourcetype") ([], resourcetype) PairMap.empty
   (* PairMap.add "supportedlock" *)
 
 let prop_tree_to_map t =

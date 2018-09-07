@@ -1,5 +1,5 @@
 open Lwt.Infix
-module Fs = Mirage_fs_mem
+module Fs = FS_unix
 
 module Xml = Webdav_xml
 
@@ -21,6 +21,12 @@ type file = [ `File of string list ]
 type dir = [ `Dir of string list ]
 
 type file_or_dir = [ file | dir ]
+
+let basename = function
+  | `File path | `Dir path ->
+    match List.rev path with
+    | base::_ -> base
+    | [] -> invalid_arg "basename of root directory not allowed"
 
 let create_file (`Dir data) name =
   `File (data @ [name])

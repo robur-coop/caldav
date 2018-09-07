@@ -21,8 +21,8 @@ let write state ~path ?etag ~content_type data =
     | true ->
       let props =
         let etag = match etag with None -> compute_etag data | Some e -> e in
-        Xml.create_properties ~content_type false
-          ~etag (Ptime.to_rfc3339 (Ptime_clock.now ()))
+        Xml.create_properties ~content_type ~etag
+          (Ptime.to_rfc3339 (Ptime_clock.now ()))
           (String.length data) (Fs.to_string (`File file))
       in
       Fs.write state (`File file) (Cstruct.of_string data) props >|= function
@@ -214,7 +214,8 @@ let mkcol ?(now = Ptime_clock.now ()) state (`Dir dir) body =
   | true ->
     let default_props =
       Xml.create_properties ~content_type:"text/directory"
-        true (Ptime.to_rfc3339 now) 0
+        ~resourcetype:[ Xml.node ~ns:Xml.dav_ns "collection" [] ]
+        (Ptime.to_rfc3339 now) 0
         (Fs.to_string (`Dir dir))
     in
     match body_to_props body default_props with
