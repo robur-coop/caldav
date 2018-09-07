@@ -9,6 +9,7 @@ type config = {
   principals : string ;
   calendars : string ;
   host : Uri.t ;
+  user_password : (string * string) list
 }
 
 (* Apply the [Webmachine.Make] functor to the Lwt_unix-based IO module
@@ -24,6 +25,7 @@ let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 
 let etag str = Digest.to_hex @@ Digest.string str
 
+(* TODO groups only one level deep right now *)
 let identities props =
   let url = function
     | Xml.Node (_, "href", _, [ Xml.Pcdata url ]) -> [ Uri.of_string url ]
@@ -120,6 +122,19 @@ let directory_as_ics fs (`Dir dir) =
       ] @ name in
       Lwt_list.map_p calendar_components files >|= fun components ->
       Icalendar.to_ics (calprops, List.flatten components)
+
+let verify_auth_header user_password v =
+  match Astring.String.cut ~sep:"Basic " v with
+  | Some ("", b64) ->
+    begin match Nocrypto.Base64.decode (Cstruct.of_string b64) with
+      | None -> Error "invalid base64 encoding"
+      | Some data -> match Astring.String.cut ~sep:":" (Cstruct.to_string data) with
+        | None -> Error "invalid user:password encoding"
+        | Some (user, password) ->
+          Printf.printf "user is %s, password %s\n%!" user password ;
+          if List.mem (user, password) user_password then Ok user else Error "invalid user or wrong password"
+    end
+  | _ -> Error "bad header"
 
 let calendar_to_collection data =
   if data = "" then Ok "" else
@@ -230,9 +245,23 @@ class handler config fs = object(self)
     ] rd
 
   method is_authorized rd =
-    (* (1) check which resource is accessed - do i need to be authorized *)
-    (* (2) check whether authorisation headers are present and valid? *)
-    Wm.continue `Authorized rd
+    (* TODO implement digest authentication! *)
+    let res, rd' =
+      match Cohttp.Header.get rd.Wm.Rd.req_headers "Authorization" with
+      | None -> `Basic "calendar", rd
+      | Some v ->
+        match verify_auth_header config.user_password v with
+        | Ok user ->
+          let replace_header h =
+            Cohttp.Header.replace h "Authorization" user
+          in
+          let rd' = Wm.Rd.with_req_headers replace_header rd in
+          `Authorized, rd'
+        | Error msg ->
+          Printf.printf "ivalid authorization: %s\n" msg ;
+          `Basic "invalid authorization", rd
+    in
+    Wm.continue res rd'
 
   method forbidden rd =
     let path = self#path rd in
@@ -257,7 +286,12 @@ class handler config fs = object(self)
             | None -> Xml.PairMap.empty
             | Some x -> x
           in
-          get_property_map_for_user "test" >>= fun auth_user_props ->
+          let user =
+            match Cohttp.Header.get rd.Wm.Rd.req_headers "Authorization" with
+            | None -> assert false
+            | Some v -> v
+          in
+          get_property_map_for_user user >>= fun auth_user_props ->
           let forbidden = evaluate_acl auth_user_props aces in
           Wm.continue forbidden rd
 
@@ -535,7 +569,8 @@ let main () =
   let config = {
     principals = "principals" ;
     calendars = "calendars" ;
-    host
+    host ;
+    user_password = [ ("test", "password") ; ("root", "toor") ; ("nobody", "1") ]
   } in
   (* create the file system *)
   Fs.connect "/tmp/calendar" >>= fun fs ->
