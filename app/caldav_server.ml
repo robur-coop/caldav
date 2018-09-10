@@ -249,8 +249,8 @@ class handler config fs = object(self)
       | Some x -> x
     in
     get_property_map_for_user user >>= fun auth_user_props ->
-    Dav.evaluate_acl fs path rd.Wm.Rd.meth auth_user_props >>= fun forbidden ->
-    Wm.continue forbidden rd
+    Dav.access_granted_for_acl fs path rd.Wm.Rd.meth auth_user_props >>= fun granted ->
+    Wm.continue (not granted) rd
 
   method private process_propfind rd path =
     let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in

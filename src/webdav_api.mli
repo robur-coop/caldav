@@ -33,7 +33,7 @@ sig
   val read : state -> string ->
   *)
   
-  val evaluate_acl : state -> string -> Cohttp.Code.meth -> Webdav_fs.propmap -> bool Lwt.t
+  val access_granted_for_acl : state -> string -> Cohttp.Code.meth -> Webdav_fs.propmap -> bool Lwt.t
 end
 
 module Make (Fs: Webdav_fs.S) : S with type state = Fs.t

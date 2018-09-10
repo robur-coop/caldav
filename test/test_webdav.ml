@@ -2,6 +2,8 @@ module Xml = Caldav.Webdav_xml
 module Fs = Caldav.Webdav_fs.Make(Mirage_fs_mem)
 module Dav = Caldav.Webdav_api.Make(Fs)
 
+open Caldav.Webdav_config
+
 let header = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
 
 let tree xml = match Xml.string_to_tree xml with Some t -> t | None -> Alcotest.fail "Invalid xml."
@@ -1261,16 +1263,16 @@ let deny_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Deny [ `All ])
 let grant_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Grant [ `All ]) ])
 
 let get_calendars_grant_all () =
+  let path = "calendars" in
   let fs = Lwt_main.run (
     let open Lwt.Infix in
-    Mirage_fs_mem.connect "" >>= fun res_fs ->
-    let props = Xml.create_properties ts len filename in
+    Mirage_fs_mem.connect "" >>= fun fs ->
+    let props = Xml.create_properties (Ptime.to_rfc3339(Ptime_clock.now ())) 0 path in
     let props' = Xml.PairMap.add (fst grant_all) (snd grant_all) props in
-    let path = "calendars" in
-    Fs.mkdir fs (`Dir [path]) props') in
+    Fs.mkdir fs (`Dir [path]) props' >|= fun _ -> fs) in
   let http_verb = `GET in
   let user_props = Xml.PairMap.add (Xml.dav_ns, "principal-URL") ([], [Xml.dav_node "href" [ Xml.Pcdata "something arbitrary" ]]) Xml.PairMap.empty in
-  Alcotest.(check bool __LOC__ true Dav.evaluate_acl fs path http_verb user_props)
+  Alcotest.(check bool __LOC__ true (Lwt_main.run @@ Dav.access_granted_for_acl fs path http_verb user_props))
 
 let webdav_acl_tests = [
   "get calendars, granted for all", `Quick, get_calendars_grant_all 

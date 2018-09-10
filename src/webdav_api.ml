@@ -33,7 +33,7 @@ sig
   val read : state -> string ->
   *)
   
-  val evaluate_acl : state -> string -> Cohttp.Code.meth -> Webdav_fs.propmap -> bool Lwt.t
+  val access_granted_for_acl : state -> string -> Cohttp.Code.meth -> Webdav_fs.propmap -> bool Lwt.t
 end
 
 module Make(Fs: Webdav_fs.S) = struct
@@ -867,7 +867,7 @@ module Make(Fs: Webdav_fs.S) = struct
         []
       | Some (_, aces) -> aces
   
-  let evaluate_acl fs path http_verb auth_user_props =
+  let access_granted_for_acl fs path http_verb auth_user_props =
     Fs.exists fs path >>= fun target_exists ->
     let requirements, target_or_parent = required_privs http_verb target_exists in
     read_acl fs path target_or_parent >|= fun aces ->
@@ -880,10 +880,7 @@ module Make(Fs: Webdav_fs.S) = struct
     in
     Format.printf "aces''' is %a\n%!" Fmt.(list ~sep:(unit "; ") Xml.pp_ace) aces''' ;
     if aces''' = []
-    then true
+    then false
     else
-      let at_least_one_granted =
         List.exists (function (_, `Grant privs) -> privilege_met requirements privs | _ -> false) aces'''
-      in
-      not at_least_one_granted
 end
