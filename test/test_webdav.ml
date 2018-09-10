@@ -1287,8 +1287,9 @@ let get_calendars_grant_user_test () =
   let config = { principals = "principals" ; calendars = "calendars" ; user_password = [] ; host = Uri.of_string "http://example.com" } in 
   let fs = test_fs_with_acl path (grant_test config) in
   let http_verb = `GET in
-  let user_props = Xml.PairMap.add (Xml.dav_ns, "principal-URL") ([], [Xml.dav_node "href" [ Xml.Pcdata "something arbitrary" ]]) Xml.PairMap.empty in
-  Alcotest.(check bool __LOC__ false (Lwt_main.run @@ Dav.access_granted_for_acl fs path http_verb user_props))
+  let url = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; "test" ])) in
+  let user_props = Xml.PairMap.add (Xml.dav_ns, "principal-URL") ([], [Xml.dav_node "href" [ Xml.Pcdata (Uri.to_string url) ]]) Xml.PairMap.empty in
+  Alcotest.(check bool __LOC__ true (Lwt_main.run @@ Dav.access_granted_for_acl fs path http_verb user_props))
 
 let webdav_acl_tests = [
   "get calendars, granted for all", `Quick, get_calendars_grant_all ;
