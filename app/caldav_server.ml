@@ -25,114 +25,6 @@ let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 
 let etag str = Digest.to_hex @@ Digest.string str
 
-let required_privs verb target_exists = match verb with
-  | `GET -> `Read, `Target
-  | `HEAD -> `Read, `Target
-  | `OPTIONS -> `Read, `Target
-  | `PUT when target_exists     -> `Write_content, `Target
-  | `PUT (* no target exists *) -> `Bind, `Parent
-  | `Other "PROPPATCH" -> `Write_properties, `Target
-  | `Other "ACL" -> `Write_acl, `Target
-  | `Other "PROPFIND" -> `Read, `Target (* plus <D:read-acl> and <D:read-current-user-privilege-set> as needed *)
-  | `DELETE -> `Unbind, `Parent
-  | `Other "MKCOL" -> `Bind, `Parent
-  | `Other "MKCALENDAR" -> `Bind, `Parent
-  | `Other "REPORT" -> `Read, `Target (* referenced_resources body *)
-  | _ -> assert false
-(* | COPY (target exists)            | <D:read>, <D:write-content> and |
-   |                                 | <D:write-properties> on target  |
-   |                                 | resource                        |
-   | COPY (no target exists)         | <D:read>, <D:bind> on target    |
-   |                                 | collection                      |
-   | MOVE (no target exists)         | <D:unbind> on source collection |
-   |                                 | and <D:bind> on target          |
-   |                                 | collection                      |
-   | MOVE (target exists)            | As above, plus <D:unbind> on    |
-   |                                 | the target collection           |
-   | LOCK (target exists)            | <D:write-content>               |
-   | LOCK (no target exists)         | <D:bind> on parent collection   |
-   | UNLOCK                          | <D:unlock>                      |
-   | CHECKOUT                        | <D:write-properties>            |
-   | CHECKIN                         | <D:write-properties>            |
-   | VERSION-CONTROL                 | <D:write-properties>            |
-   | MERGE                           | <D:write-content>               |
-   | MKWORKSPACE                     | <D:write-content> on parent     |
-   |                                 | collection                      |
-   | BASELINE-CONTROL                | <D:write-properties> and        |
-   |                                 | <D:write-content>               |
-   | MKACTIVITY                      | <D:write-content> on parent     |
-   |                                 | collection                      | *)
-
-(* TODO groups only one level deep right now *)
-let identities props =
-  let url = function
-    | Xml.Node (_, "href", _, [ Xml.Pcdata url ]) -> [ Uri.of_string url ]
-    | _ -> []
-  in
-  let urls n = List.flatten (List.map url n) in
-  match
-    Xml.get_prop (Xml.dav_ns, "principal-URL") props,
-    Xml.get_prop (Xml.dav_ns, "group-membership") props
-  with
-  | None, _ -> []
-  | Some (_, principal), Some (_, groups) -> urls principal @ urls groups
-  | Some (_, principal), None -> urls principal
-
-let privilege_met requirements privs =
-  List.exists (fun priv -> 
-    match requirements, priv with
-      | _, `All -> true
-      | `Read, `Read -> true
-      | `Read_acl, `Read_acl -> true
-      | `Write, `Write -> true
-      | `Write_content, `Write -> true
-      | `Write_properties, `Write -> true
-      | `Write_acl, `Write -> true
-      | `Bind, `Write -> true
-      | `Unbind, `Write -> true
-      | `Write_content, `Write_content -> true
-      | `Write_properties, `Write_properties -> true
-      | `Write_acl, `Write_acl -> true
-      | `Bind, `Bind -> true
-      | `Unbind, `Unbind -> true
-      | _ -> false) privs
-
-let read_acl fs path target_or_parent =
-  (match target_or_parent with
-  | `Target -> Fs.from_string fs path
-  | `Parent -> Lwt.return @@ Ok (Fs.parent @@ (Fs.file_from_string path :> Fs.file_or_dir) :> Fs.file_or_dir)) >>= function 
-  | Error _ -> Lwt.return [] 
-  | Ok f_or_d -> Fs.get_property_map fs f_or_d >|= function
-  | None ->
-    Printf.printf "forbidden: no property map found!\n" ;
-    []
-  | Some props ->
-    match Xml.get_prop (Xml.dav_ns, "acl") props with
-    | None ->
-      Printf.printf "ACL not present for %s\n" path ;
-      []
-    | Some (_, aces) -> aces
-
-let evaluate_acl fs path http_verb auth_user_props =
-  Fs.exists fs path >>= fun target_exists -> 
-  let requirements, target_or_parent = required_privs http_verb target_exists in
-  read_acl fs path target_or_parent >|= fun aces ->
-  let aces' = List.map Xml.xml_to_ace aces in
-  let aces'' = List.fold_left (fun acc -> function Ok ace -> ace :: acc | Error _ -> acc) [] aces' in (* TODO malformed ace? *)
-  let aces''' = List.filter (function
-      | `All, _ -> true
-      | `Href principal, _ -> List.exists (Uri.equal principal) (identities auth_user_props)
-      | _ -> assert false)  aces''
-  in
-  Format.printf "aces''' is %a\n%!" Fmt.(list ~sep:(unit "; ") Xml.pp_ace) aces''' ;
-  if aces''' = []
-  then true
-  else
-    let at_least_one_granted =
-      List.exists (function (_, `Grant privs) -> privilege_met requirements privs | _ -> false) aces'''
-    in
-    not at_least_one_granted
-
 (* assumption: path is a directory - otherwise we return none *)
 (* out: ( name * typ * last_modified ) list - non-recursive *)
 let list_dir fs (`Dir dir) =
@@ -362,7 +254,7 @@ class handler config fs = object(self)
       | Some x -> x
     in
     get_property_map_for_user user >>= fun auth_user_props ->
-    evaluate_acl fs path rd.Wm.Rd.meth auth_user_props >>= fun forbidden ->
+    Dav.evaluate_acl fs path rd.Wm.Rd.meth auth_user_props >>= fun forbidden ->
     Wm.continue forbidden rd
 
   method private process_propfind rd path =
