@@ -25,19 +25,20 @@ let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 
 let etag str = Digest.to_hex @@ Digest.string str
 
-let http_verb_needs_privileges target parent body = function
-  | `GET -> `Read target
-  | `HEAD -> `Read target
-  | `OPTIONS -> `Read target
-  | `PUT (* target exists *) -> `Write_content target
-  | `PUT (* no target exists *) -> `Bind parent
-  | `Other "PROPPATCH" -> `Write_properties target
-  | `Other "ACL" -> `Write_acl target
-  | `Other "PROPFIND" -> `Read target (* plus <D:read-acl> and <D:read-current-user-privilege-set> as needed *)
-  | `DELETE -> `Unbind parent
-  | `Other "MKCOL" -> `Bind parent
-  | `Other "MKCALENDAR" -> `Bind parent
-  | `Other "REPORT" -> `Read target (* referenced_resources body *)
+let required_privs verb target_exists = match verb with
+  | `GET -> `Read, `Target
+  | `HEAD -> `Read, `Target
+  | `OPTIONS -> `Read, `Target
+  | `PUT when target_exists     -> `Write_content, `Target
+  | `PUT (* no target exists *) -> `Bind, `Parent
+  | `Other "PROPPATCH" -> `Write_properties, `Target
+  | `Other "ACL" -> `Write_acl, `Target
+  | `Other "PROPFIND" -> `Read, `Target (* plus <D:read-acl> and <D:read-current-user-privilege-set> as needed *)
+  | `DELETE -> `Unbind, `Parent
+  | `Other "MKCOL" -> `Bind, `Parent
+  | `Other "MKCALENDAR" -> `Bind, `Parent
+  | `Other "REPORT" -> `Read, `Target (* referenced_resources body *)
+  | _ -> assert false
 (* | COPY (target exists)            | <D:read>, <D:write-content> and |
    |                                 | <D:write-properties> on target  |
    |                                 | resource                        |
@@ -77,15 +78,45 @@ let identities props =
   | Some (_, principal), Some (_, groups) -> urls principal @ urls groups
   | Some (_, principal), None -> urls principal
 
-let privilege_met verb privs =
-  List.exists (fun priv -> match verb, priv with
+let privilege_met requirements privs =
+  List.exists (fun priv -> 
+    match requirements, priv with
       | _, `All -> true
-      | `GET, `Read -> true
-      | `HEAD, `Read -> true
-      | `OPTIONS, `Read -> true
+      | `Read, `Read -> true
+      | `Read_acl, `Read_acl -> true
+      | `Write, `Write -> true
+      | `Write_content, `Write -> true
+      | `Write_properties, `Write -> true
+      | `Write_acl, `Write -> true
+      | `Bind, `Write -> true
+      | `Unbind, `Write -> true
+      | `Write_content, `Write_content -> true
+      | `Write_properties, `Write_properties -> true
+      | `Write_acl, `Write_acl -> true
+      | `Bind, `Bind -> true
+      | `Unbind, `Unbind -> true
       | _ -> false) privs
 
-let evaluate_acl http_verb auth_user_props (_, aces) =
+let read_acl fs path target_or_parent =
+  (match target_or_parent with
+  | `Target -> Fs.from_string fs path
+  | `Parent -> Lwt.return @@ Ok (Fs.parent @@ (Fs.file_from_string path :> Fs.file_or_dir) :> Fs.file_or_dir)) >>= function 
+  | Error _ -> Lwt.return [] 
+  | Ok f_or_d -> Fs.get_property_map fs f_or_d >|= function
+  | None ->
+    Printf.printf "forbidden: no property map found!\n" ;
+    []
+  | Some props ->
+    match Xml.get_prop (Xml.dav_ns, "acl") props with
+    | None ->
+      Printf.printf "ACL not present for %s\n" path ;
+      []
+    | Some (_, aces) -> aces
+
+let evaluate_acl fs path http_verb auth_user_props =
+  Fs.exists fs path >>= fun target_exists -> 
+  let requirements, target_or_parent = required_privs http_verb target_exists in
+  read_acl fs path target_or_parent >|= fun aces ->
   let aces' = List.map Xml.xml_to_ace aces in
   let aces'' = List.fold_left (fun acc -> function Ok ace -> ace :: acc | Error _ -> acc) [] aces' in (* TODO malformed ace? *)
   let aces''' = List.filter (function
@@ -98,7 +129,7 @@ let evaluate_acl http_verb auth_user_props (_, aces) =
   then true
   else
     let at_least_one_granted =
-      List.exists (function (_, `Grant privs) -> privilege_met http_verb privs | _ -> false) aces'''
+      List.exists (function (_, `Grant privs) -> privilege_met requirements privs | _ -> false) aces'''
     in
     not at_least_one_granted
 
@@ -319,35 +350,20 @@ class handler config fs = object(self)
 
   method forbidden rd =
     let path = self#path rd in
-    Fs.from_string fs path >>= function
-    | Error _ ->
-      Printf.printf "forbidden: couldn't transform path %s\n" path ;
-      Wm.continue true rd
-    | Ok f_or_d ->
-      Fs.get_property_map fs f_or_d >>= function
-      | None ->
-        Printf.printf "forbidden: no property map found!\n" ;
-        Wm.continue true rd
-      | Some props ->
-        match Xml.get_prop (Xml.dav_ns, "acl") props with
-        | None ->
-          Printf.printf "ACL not present for %s\n" path ;
-          Wm.continue true rd
-        | Some aces ->
-          let get_property_map_for_user name =
-            let user_path = `Dir [ config.principals ; name ] in
-            Fs.get_property_map fs user_path >|= function
-            | None -> Xml.PairMap.empty
-            | Some x -> x
-          in
-          let user =
-            match Cohttp.Header.get rd.Wm.Rd.req_headers "Authorization" with
-            | None -> assert false
-            | Some v -> v
-          in
-          get_property_map_for_user user >>= fun auth_user_props ->
-          let forbidden = evaluate_acl rd.Wm.Rd.meth auth_user_props aces in
-          Wm.continue forbidden rd
+    let user =
+      match Cohttp.Header.get rd.Wm.Rd.req_headers "Authorization" with
+      | None -> assert false
+      | Some v -> v
+    in
+    let get_property_map_for_user name =
+      let user_path = `Dir [ config.principals ; name ] in
+      Fs.get_property_map fs user_path >|= function
+      | None -> Xml.PairMap.empty
+      | Some x -> x
+    in
+    get_property_map_for_user user >>= fun auth_user_props ->
+    evaluate_acl fs path rd.Wm.Rd.meth auth_user_props >>= fun forbidden ->
+    Wm.continue forbidden rd
 
   method private process_propfind rd path =
     let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
@@ -506,7 +522,7 @@ let make_dir_if_not_present fs ?resourcetype ?props dir =
 
 let grant_test config =
   let url = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; "test" ])) in
-  (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`Href url, `Grant [ `Read ]) ])
+  (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`Href url, `Grant [ `Read ]) ; Xml.ace_to_xml (`Href url, `Grant [ `Write ]) ])
 
 let deny_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Deny [ `All ]) ])
 let grant_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Grant [ `All ]) ])

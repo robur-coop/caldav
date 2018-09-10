@@ -536,11 +536,11 @@ let appendix_b_data =
       Ptime.to_rfc3339 ts
     in
     Fs.connect "/tmp/caldavtest" >>= fun res_fs ->
-    let props name = Xml.create_properties true now 0 name in
+    let props name = Xml.create_properties ~resourcetype:([Xml.dav_node "collection" []]) now 0 name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
     Lwt_list.iter_s (fun (fn, etag, data) ->
-        let props = Xml.create_properties ~content_type:"text/calendar" ~etag false
+        let props = Xml.create_properties ~content_type:"text/calendar" ~etag 
             now (String.length data) ("bernard/work/" ^ fn)
         in
         Fs.write res_fs (`File [ "bernard" ; "work" ; fn ])
@@ -557,12 +557,12 @@ let appendix_b_1_data =
       Ptime.to_rfc3339 ts
     in
     Fs.connect "" >>= fun res_fs ->
-    let props name = Xml.create_properties true now 0 name in
+    let props name = Xml.create_properties ~resourcetype:([Xml.dav_node "collection" []]) now 0 name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
     (match Appendix_b.all with
     | (fn, etag, data) :: _ ->
-        let props = Xml.create_properties ~content_type:"text/calendar" ~etag false
+        let props = Xml.create_properties ~content_type:"text/calendar" ~etag 
             now (String.length data) ("bernard/work/" ^ fn)
         in
         Fs.write res_fs (`File [ "bernard" ; "work" ; fn ])
