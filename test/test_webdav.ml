@@ -1254,30 +1254,46 @@ let webdav_api_tests = [
   "delete", `Quick, delete_test
 ]
 
+let test_fs_with_acl path acl = Lwt_main.run (
+  let open Lwt.Infix in
+  Mirage_fs_mem.connect "" >>= fun fs ->
+  let props = Xml.create_properties (Ptime.to_rfc3339(Ptime_clock.now ())) 0 path in
+  let props' = Xml.PairMap.add (Xml.dav_ns, "acl") acl props in
+  Fs.mkdir fs (`Dir [path]) props' >|= fun _ -> fs)
 
 let grant_test config =
   let url = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; "test" ])) in
-  (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`Href url, `Grant [ `Read ]) ; Xml.ace_to_xml (`Href url, `Grant [ `Write ]) ])
+  ([], [ Xml.ace_to_xml (`Href url, `Grant [ `Read ]) ; Xml.ace_to_xml (`Href url, `Grant [ `Write ]) ])
 
-let deny_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Deny [ `All ]) ])
-let grant_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Grant [ `All ]) ])
+let deny_all = ([], [ Xml.ace_to_xml (`All, `Deny [ `All ]) ])
+let grant_all = ([], [ Xml.ace_to_xml (`All, `Grant [ `All ]) ])
 
 let get_calendars_grant_all () =
   let path = "calendars" in
-  let fs = Lwt_main.run (
-    let open Lwt.Infix in
-    Mirage_fs_mem.connect "" >>= fun fs ->
-    let props = Xml.create_properties (Ptime.to_rfc3339(Ptime_clock.now ())) 0 path in
-    let props' = Xml.PairMap.add (fst grant_all) (snd grant_all) props in
-    Fs.mkdir fs (`Dir [path]) props' >|= fun _ -> fs) in
+  let fs = test_fs_with_acl path grant_all in
   let http_verb = `GET in
   let user_props = Xml.PairMap.add (Xml.dav_ns, "principal-URL") ([], [Xml.dav_node "href" [ Xml.Pcdata "something arbitrary" ]]) Xml.PairMap.empty in
   Alcotest.(check bool __LOC__ true (Lwt_main.run @@ Dav.access_granted_for_acl fs path http_verb user_props))
 
+let get_calendars_deny_all () =
+  let path = "calendars" in
+  let fs = test_fs_with_acl path deny_all in
+  let http_verb = `GET in
+  let user_props = Xml.PairMap.add (Xml.dav_ns, "principal-URL") ([], [Xml.dav_node "href" [ Xml.Pcdata "something arbitrary" ]]) Xml.PairMap.empty in
+  Alcotest.(check bool __LOC__ false (Lwt_main.run @@ Dav.access_granted_for_acl fs path http_verb user_props))
+
+let get_calendars_grant_user_test () =
+  let path = "calendars" in
+  let config = { principals = "principals" ; calendars = "calendars" ; user_password = [] ; host = Uri.of_string "http://example.com" } in 
+  let fs = test_fs_with_acl path (grant_test config) in
+  let http_verb = `GET in
+  let user_props = Xml.PairMap.add (Xml.dav_ns, "principal-URL") ([], [Xml.dav_node "href" [ Xml.Pcdata "something arbitrary" ]]) Xml.PairMap.empty in
+  Alcotest.(check bool __LOC__ false (Lwt_main.run @@ Dav.access_granted_for_acl fs path http_verb user_props))
+
 let webdav_acl_tests = [
-  "get calendars, granted for all", `Quick, get_calendars_grant_all 
-(*  "get calendars, denied for all", `Quick,  
-  "get calendars, granted for user", `Quick,  *)
+  "get calendars, granted for all", `Quick, get_calendars_grant_all ;
+  "get calendars, denied for all", `Quick, get_calendars_deny_all ;
+  "get calendars, granted for user", `Quick, get_calendars_grant_user_test ; 
 ]
 
 let tests = [
