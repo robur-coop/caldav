@@ -1,16 +1,11 @@
 open Cohttp_lwt_unix
 open Lwt.Infix
+open Caldav.Webdav_config
 
-module Fs = Caldav.Webdav_fs
+module Fs = Caldav.Webdav_fs.Make(FS_unix)
 module Xml = Caldav.Webdav_xml
-module Dav = Caldav.Webdav_api
-
-type config = {
-  principals : string ;
-  calendars : string ;
-  host : Uri.t ;
-  user_password : (string * string) list
-}
+module Dav = Caldav.Webdav_api.Make(Fs)
+type file_or_dir = Caldav.Webdav_fs.file_or_dir
 
 (* Apply the [Webmachine.Make] functor to the Lwt_unix-based IO module
  * exported by cohttp. For added convenience, include the [Rd] module
@@ -400,7 +395,7 @@ let make_dir fs ?(resourcetype = []) ?(props=[]) dir =
   let propmap =
     let resourcetype' = Xml.node ~ns:Xml.dav_ns "collection" [] :: resourcetype in
     Xml.create_properties ~content_type:"text/directory" ~resourcetype:resourcetype'
-      (Ptime.to_rfc3339 (Ptime_clock.now ())) 0 (Fs.basename (dir :> Fs.file_or_dir))
+      (Ptime.to_rfc3339 (Ptime_clock.now ())) 0 (Fs.basename (dir :> file_or_dir))
   in
   let propmap' = List.fold_left (fun p (k, v) -> Xml.PairMap.add k v p) propmap props in
   Fs.mkdir fs dir propmap'
@@ -475,7 +470,7 @@ let make_user ?(props = []) fs config name =
   make_dir_if_not_present fs (`Dir [ config.principals ]) >>= fun _ ->
   let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
   let user_home = `Dir [ config.principals ; name ] in
-  let url = Uri.with_path config.host (Fs.to_string (user_home :> Fs.file_or_dir)) in
+  let url = Uri.with_path config.host (Fs.to_string (user_home :> file_or_dir)) in
   let props' =
     ((Xml.dav_ns, "principal-URL"),
      ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata (Uri.to_string url) ] ]))
@@ -503,7 +498,7 @@ let make_group fs config name members =
   in
   let group_key = (Xml.dav_ns, "group-membership") in
   Lwt_list.iter_p (fun path ->
-      let f_or_d = (Fs.dir_from_string path :> Fs.file_or_dir) in
+      let f_or_d = (Fs.dir_from_string path :> file_or_dir) in
       Fs.get_property_map fs f_or_d >>= function
       | None -> Lwt.return_unit
       | Some props ->
@@ -538,7 +533,7 @@ let main () =
       ("nobody", hash_password "1") ]
   } in
   (* create the file system *)
-  Fs.connect "/tmp/calendar" >>= fun fs ->
+  FS_unix.connect "/tmp/calendar" >>= fun fs ->
   (* only for apple test suite *)
   initialise_fs fs config >>= fun () ->
   init_users fs config >>= fun () ->

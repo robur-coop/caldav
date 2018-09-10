@@ -1,6 +1,6 @@
 module Xml = Caldav.Webdav_xml
-module Dav = Caldav.Webdav_api
-module Fs = Caldav.Webdav_fs
+module Fs = Caldav.Webdav_fs.Make(Mirage_fs_mem)
+module Dav = Caldav.Webdav_api.Make(Fs)
 
 let header = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
 
@@ -535,7 +535,7 @@ let appendix_b_data =
       let ts = Ptime.v (1, 0L) in
       Ptime.to_rfc3339 ts
     in
-    Fs.connect "/tmp/caldavtest" >>= fun res_fs ->
+    Mirage_fs_mem.connect "/tmp/caldavtest" >>= fun res_fs ->
     let props name = Xml.create_properties ~resourcetype:([Xml.dav_node "collection" []]) now 0 name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
@@ -556,7 +556,7 @@ let appendix_b_1_data =
       let ts = Ptime.v (1, 0L) in
       Ptime.to_rfc3339 ts
     in
-    Fs.connect "" >>= fun res_fs ->
+    Mirage_fs_mem.connect "" >>= fun res_fs ->
     let props name = Xml.create_properties ~resourcetype:([Xml.dav_node "collection" []]) now 0 name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
@@ -1206,7 +1206,7 @@ let mkcol_success () =
   let res_fs, r =
     Lwt_main.run (
       let now = Ptime.v (1, 0L) in
-      Fs.connect "" >>= fun res_fs ->
+      Mirage_fs_mem.connect "" >>= fun res_fs ->
       let content = {_|<?xml version="1.0" encoding="utf-8" ?>
 <D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-02T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
       in
@@ -1226,7 +1226,7 @@ let delete_test () =
   let res_fs, r =
     Lwt_main.run (
       let open Lwt.Infix in
-      Fs.connect "" >>= fun res_fs ->
+      Mirage_fs_mem.connect "" >>= fun res_fs ->
       let content = {_|<?xml version="1.0" encoding="utf-8" ?>
 <D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-02T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
       in
@@ -1235,7 +1235,7 @@ let delete_test () =
       Mirage_fs_mem.mkdir res_fs "home" >>= fun _ ->
       Mirage_fs_mem.write res_fs "home/.prop.xml" 0
         (Cstruct.of_string content) >>= fun _ ->
-      Fs.connect "" >>= fun fs ->
+      Mirage_fs_mem.connect "" >>= fun fs ->
       let now = Ptime.v (10, 0L) in
       let content' = {_|<?xml version="1.0" encoding="utf-8" ?>
 <D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-11T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
@@ -1252,12 +1252,39 @@ let webdav_api_tests = [
   "delete", `Quick, delete_test
 ]
 
+
+let grant_test config =
+  let url = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; "test" ])) in
+  (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`Href url, `Grant [ `Read ]) ; Xml.ace_to_xml (`Href url, `Grant [ `Write ]) ])
+
+let deny_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Deny [ `All ]) ])
+let grant_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Grant [ `All ]) ])
+
+let get_calendars_grant_all () =
+  let fs = Lwt_main.run (
+    let open Lwt.Infix in
+    Mirage_fs_mem.connect "" >>= fun res_fs ->
+    let props = Xml.create_properties ts len filename in
+    let props' = Xml.PairMap.add (fst grant_all) (snd grant_all) props in
+    let path = "calendars" in
+    Fs.mkdir fs (`Dir [path]) props') in
+  let http_verb = `GET in
+  let user_props = Xml.PairMap.add (Xml.dav_ns, "principal-URL") ([], [Xml.dav_node "href" [ Xml.Pcdata "something arbitrary" ]]) Xml.PairMap.empty in
+  Alcotest.(check bool __LOC__ true Dav.evaluate_acl fs path http_verb user_props)
+
+let webdav_acl_tests = [
+  "get calendars, granted for all", `Quick, get_calendars_grant_all 
+(*  "get calendars, denied for all", `Quick,  
+  "get calendars, granted for user", `Quick,  *)
+]
+
 let tests = [
   "Read propfind", parse_propfind_xml_tests ;
   "Read propertyupdate", parse_propupdate_xml_tests ;
   "Report parse tests", report_parse_tests ;
   "Report tests", report_tests ;
-  "Webdav API", webdav_api_tests
+  "Webdav API", webdav_api_tests ;
+  "ACL tests", webdav_acl_tests
 ]
 
 let () =
