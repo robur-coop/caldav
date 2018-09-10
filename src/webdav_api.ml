@@ -816,23 +816,8 @@ module Make(Fs: Webdav_fs.S) = struct
      |                                 | <D:write-content>               |
      | MKACTIVITY                      | <D:write-content> on parent     |
      |                                 | collection                      | *)
-  
-  (* TODO groups only one level deep right now *)
-  let identities props =
-    let url = function
-      | Xml.Node (_, "href", _, [ Xml.Pcdata url ]) -> [ Uri.of_string url ]
-      | _ -> []
-    in
-    let urls n = List.flatten (List.map url n) in
-    match
-      Xml.get_prop (Xml.dav_ns, "principal-URL") props,
-      Xml.get_prop (Xml.dav_ns, "group-membership") props
-    with
-    | None, _ -> []
-    | Some (_, principal), Some (_, groups) -> urls principal @ urls groups
-    | Some (_, principal), None -> urls principal
-  
-  let privilege_met requirements privs =
+
+    let privilege_met requirements privs =
     List.exists (fun priv ->
       match requirements, priv with
         | _, `All -> true
@@ -850,7 +835,22 @@ module Make(Fs: Webdav_fs.S) = struct
         | `Bind, `Bind -> true
         | `Unbind, `Unbind -> true
         | _ -> false) privs
-  
+ 
+  (* TODO groups only one level deep right now *)
+  let identities props =
+    let url = function
+      | Xml.Node (_, "href", _, [ Xml.Pcdata url ]) -> [ Uri.of_string url ]
+      | _ -> []
+    in
+    let urls n = List.flatten (List.map url n) in
+    match
+      Xml.get_prop (Xml.dav_ns, "principal-URL") props,
+      Xml.get_prop (Xml.dav_ns, "group-membership") props
+    with
+    | None, _ -> []
+    | Some (_, principal), Some (_, groups) -> urls principal @ urls groups
+    | Some (_, principal), None -> urls principal
+   
   let read_acl fs path target_or_parent =
     (match target_or_parent with
     | `Target -> Fs.from_string fs path
