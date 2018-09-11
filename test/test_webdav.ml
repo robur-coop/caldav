@@ -1,6 +1,7 @@
 module Xml = Caldav.Webdav_xml
 module Fs = Caldav.Webdav_fs.Make(Mirage_fs_mem)
 module Dav = Caldav.Webdav_api.Make(Fs)
+module Properties = Caldav.Properties
 
 open Caldav.Webdav_config
 
@@ -538,11 +539,11 @@ let appendix_b_data =
       Ptime.to_rfc3339 ts
     in
     Mirage_fs_mem.connect "/tmp/caldavtest" >>= fun res_fs ->
-    let props name = Xml.create_properties ~resourcetype:([Xml.dav_node "collection" []]) now 0 name in
+    let props name = Properties.create ~resourcetype:([Xml.dav_node "collection" []]) now 0 name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
     Lwt_list.iter_s (fun (fn, etag, data) ->
-        let props = Xml.create_properties ~content_type:"text/calendar" ~etag 
+        let props = Properties.create ~content_type:"text/calendar" ~etag 
             now (String.length data) ("bernard/work/" ^ fn)
         in
         Fs.write res_fs (`File [ "bernard" ; "work" ; fn ])
@@ -559,12 +560,12 @@ let appendix_b_1_data =
       Ptime.to_rfc3339 ts
     in
     Mirage_fs_mem.connect "" >>= fun res_fs ->
-    let props name = Xml.create_properties ~resourcetype:([Xml.dav_node "collection" []]) now 0 name in
+    let props name = Properties.create ~resourcetype:([Xml.dav_node "collection" []]) now 0 name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
     (match Appendix_b.all with
     | (fn, etag, data) :: _ ->
-        let props = Xml.create_properties ~content_type:"text/calendar" ~etag 
+        let props = Properties.create ~content_type:"text/calendar" ~etag 
             now (String.length data) ("bernard/work/" ^ fn)
         in
         Fs.write res_fs (`File [ "bernard" ; "work" ; fn ])
@@ -1261,8 +1262,8 @@ let principal_url principal = Uri.with_path config.host (Fs.to_string (`Dir [ co
 let test_fs_with_acl path acl = Lwt_main.run (
   let open Lwt.Infix in
   Mirage_fs_mem.connect "" >>= fun fs ->
-  let props = Xml.create_properties (Ptime.to_rfc3339(Ptime_clock.now ())) 0 path in
-  let props' = Xml.PairMap.add (Xml.dav_ns, "acl") acl props in
+  let props = Properties.create (Ptime.to_rfc3339(Ptime_clock.now ())) 0 path in
+  let props' = Properties.add (Xml.dav_ns, "acl") acl props in
   Fs.mkdir fs (`Dir [path]) props' >|= fun _ -> fs)
 
 let deny_all = "deny all", [ (`All, `Deny [ `All ]) ]
@@ -1306,10 +1307,10 @@ let grant_write_acl =
 
 let user principal =
   principal,
-  Xml.PairMap.add
+  Properties.add
     (Xml.dav_ns, "principal-URL")
     ([], [Xml.dav_node "href" [ Xml.Pcdata (Uri.to_string @@ principal_url principal) ]])
-    Xml.PairMap.empty
+    Properties.empty
 
 let test_cases_for_get = [
   (grant_all, user "any", true);

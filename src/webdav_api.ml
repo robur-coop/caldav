@@ -33,7 +33,7 @@ sig
   val read : state -> string ->
   *)
 
-  val access_granted_for_acl : state -> string -> Cohttp.Code.meth -> Webdav_fs.propmap -> bool Lwt.t
+  val access_granted_for_acl : state -> string -> Cohttp.Code.meth -> Properties.t -> bool Lwt.t
 end
 
 module Make(Fs: Webdav_fs.S) = struct
@@ -59,7 +59,7 @@ module Make(Fs: Webdav_fs.S) = struct
       | true ->
         let props =
           let etag = match etag with None -> compute_etag data | Some e -> e in
-          Xml.create_properties ~content_type ~etag
+          Properties.create ~content_type ~etag
             (Ptime.to_rfc3339 (Ptime_clock.now ()))
             (String.length data) (Fs.to_string (`File file))
         in
@@ -75,7 +75,7 @@ module Make(Fs: Webdav_fs.S) = struct
       Fs.get_property_map state (`Dir parent) >>= function
       | None -> assert false
       | Some map ->
-        let map' = Xml.PairMap.add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
+        let map' = Properties.add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
         Fs.write_property_map state (`Dir parent) map' >>= function
         | Error e -> assert false
         | Ok () -> match parent with
@@ -102,19 +102,64 @@ module Make(Fs: Webdav_fs.S) = struct
     | Some "infinity" -> Ok `Infinity
     | _ -> Error `Bad_request
 
-  let propfind_request_to_selector = function
-    | `Propname -> (fun m -> [`OK, List.map (fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings m)])
-    | `All_prop includes -> (fun m -> [`OK, Xml.props_to_tree m]) (* TODO: finish this *)
-    | `Props ps -> (fun m -> Xml.find_props ps m)
-
   let uri_string host f_or_d =
     Uri.to_string @@ Uri.with_path host (Fs.to_string f_or_d)
+
+  (* TODO groups only one level deep right now *)
+  let identities props =
+    let url = function
+      | Xml.Node (_, "href", _, [ Xml.Pcdata url ]) -> [ Uri.of_string url ]
+      | _ -> []
+    in
+    let urls n = List.flatten (List.map url n) in
+    match
+      Properties.find (Xml.dav_ns, "principal-URL") props,
+      Properties.find (Xml.dav_ns, "group-membership") props
+    with
+    | None, _ -> []
+    | Some (_, principal), Some (_, groups) -> urls principal @ urls groups
+    | Some (_, principal), None -> urls principal
+
+
+  let current_user_privilege_set auth_user_props aces =
+    let aces' = List.filter (function
+        | `All, _ -> true
+        | `Href principal, _ -> List.exists (Uri.equal principal) (identities auth_user_props)
+        | _ -> assert false) aces
+    in
+    let privs =
+      List.flatten @@
+        List.map (function `Grant ps -> ps | `Deny _ -> [])
+          (List.map snd aces')
+    in
+    Xml.dav_node "current-user-privilege-set"
+      (List.map (fun p -> Xml.dav_node "privilege" [ Xml.priv_to_xml p ]) privs)
+
+  (* TODO extract map and sort *)
+  let find_props allowed_props ps m =
+    let (found, not_found) =
+      List.fold_left (fun (s, f) (ns, k) -> match Properties.find (ns, k) m with
+          | None        -> (s, Xml.node ~ns k [] :: f)
+          | Some (a, v) -> (Xml.node ~ns ~a k v :: s, f))
+        ([], []) ps
+    in
+    match found, not_found with
+    | [], [] -> []
+    | [], nf -> [ (`Not_found, nf) ]
+    | f, [] -> [ (`OK, f) ]
+    | f, nf -> [ (`OK, f) ; (`Not_found, nf) ]
 
   let property_selector fs host request f_or_d =
     Fs.get_property_map fs f_or_d >|= function
     | None -> `Not_found
     | Some map ->
-      let propstats = (propfind_request_to_selector request) map in
+      let allowed_props = [] in
+      (* results for props, grouped by code *)
+      let propstats = match request with
+        | `Propname -> [`OK, List.map (fun (ns, k) -> Xml.node ~ns k []) @@ Properties.keys map]
+        | `All_prop includes -> [`OK, Properties.to_trees map] (* TODO: finish this *)
+        | `Props ps -> find_props allowed_props ps map
+      in
       let ps = List.map propstat_node propstats in
       let selected_properties =
         Xml.dav_node "response"
@@ -169,7 +214,7 @@ module Make(Fs: Webdav_fs.S) = struct
       | Error e -> None, (e, k)
       | Ok () ->
         (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
-        let map = Xml.PairMap.add k v m in
+        let map = Properties.add k v m in
         Some map, (`OK, k)
     in
     (* if an update did not apply, m will be None! *)
@@ -180,7 +225,7 @@ module Make(Fs: Webdav_fs.S) = struct
         let (m, p) = set_prop k (a, v) m in
         (m, p :: propstats)
       | Some m, `Remove k ->
-        let map = Xml.PairMap.remove k m in
+        let map = Properties.remove k m in
         Some map, (`OK, k) :: propstats
     in
     match List.fold_left apply (m, []) updates with
@@ -251,7 +296,7 @@ module Make(Fs: Webdav_fs.S) = struct
     | false -> Lwt.return (Error `Conflict)
     | true ->
       let default_props =
-        Xml.create_properties ~content_type:"text/directory"
+        Properties.create ~content_type:"text/directory"
           ~resourcetype:[ Xml.node ~ns:Xml.dav_ns "collection" [] ]
           (Ptime.to_rfc3339 now) 0
           (Fs.to_string (`Dir dir))
@@ -667,8 +712,8 @@ module Make(Fs: Webdav_fs.S) = struct
 
   let apply_transformation (t : Xml.report_prop option) d map = match t with
     | None -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics ~cr:false d)]]]
-    | Some `All_props -> [`OK, Xml.props_to_tree map]
-    | Some `Propname -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings map)]
+    | Some `All_props -> [`OK, Properties.to_trees map]
+    | Some `Propname -> [`OK, List.map ( fun (ns, k) -> Xml.node ~ns k []) @@ Properties.keys map]
     | Some `Proplist ps ->
       let props, calendar_data_transform = List.partition (function `Prop _ -> true | _ -> false) ps in
       let calendar_data_transform' = match calendar_data_transform with
@@ -681,7 +726,8 @@ module Make(Fs: Webdav_fs.S) = struct
         | None -> d, None
         | Some ((filter, _, _) as tr) -> select_calendar_data d tr, filter
       in
-      let found_props = Xml.find_props props' map in
+      (* TODO allowed_props *)
+      let found_props = find_props [] props' map in
       let ok_props, rest_props = List.partition (fun (st, _) -> st = `OK) found_props in
       let ok_props' = List.flatten (List.map snd ok_props) in
       match snd output with (* kill whole calendar if comps are empty *)
@@ -836,21 +882,6 @@ module Make(Fs: Webdav_fs.S) = struct
         | `Unbind, `Unbind -> true
         | _ -> false) privs
 
-  (* TODO groups only one level deep right now *)
-  let identities props =
-    let url = function
-      | Xml.Node (_, "href", _, [ Xml.Pcdata url ]) -> [ Uri.of_string url ]
-      | _ -> []
-    in
-    let urls n = List.flatten (List.map url n) in
-    match
-      Xml.get_prop (Xml.dav_ns, "principal-URL") props,
-      Xml.get_prop (Xml.dav_ns, "group-membership") props
-    with
-    | None, _ -> []
-    | Some (_, principal), Some (_, groups) -> urls principal @ urls groups
-    | Some (_, principal), None -> urls principal
-
   let read_acl fs path target_or_parent =
     (match target_or_parent with
      | `Target -> Fs.from_string fs path
@@ -861,7 +892,7 @@ module Make(Fs: Webdav_fs.S) = struct
         Printf.printf "forbidden: no property map found!\n" ;
         []
       | Some props ->
-        match Xml.get_prop (Xml.dav_ns, "acl") props with
+        match Properties.find (Xml.dav_ns, "acl") props with
         | None ->
           Printf.printf "ACL not present for %s\n" path ;
           []
@@ -876,7 +907,7 @@ module Make(Fs: Webdav_fs.S) = struct
     let aces''' = List.filter (function
         | `All, _ -> true
         | `Href principal, _ -> List.exists (Uri.equal principal) (identities auth_user_props)
-        | _ -> assert false)  aces''
+        | _ -> assert false) aces''
     in
     Format.printf "aces''' is %a\n%!" Fmt.(list ~sep:(unit "; ") Xml.pp_ace) aces''' ;
     if aces''' = []

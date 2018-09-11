@@ -5,6 +5,7 @@ open Caldav.Webdav_config
 module Fs = Caldav.Webdav_fs.Make(FS_unix)
 module Xml = Caldav.Webdav_xml
 module Dav = Caldav.Webdav_api.Make(Fs)
+module Properties = Caldav.Properties
 type file_or_dir = Caldav.Webdav_fs.file_or_dir
 
 (* Apply the [Webmachine.Make] functor to the Lwt_unix-based IO module
@@ -28,7 +29,7 @@ let list_dir fs (`Dir dir) =
     Fs.get_property_map fs f_or_d >|= function
     | None -> assert false
     | Some m ->
-      let last_modified = match Xml.get_prop (Xml.dav_ns, "getlastmodified") m with
+      let last_modified = match Properties.find (Xml.dav_ns, "getlastmodified") m with
         | Some (_, [ Xml.Pcdata lm ]) -> lm
         | _ -> assert false
       in
@@ -75,7 +76,7 @@ let directory_as_ics fs (`Dir dir) =
     | Some props ->
       let empty = Icalendar.Params.empty in
       let name =
-        match Xml.get_prop (Xml.dav_ns, "displayname") props with
+        match Properties.find (Xml.dav_ns, "displayname") props with
         | Some (_, [ Xml.Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), empty, name) ]
         | _ -> []
       in
@@ -178,7 +179,7 @@ class handler config fs = object(self)
         Wm.continue (`String data) rd
     | `File f ->
       Fs.read fs (`File f) >>== fun (data, props) ->
-      let ct = match Xml.get_prop (Xml.dav_ns, "getcontenttype") props with
+      let ct = match Properties.find (Xml.dav_ns, "getcontenttype") props with
         | Some (_, [ Xml.Pcdata ct ]) -> ct
         | _ -> "text/calendar" in
       let rd =
@@ -245,7 +246,7 @@ class handler config fs = object(self)
     let get_property_map_for_user name =
       let user_path = `Dir [ config.principals ; name ] in
       Fs.get_property_map fs user_path >|= function
-      | None -> Xml.PairMap.empty
+      | None -> Properties.empty
       | Some x -> x
     in
     get_property_map_for_user user >>= fun auth_user_props ->
@@ -338,7 +339,7 @@ class handler config fs = object(self)
     | Ok f_or_d ->
       Fs.get_property_map fs f_or_d >|= (function
           | None -> None
-          | Some map -> match Xml.get_prop (Xml.dav_ns, "getlastmodified") map with
+          | Some map -> match Properties.find (Xml.dav_ns, "getlastmodified") map with
             | Some (_, [ Xml.Pcdata lm]) -> Some lm
             | _ -> None) >>= fun res ->
       Wm.continue res rd
@@ -351,13 +352,13 @@ class handler config fs = object(self)
       | None -> Wm.continue None rd
       | Some map ->
         let rd' =
-          match Xml.get_prop (Xml.dav_ns, "getlastmodified") map with
+          match Properties.find (Xml.dav_ns, "getlastmodified") map with
           | Some (_, [ Xml.Pcdata lm ]) ->
             let add_headers h = Cohttp.Header.add_list h [ ("Last-Modified", lm) ] in
             Wm.Rd.with_resp_headers add_headers rd
           | _ -> rd
         in
-        let etag = match Xml.get_prop (Xml.dav_ns, "getetag") map with
+        let etag = match Properties.find (Xml.dav_ns, "getetag") map with
           | Some (_, [ Xml.Pcdata etag ]) -> Some etag
           | _ -> None
         in
@@ -394,10 +395,10 @@ let carddav_ns = "urn:ietf:params:xml:ns:carddav"
 let make_dir fs ?(resourcetype = []) ?(props=[]) dir =
   let propmap =
     let resourcetype' = Xml.node ~ns:Xml.dav_ns "collection" [] :: resourcetype in
-    Xml.create_properties ~content_type:"text/directory" ~resourcetype:resourcetype'
+    Properties.create ~content_type:"text/directory" ~resourcetype:resourcetype'
       (Ptime.to_rfc3339 (Ptime_clock.now ())) 0 (Fs.basename (dir :> file_or_dir))
   in
-  let propmap' = List.fold_left (fun p (k, v) -> Xml.PairMap.add k v p) propmap props in
+  let propmap' = List.fold_left (fun p (k, v) -> Properties.add k v p) propmap props in
   Fs.mkdir fs dir propmap'
 
 let make_dir_if_not_present fs ?resourcetype ?props dir =
@@ -502,9 +503,9 @@ let make_group fs config name members =
       Fs.get_property_map fs f_or_d >>= function
       | None -> Lwt.return_unit
       | Some props ->
-        let props' = match Xml.get_prop group_key props with
-          | None -> Xml.PairMap.add group_key ([], [ group_node ]) props
-          | Some (attrs, groups) -> Xml.PairMap.add group_key (attrs, group_node :: groups) props
+        let props' = match Properties.find group_key props with
+          | None -> Properties.add group_key ([], [ group_node ]) props
+          | Some (attrs, groups) -> Properties.add group_key (attrs, group_node :: groups) props
         in
         Fs.write_property_map fs f_or_d props' >>= fun _ ->
         Lwt.return_unit)

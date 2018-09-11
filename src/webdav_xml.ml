@@ -228,57 +228,6 @@ let tree_to_tyxml t =
 
 let tree_to_string t = tyxml_to_body @@ tree_to_tyxml t
 
-module PairMap = Map.Make (struct
-  type t = string * string
-  let compare (a1, a2) (b1, b2) = match String.compare a1 b1 with
-    | 0 -> String.compare a2 b2
-    | x -> x
-  end)
-
-let props_to_tree m =
-  PairMap.fold (fun (ns, k) (a, v) acc ->
-    node ~ns ~a k v :: acc) m []
-
-let props_to_string m =
-  let c = props_to_tree m in
-  tree_to_string (node ~ns:dav_ns "prop" c)
-
-let find_props ps m =
-  let (found, not_found) =
-    List.fold_left (fun (s, f) (ns, k) -> match PairMap.find_opt (ns, k) m with
-        | None        -> (s, node ~ns k [] :: f)
-        | Some (a, v) -> (node ~ns ~a k v :: s, f))
-      ([], []) ps
-  in
-  match found, not_found with
-  | [], [] -> []
-  | [], nf -> [ (`Not_found, nf) ]
-  | f, [] -> [ (`OK, f) ]
-  | f, nf -> [ (`OK, f) ; (`Not_found, nf) ]
-
-let create_properties ?(content_type = "text/html") ?(language = "en") ?etag ?(resourcetype = []) timestamp length filename =
-  let filename = if filename = "" then "hinz und kunz" else filename in
-  let etag' m = match etag with None -> m | Some e -> PairMap.add (dav_ns, "getetag") ([], [ Pcdata e ]) m in
-  etag' @@
-  PairMap.add (dav_ns, "creationdate") ([], [ Pcdata timestamp ]) @@
-  PairMap.add (dav_ns, "displayname") ([], [ Pcdata filename ]) @@
-  PairMap.add (dav_ns, "getcontentlanguage") ([], [ Pcdata language ]) @@
-  PairMap.add (dav_ns, "getcontenttype") ([], [ Pcdata content_type ]) @@
-  PairMap.add (dav_ns, "getcontentlength") ([], [ Pcdata (string_of_int length) ]) @@
-  PairMap.add (dav_ns, "getlastmodified") ([], [ Pcdata timestamp ]) @@
-  (* PairMap.add "lockdiscovery" *)
-  PairMap.add (dav_ns, "resourcetype") ([], resourcetype) PairMap.empty
-  (* PairMap.add "supportedlock" *)
-
-let prop_tree_to_map t =
-  match t with
-  | Node (_, "prop", _, children) ->
-    List.fold_left (fun m c -> match c with
-        | Node (ns, k, a, v) -> PairMap.add (ns, k) (a, v) m
-        | Pcdata _ -> assert false)
-      PairMap.empty children
-  | _ -> assert false
-
 let is_whitespace_node = function
   | Pcdata str -> Astring.String.for_all (function ' ' | '\n' | '\r' | '\t' -> true | _ -> false) str
   | Node _ -> false
@@ -794,8 +743,6 @@ let parse_mkcol_xml tree =
       set_parser
   in
   run mkcol tree
-
-let get_prop p map = PairMap.find_opt p map
 
 let ptime_to_http_date ptime =
   let (y, m, d), ((hh, mm, ss), _)  = Ptime.to_date_time ptime
