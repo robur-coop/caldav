@@ -7,7 +7,7 @@ sig
     (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
       result Lwt.t
 
-  val propfind : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> depth:string option ->
+  val propfind : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> user:Webdav_fs.file_or_dir -> depth:string option ->
     (tree, [ `Bad_request | `Forbidden of tree | `Property_not_found ]) result Lwt.t
 
   val proppatch : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree ->

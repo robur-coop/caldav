@@ -15,8 +15,12 @@ val find : Xml.fqname -> t -> (Xml.attribute list * Xml.tree list) option
 
 val to_string : t -> string
 
-val to_trees : t -> Xml.tree list
-
 val from_tree : Xml.tree -> t
 
-val keys : t -> Xml.fqname list
+val allprop : t -> Xml.tree list
+
+val identities : t -> Uri.t list
+
+val current_user_privilege_set : userprops:t -> t -> (Xml.attribute list * Xml.tree list) option
+
+val propname : t -> Xml.tree list

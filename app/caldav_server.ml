@@ -255,12 +255,17 @@ class handler config fs = object(self)
 
   method private process_propfind rd path =
     let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
+    let user =
+      match Cohttp.Header.get rd.Wm.Rd.req_headers "Authorization" with
+      | None -> assert false
+      | Some user -> (`Dir [ config.principals ; user ])
+    in
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "PROPFIND: %s\n%!" body;
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
-      Dav.propfind fs ~host:config.host ~path tree ~depth >>= function
+      Dav.propfind fs ~host:config.host ~path tree ~user ~depth >>= function
       | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Property_not_found -> Wm.continue `Property_not_found rd
       | Error (`Forbidden b) -> Wm.respond ~body:(`String (Xml.tree_to_string b)) (to_status `Forbidden) rd
