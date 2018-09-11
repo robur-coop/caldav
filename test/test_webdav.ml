@@ -1305,6 +1305,10 @@ let grant_write_acl =
   let url = principal_url "write-acl" in
   "grant for user write-acl", [ (`Href url, `Grant [ `Write_acl ]) ]
 
+let grant_read_current_user_privilege_set =
+  let url = principal_url "read-current-user-privilege-set" in
+  "grant for user read-current-user-privilege-set", [ (`Href url, `Grant [ `Read_current_user_privilege_set ]) ]
+
 let user principal =
   principal,
   Properties.add
@@ -1324,6 +1328,7 @@ let test_cases_for_get = [
   (grant_write_properties, user "write-props", false); (grant_write_properties, user "invader", false);
   (grant_write_content, user "write-content", false); (grant_write_content, user "invader", false);
   (grant_write_acl, user "write-acl", false); (grant_write_acl, user "invader", false);
+  (grant_read_current_user_privilege_set, user "read-current-user-privilege-set", false); (grant_read_current_user_privilege_set, user "invader", false);
 ]
 
 let test_cases_for_put_target_exists = [
@@ -1338,6 +1343,7 @@ let test_cases_for_put_target_exists = [
   (grant_write_properties, user "write-props", false); (grant_write_properties, user "invader", false);
   (grant_write_content, user "write-content", true); (grant_write_content, user "invader", false);
   (grant_write_acl, user "write-acl", false); (grant_write_acl, user "invader", false);
+  (grant_read_current_user_privilege_set, user "read-current-user-privilege-set", false); (grant_read_current_user_privilege_set, user "invader", false);
 ]
 
 let test_cases_for_put_not_target_exists = [
@@ -1352,6 +1358,7 @@ let test_cases_for_put_not_target_exists = [
   (grant_write_properties, user "write-props", false); (grant_write_properties, user "invader", false);
   (grant_write_content, user "write-content", false); (grant_write_content, user "invader", false);
   (grant_write_acl, user "write-acl", false); (grant_write_acl, user "invader", false);
+  (grant_read_current_user_privilege_set, user "read-current-user-privilege-set", false); (grant_read_current_user_privilege_set, user "invader", false);
 ]
 
 let test_cases_for_proppatch = [
@@ -1366,6 +1373,7 @@ let test_cases_for_proppatch = [
   (grant_write_properties, user "write-props", true); (grant_write_properties, user "invader", false);
   (grant_write_content, user "write-content", false); (grant_write_content, user "invader", false);
   (grant_write_acl, user "write-acl", false); (grant_write_acl, user "invader", false);
+  (grant_read_current_user_privilege_set, user "read-current-user-privilege-set", false); (grant_read_current_user_privilege_set, user "invader", false);
 ]
 
 let test_cases_for_acl = [
@@ -1380,6 +1388,22 @@ let test_cases_for_acl = [
   (grant_write_properties, user "write-props", false); (grant_write_properties, user "invader", false);
   (grant_write_content, user "write-content", false); (grant_write_content, user "invader", false);
   (grant_write_acl, user "write-acl", true); (grant_write_acl, user "invader", false);
+  (grant_read_current_user_privilege_set, user "read-current-user-privilege-set", false); (grant_read_current_user_privilege_set, user "invader", false);
+]
+
+let test_cases_for_propfind = [
+  (grant_all, user "any", true);
+  (deny_all, user "any", false);
+  (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
+  (grant_read_only, user "read-only", true); (grant_read_only, user "invader", false);
+  (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
+  (grant_bind, user "bind", false); (grant_bind, user "invader", false);
+  (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
+  (grant_write, user "write", false); (grant_write, user "invader", false);
+  (grant_write_properties, user "write-props", false); (grant_write_properties, user "invader", false);
+  (grant_write_content, user "write-content", false); (grant_write_content, user "invader", false);
+  (grant_write_acl, user "write-acl", false); (grant_write_acl, user "invader", false);
+  (grant_read_current_user_privilege_set, user "read-current-user-privilege-set", false); (grant_read_current_user_privilege_set, user "invader", false);
 ]
 
 (* HTTP verb * requested_path * (access control lists * authenticated user * expected result) list *)
@@ -1391,7 +1415,7 @@ let acl_test_cases = [
   `PUT,     "calendars/non_existing", test_cases_for_put_not_target_exists ;
   `Other "PROPPATCH", "calendars", test_cases_for_proppatch ;
   `Other "ACL", "calendars", test_cases_for_acl ;
-  `Other "PROPFIND", "calendars", test_cases_for_get ;
+  `Other "PROPFIND", "calendars", test_cases_for_propfind ;
 ]
 
 let request_calendars_for_acl http_verb request_path aces user_props res () =

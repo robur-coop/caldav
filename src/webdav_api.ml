@@ -842,54 +842,40 @@ module Make(Fs: Webdav_fs.S) = struct
      | MKACTIVITY                      | <D:write-content> on parent     |
      |                                 | collection                      | *)
 
-  let privilege_met requirements privs =
-    List.exists (fun priv ->
-      match requirements, priv with
-        | _, `All -> true
-        | `Read, `Read -> true
-        | `Read_acl, `Read_acl -> true
-        | `Write, `Write -> true
-        | `Write_content, `Write -> true
-        | `Write_properties, `Write -> true
-        | `Write_acl, `Write -> true
-        | `Bind, `Write -> true
-        | `Unbind, `Write -> true
-        | `Write_content, `Write_content -> true
-        | `Write_properties, `Write_properties -> true
-        | `Write_acl, `Write_acl -> true
-        | `Bind, `Bind -> true
-        | `Unbind, `Unbind -> true
-        | _ -> false) privs
+  let privilege_met requirements privilege =
+    match requirements, privilege with
+    | _, `All -> true
+    | `Read, `Read -> true
+    | `Read_acl, `Read_acl -> true
+    | `Write, `Write -> true
+    | `Write_content, `Write -> true
+    | `Write_properties, `Write -> true
+    | `Write_acl, `Write -> true
+    | `Bind, `Write -> true
+    | `Unbind, `Write -> true
+    | `Write_content, `Write_content -> true
+    | `Write_properties, `Write_properties -> true
+    | `Write_acl, `Write_acl -> true
+    | `Bind, `Bind -> true
+    | `Unbind, `Unbind -> true
+    | _ -> false
 
-  let read_acl fs path target_or_parent =
+  let read_target_or_parent_properties fs path target_or_parent =
     (match target_or_parent with
      | `Target -> Fs.from_string fs path
      | `Parent -> Lwt.return @@ Ok (Fs.parent @@ (Fs.file_from_string path :> Webdav_fs.file_or_dir) :> Webdav_fs.file_or_dir)) >>= function
-    | Error _ -> Lwt.return []
+    | Error _ -> Lwt.return Properties.empty
     | Ok f_or_d -> Fs.get_property_map fs f_or_d >|= function
       | None ->
         Printf.printf "forbidden: no property map found!\n" ;
-        []
-      | Some props ->
-        match Properties.find (Xml.dav_ns, "acl") props with
-        | None ->
-          Printf.printf "ACL not present for %s\n" path ;
-          []
-        | Some (_, aces) -> aces
+        Properties.empty
+      | Some props -> props
 
-  let access_granted_for_acl fs path http_verb auth_user_props =
+  let access_granted_for_acl fs path http_verb userprops =
     Fs.exists fs path >>= fun target_exists ->
     let requirements, target_or_parent = required_privs http_verb target_exists in
-    read_acl fs path target_or_parent >|= fun aces ->
-    let aces' = List.map Xml.xml_to_ace aces in
-    let aces'' = List.fold_left (fun acc -> function Ok ace -> ace :: acc | Error _ -> acc) [] aces' in (* TODO malformed ace? *)
-    let aces''' = List.filter (function
-        | `All, _ -> true
-        | `Href principal, _ -> List.exists (Uri.equal principal) (Properties.identities auth_user_props)
-        | _ -> assert false) aces''
-    in
-    Format.printf "aces''' is %a\n%!" Fmt.(list ~sep:(unit "; ") Xml.pp_ace) aces''' ;
-    if aces''' = []
-    then false
-    else List.exists (function (_, `Grant privs) -> privilege_met requirements privs | _ -> false) aces'''
+    read_target_or_parent_properties fs path target_or_parent >|= fun propmap ->
+    let privileges = Properties.privileges ~userprops propmap in
+    Format.printf "privileges are %a\n%!" Fmt.(list ~sep:(unit "; ") Xml.pp_privilege) privileges ;
+    List.exists (privilege_met requirements) privileges
 end

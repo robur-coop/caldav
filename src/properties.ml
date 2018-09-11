@@ -92,7 +92,7 @@ let identities props =
   | Some (_, principal), Some (_, groups) -> urls principal @ urls groups
   | Some (_, principal), None -> urls principal
 
-let current_user_privilege_set ~userprops map =
+let privileges ~userprops map =
   let aces = match find (Xml.dav_ns, "acl") map with
     | None -> []
     | Some (_, aces) -> aces
@@ -104,9 +104,8 @@ let current_user_privilege_set ~userprops map =
       | `Href principal, _ -> List.exists (Uri.equal principal) (identities userprops)
       | _ -> assert false) aces''
   in
-  let privs =
-    List.flatten @@
-    List.map (function `Grant ps -> ps | `Deny _ -> [])
-      (List.map snd aces''')
-  in
-  Some ([], (List.map (fun p -> Xml.dav_node "privilege" [ Xml.priv_to_xml p ]) privs))
+  List.flatten @@ List.map (function `Grant ps -> ps | `Deny _ -> []) (List.map snd aces''')
+
+let current_user_privilege_set ~userprops map =
+  let make_node p = Xml.dav_node "privilege" [ Xml.priv_to_xml p ] in
+  Some ([], (List.map make_node (privileges ~userprops map)))

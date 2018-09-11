@@ -19,8 +19,8 @@ val from_tree : Xml.tree -> t
 
 val allprop : t -> Xml.tree list
 
-val identities : t -> Uri.t list
+val propname : t -> Xml.tree list
 
 val current_user_privilege_set : userprops:t -> t -> (Xml.attribute list * Xml.tree list) option
 
-val propname : t -> Xml.tree list
+val privileges : userprops:t -> t -> Xml.privilege list
