@@ -1265,12 +1265,44 @@ let test_fs_with_acl path acl = Lwt_main.run (
   let props' = Xml.PairMap.add (Xml.dav_ns, "acl") acl props in
   Fs.mkdir fs (`Dir [path]) props' >|= fun _ -> fs)
 
-let grant_test =
-  let url = principal_url "test" in
+let deny_all = "deny all", [ (`All, `Deny [ `All ]) ]
+let grant_all ="grant all",  [ (`All, `Grant [ `All ]) ]
+
+let grant_read_write =
+  let url = principal_url "read-write" in
   "grant for user test", [ (`Href url, `Grant [ `Read ]) ; (`Href url, `Grant [ `Write ]) ]
 
-let deny_all = "deny all", [ (`All, `Deny [ `All ]) ]
-let grant_all ="grant all",  [ (`All, `Grant [ `Read ]) ]
+let grant_read_only =
+  let url = principal_url "read-only" in
+  "grant for user read-only", [ (`Href url, `Grant [ `Read ]) ]
+
+let grant_read_acl =
+  let url = principal_url "read-acl" in
+  "grant for user read-acl", [ (`Href url, `Grant [ `Read_acl ]) ]
+
+let grant_bind =
+  let url = principal_url "bind" in
+  "grant for user bind", [ (`Href url, `Grant [ `Bind ]) ]
+
+let grant_unbind =
+  let url = principal_url "unbind" in
+  "grant for user unbind", [ (`Href url, `Grant [ `Unbind ]) ]
+
+let grant_write =
+  let url = principal_url "write" in
+  "grant for user write", [ (`Href url, `Grant [ `Write ]) ]
+
+let grant_write_properties =
+  let url = principal_url "write-props" in
+  "grant for user write-props", [ (`Href url, `Grant [ `Write_properties ]) ]
+
+let grant_write_content =
+  let url = principal_url "write-content" in
+  "grant for user write-content", [ (`Href url, `Grant [ `Write_content ]) ]
+
+let grant_write_acl =
+  let url = principal_url "write-acl" in
+  "grant for user write-acl", [ (`Href url, `Grant [ `Write_acl ]) ]
 
 let user principal =
   principal,
@@ -1279,25 +1311,100 @@ let user principal =
     ([], [Xml.dav_node "href" [ Xml.Pcdata (Uri.to_string @@ principal_url principal) ]])
     Xml.PairMap.empty
 
-(* HTTP verb * (access control list * expected result) list *)
-let acl_test_cases = [
-  `GET,     [ (grant_all, user "any", true); (deny_all, user "any", false); (grant_test, user "test", true); (grant_test, user "invader", false) ];
-  `HEAD,    [ (grant_all, user "any", true); (deny_all, user "any", false); (grant_test, user "test", true); (grant_test, user "invader", false) ];
-  `OPTIONS, [ (grant_all, user "any", true); (deny_all, user "any", false); (grant_test, user "test", true); (grant_test, user "invader", false) ];
-  `PUT,     [ (grant_all, user "any", false); (deny_all, user "any", false); (grant_test, user "test", true); (grant_test, user "invader", false) ]
+let test_cases_for_get = [
+  (grant_all, user "any", true);
+  (deny_all, user "any", false);
+  (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
+  (grant_read_only, user "read-only", true); (grant_read_only, user "invader", false);
+  (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
+  (grant_bind, user "bind", false); (grant_bind, user "invader", false);
+  (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
+  (grant_write, user "write", false); (grant_write, user "invader", false);
+  (grant_write_properties, user "write-props", false); (grant_write_properties, user "invader", false);
+  (grant_write_content, user "write-content", false); (grant_write_content, user "invader", false);
+  (grant_write_acl, user "write-acl", false); (grant_write_acl, user "invader", false);
 ]
 
-let request_calendars_for_acl http_verb aces user_props res () =
+let test_cases_for_put_target_exists = [
+  (grant_all, user "any", true);
+  (deny_all, user "any", false);
+  (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
+  (grant_read_only, user "read-only", false); (grant_read_only, user "invader", false);
+  (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
+  (grant_bind, user "bind", false); (grant_bind, user "invader", false);
+  (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
+  (grant_write, user "write", true); (grant_write, user "invader", false);
+  (grant_write_properties, user "write-props", false); (grant_write_properties, user "invader", false);
+  (grant_write_content, user "write-content", true); (grant_write_content, user "invader", false);
+  (grant_write_acl, user "write-acl", false); (grant_write_acl, user "invader", false);
+]
+
+let test_cases_for_put_not_target_exists = [
+  (grant_all, user "any", true);
+  (deny_all, user "any", false);
+  (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
+  (grant_read_only, user "read-only", false); (grant_read_only, user "invader", false);
+  (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
+  (grant_bind, user "bind", true); (grant_bind, user "invader", false);
+  (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
+  (grant_write, user "write", true); (grant_write, user "invader", false);
+  (grant_write_properties, user "write-props", false); (grant_write_properties, user "invader", false);
+  (grant_write_content, user "write-content", false); (grant_write_content, user "invader", false);
+  (grant_write_acl, user "write-acl", false); (grant_write_acl, user "invader", false);
+]
+
+let test_cases_for_proppatch = [
+  (grant_all, user "any", true);
+  (deny_all, user "any", false);
+  (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
+  (grant_read_only, user "read-only", false); (grant_read_only, user "invader", false);
+  (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
+  (grant_bind, user "bind", false); (grant_bind, user "invader", false);
+  (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
+  (grant_write, user "write", true); (grant_write, user "invader", false);
+  (grant_write_properties, user "write-props", true); (grant_write_properties, user "invader", false);
+  (grant_write_content, user "write-content", false); (grant_write_content, user "invader", false);
+  (grant_write_acl, user "write-acl", false); (grant_write_acl, user "invader", false);
+]
+
+let test_cases_for_acl = [
+  (grant_all, user "any", true);
+  (deny_all, user "any", false);
+  (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
+  (grant_read_only, user "read-only", false); (grant_read_only, user "invader", false);
+  (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
+  (grant_bind, user "bind", false); (grant_bind, user "invader", false);
+  (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
+  (grant_write, user "write", true); (grant_write, user "invader", false);
+  (grant_write_properties, user "write-props", false); (grant_write_properties, user "invader", false);
+  (grant_write_content, user "write-content", false); (grant_write_content, user "invader", false);
+  (grant_write_acl, user "write-acl", true); (grant_write_acl, user "invader", false);
+]
+
+(* HTTP verb * requested_path * (access control lists * authenticated user * expected result) list *)
+let acl_test_cases = [
+  `GET,     "calendars", test_cases_for_get ;
+  `HEAD,    "calendars", test_cases_for_get ;
+  `OPTIONS, "calendars", test_cases_for_get ;
+  `PUT,     "calendars", test_cases_for_put_target_exists ;
+  `PUT,     "calendars/non_existing", test_cases_for_put_not_target_exists ;
+  `Other "PROPPATCH", "calendars", test_cases_for_proppatch ;
+  `Other "ACL", "calendars", test_cases_for_acl ;
+  `Other "PROPFIND", "calendars", test_cases_for_get ;
+]
+
+let request_calendars_for_acl http_verb request_path aces user_props res () =
   let path = "calendars" in
   let acl = ([], List.map Xml.ace_to_xml aces ) in
   let fs = test_fs_with_acl path acl in
-  Alcotest.(check bool __LOC__ res (Lwt_main.run @@ Dav.access_granted_for_acl fs path http_verb user_props))
+  Alcotest.(check bool __LOC__ res (Lwt_main.run @@ Dav.access_granted_for_acl fs request_path http_verb user_props))
 
-let webdav_acl_tests (http_verb, acls_results) =
+let webdav_acl_tests (http_verb, request_path, acls_results) =
   let http_verb_str = Sexplib.Sexp.to_string_hum @@ Cohttp.Code.sexp_of_meth http_verb in
   let test ((ace_str, aces), (principal_str, user_props), result) =
-    http_verb_str ^ " calendars, " ^ ace_str ^ ", principal " ^ principal_str, `Quick,
-    request_calendars_for_acl http_verb aces user_props result
+    Printf.sprintf "%s %s %s, principal %s" http_verb_str request_path ace_str principal_str,
+    `Quick,
+    request_calendars_for_acl http_verb request_path aces user_props result
   in
   List.map test acls_results
 

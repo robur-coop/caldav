@@ -1,52 +1,52 @@
-module type S = 
+module type S =
 sig
   type state
   type tree = Webdav_xml.tree
-  
+
   val mkcol : ?now:Ptime.t -> state -> Webdav_fs.dir -> tree option ->
     (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
       result Lwt.t
-  
+
   val propfind : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> depth:string option ->
     (tree, [ `Bad_request | `Forbidden of tree | `Property_not_found ]) result Lwt.t
-  
+
   val proppatch : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree ->
     (state * tree, [ `Bad_request ]) result Lwt.t
-  
+
   val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree ->
     (tree, [`Bad_request]) result Lwt.t
-  
+
   val write : state -> path:Webdav_fs.file -> ?etag:string -> content_type:string -> string ->
     (state, [ `Conflict | `Internal_server_error | `Method_not_allowed ]) result Lwt.t
-  
+
   val delete : ?now:Ptime.t -> state -> path:Webdav_fs.file_or_dir -> state Lwt.t
-  
+
   (*
   val get : state -> string ->
-  
+
   val head : state -> string ->
-  
+
   val post : state -> string -> ?? -> state
-  
+
   val put : state -> string ->
-  
+
   val read : state -> string ->
   *)
-  
+
   val access_granted_for_acl : state -> string -> Cohttp.Code.meth -> Webdav_fs.propmap -> bool Lwt.t
 end
 
 module Make(Fs: Webdav_fs.S) = struct
 
   open Lwt.Infix
-  
+
   module Xml = Webdav_xml
-  
+
   type state = Fs.t
   type tree = Webdav_xml.tree
-  
+
   let compute_etag str = Digest.to_hex @@ Digest.string str
-  
+
   let write state ~path ?etag ~content_type data =
     match path with
     | `Dir _ -> Lwt.return (Error `Method_not_allowed)
@@ -66,7 +66,7 @@ module Make(Fs: Webdav_fs.S) = struct
         Fs.write state (`File file) (Cstruct.of_string data) props >|= function
         | Error e -> Error `Internal_server_error
         | Ok () -> Ok state
-  
+
   let delete ?(now = Ptime_clock.now ()) state ~path =
     Fs.destroy state path >>= fun res ->
     let now = Ptime.to_rfc3339 now in
@@ -84,32 +84,32 @@ module Make(Fs: Webdav_fs.S) = struct
     in
     update_parent path >|= fun () ->
     state
-  
+
   let statuscode_to_string res =
     Format.sprintf "%s %s"
       (Cohttp.Code.string_of_version `HTTP_1_1)
       (Cohttp.Code.string_of_status res)
-  
+
   let propstat_node (code, props) =
     Xml.dav_node "propstat" [
       Xml.dav_node "prop" props ;
       Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string code) ] ]
-  
+
   let parse_depth = function
     | None -> Ok `Infinity
     | Some "0" -> Ok `Zero
     | Some "1" -> Ok `One
     | Some "infinity" -> Ok `Infinity
     | _ -> Error `Bad_request
-  
+
   let propfind_request_to_selector = function
     | `Propname -> (fun m -> [`OK, List.map (fun (ns, k) -> Xml.node ~ns k []) @@ List.map fst (Xml.PairMap.bindings m)])
     | `All_prop includes -> (fun m -> [`OK, Xml.props_to_tree m]) (* TODO: finish this *)
     | `Props ps -> (fun m -> Xml.find_props ps m)
-  
+
   let uri_string host f_or_d =
     Uri.to_string @@ Uri.with_path host (Fs.to_string f_or_d)
-  
+
   let property_selector fs host request f_or_d =
     Fs.get_property_map fs f_or_d >|= function
     | None -> `Not_found
@@ -121,11 +121,11 @@ module Make(Fs: Webdav_fs.S) = struct
           (Xml.dav_node "href" [ Xml.Pcdata (uri_string host f_or_d) ] :: ps)
       in
       `Single_response selected_properties
-  
+
   let multistatus nodes = Xml.dav_node "multistatus" nodes
-  
+
   let error_xml element = Xml.dav_node "error" [ Xml.dav_node element [] ]
-  
+
   let propfind fs f_or_d host req depth =
     let process_files fs host dir req els =
       Lwt_list.map_s (property_selector fs host req) (dir :: els) >|= fun answers ->
@@ -152,7 +152,7 @@ module Make(Fs: Webdav_fs.S) = struct
       Fs.listdir fs (`Dir data) >>= function
       | Error _ -> assert false
       | Ok els -> process_files fs host (`Dir data) req els
-  
+
   let propfind state ~host ~path tree ~depth =
     match parse_depth depth with
     | Error `Bad_request -> Lwt.return (Error `Bad_request)
@@ -163,7 +163,7 @@ module Make(Fs: Webdav_fs.S) = struct
         propfind state path host req depth >|= function
         | Ok body -> Ok body
         | Error e -> Error e
-  
+
   let apply_updates ?(validate_key = fun _ -> Ok ()) m updates =
     let set_prop k v m = match validate_key k with
       | Error e -> None, (e, k)
@@ -176,8 +176,8 @@ module Make(Fs: Webdav_fs.S) = struct
     let apply (m, propstats) update = match m, update with
       | None, `Set (_, k, _) -> None, (`Failed_dependency, k) :: propstats
       | None, `Remove k   -> None, (`Failed_dependency, k) :: propstats
-      | Some m, `Set (a, k, v) -> 
-        let (m, p) = set_prop k (a, v) m in 
+      | Some m, `Set (a, k, v) ->
+        let (m, p) = set_prop k (a, v) m in
         (m, p :: propstats)
       | Some m, `Remove k ->
         let map = Xml.PairMap.remove k m in
@@ -193,7 +193,7 @@ module Make(Fs: Webdav_fs.S) = struct
           | x -> x), k)
       in
       None, List.map ok_to_failed xs
-  
+
   let update_properties ?validate_key fs f_or_d updates =
     Fs.get_property_map fs f_or_d >>= fun map ->
     let map', xs = apply_updates ?validate_key map updates in
@@ -205,7 +205,7 @@ module Make(Fs: Webdav_fs.S) = struct
     | Some m -> Fs.write_property_map fs f_or_d m ) >|= function
       | Error e -> Error e
       | Ok () -> Ok propstats
-  
+
   let proppatch state ~host ~path body =
     match Xml.parse_propupdate_xml body with
     | Error _ -> Lwt.return (Error `Bad_request)
@@ -225,7 +225,7 @@ module Make(Fs: Webdav_fs.S) = struct
         in
         let status = multistatus [ nodes ] in
         Ok (state, status)
-  
+
   let body_to_props body default_props =
     match body with
     | None -> Ok default_props
@@ -242,7 +242,7 @@ module Make(Fs: Webdav_fs.S) = struct
         Printf.printf "forbidden from body_to_props!\n" ;
         Error (`Forbidden xml)
       | Some map, _ -> Ok map
-  
+
   (* assumption: path is a relative path! *)
   let mkcol ?(now = Ptime_clock.now ()) state (`Dir dir) body =
     (* TODO: move to caller *)
@@ -261,11 +261,11 @@ module Make(Fs: Webdav_fs.S) = struct
       | Ok map -> Fs.mkdir state (`Dir dir) map >|= function
         | Error _ -> Error `Conflict
         | Ok () -> Ok state
-  
+
   let check_in_bounds p s e = true
   let apply_to_params pfs p = true
   let text_matches s c n p = true
-  
+
   let apply_to_props props =
     let key p = Icalendar.Writer.cal_prop_to_ics_key p in
     function
@@ -283,7 +283,7 @@ module Make(Fs: Webdav_fs.S) = struct
       (match property with
       | None -> false
       | Some p -> text_matches substring collate negate p && apply_to_params pfs p)
-  
+
   let get_time_properties props =
     let dtstart = match List.find_opt (function `Dtstart _ -> true | _ -> false) props with
     | None -> None
@@ -295,11 +295,11 @@ module Make(Fs: Webdav_fs.S) = struct
     | Some (`Duration (_, s)) -> Some s
     | _ -> assert false
     in (dtstart, duration)
-  
+
   let add_span ts span = match Ptime.add_span ts span with
     | None -> assert false
     | Some ts' -> ts'
-  
+
   (*
         +---------------------------------------------------------------+
         | VEVENT has the DTEND property?                                |
@@ -323,18 +323,18 @@ module Make(Fs: Webdav_fs.S) = struct
         | N | N | N | N | (start <  DTSTART+P1D AND end > DTSTART)      |
         +---+---+---+---+-----------------------------------------------+
   *)
-  
+
   let date_or_datetime_to_utc_ptime timezones = function
     | `Datetime (`Utc dtstart) -> dtstart, true
     | `Datetime (`Local dtstart) -> dtstart, true
-    | `Datetime (`With_tzid (dtstart, tzid)) -> 
+    | `Datetime (`With_tzid (dtstart, tzid)) ->
        (match Icalendar.normalize_timezone dtstart tzid timezones with
        | None -> dtstart, true
        | Some ts' -> ts', true)
     | `Date start -> match Ptime.of_date_time (start, ((0, 0, 0), 0)) with
       | None -> assert false
       | Some dtstart -> dtstart, false
-  
+
   (* start and end_ mark the range,
      dtstart and dtend and duration mark the component, e.g. event *)
   let span_in_timerange range dtstart dtend duration dtstart_is_datetime =
@@ -357,7 +357,7 @@ module Make(Fs: Webdav_fs.S) = struct
     | None, None, false, true       -> start <= dtstart && end_ > dtstart
     | None, None, false, false      -> start < (dtstart + p1d) && end_ > dtstart
     | _                             -> assert false (* duration_gt_0 is dependent on duration *)
-  
+
   let real_event_in_timerange timezones event range =
     let dtstart, dtstart_is_datetime = date_or_datetime_to_utc_ptime timezones (snd event.Icalendar.dtstart) in
     let dtend, duration = match event.Icalendar.dtend_or_duration with
@@ -366,7 +366,7 @@ module Make(Fs: Webdav_fs.S) = struct
       | Some (`Dtend (_, v)) -> Some (fst (date_or_datetime_to_utc_ptime timezones v)), None
     in
     span_in_timerange range dtstart dtend duration dtstart_is_datetime
-  
+
   let expand_event_in_range timezones f acc range exceptions event =
     let (s, e) = range in
     let next_event = Icalendar.recur_events event in
@@ -387,11 +387,11 @@ module Make(Fs: Webdav_fs.S) = struct
        in_timerange acc' (next_r ())
      | _ -> acc in
     in_timerange acc (Some event)
-  
+
   let event_in_timerange timezones range exceptions event =
     let f _ _ = true in
     expand_event_in_range timezones f false range exceptions event
-  
+
   (* TODO does not match freebusy table in RFC 4791 Sec 9.9 *)
   let freebusy_in_timerange range fb =
     match
@@ -401,20 +401,20 @@ module Make(Fs: Webdav_fs.S) = struct
     | Some (`Dtstart_utc (_, dtstart)), Some (`Dtend_utc (_, dtend)) ->
       span_in_timerange range dtstart (Some dtend) None true
     | _ -> false
-  
+
   (* TODO `Todo is missing *)
   let comp_in_timerange timezones range exceptions = function
     | `Event e -> event_in_timerange timezones range exceptions e
     | `Freebusy fb -> freebusy_in_timerange range fb
     | `Timezone _  -> true
     | _ -> false
-  
+
   let date_to_ptime date = match Ptime.of_date_time (date, ((0, 0, 0), 0)) with
     | None -> assert false
     | Some t -> t
-  
+
   let ptime_to_date ts = fst @@ Ptime.to_date_time ts
-  
+
   let normalize_timestamp timezones = function
     | `Utc ts -> `Utc ts
     | `Local ts -> `Local ts
@@ -422,19 +422,19 @@ module Make(Fs: Webdav_fs.S) = struct
       match Icalendar.normalize_timezone ts tzid timezones with
       | None -> d
       | Some ts' -> `Utc ts'
-  
+
   let normalize_date_or_datetime timezones = function
     | `Date date -> `Date date
     | `Datetime dt -> `Datetime (normalize_timestamp timezones dt)
-  
+
   let normalize_dates_or_datetimes timezones = function
-    | `Dates ds -> `Dates ds 
+    | `Dates ds -> `Dates ds
     | `Datetimes dts -> `Datetimes (List.map (normalize_timestamp timezones) dts)
-  
+
   let normalize_dates_or_datetimes_or_periods timezones = function
     | #Icalendar.dates_or_datetimes as ds_or_dts -> normalize_dates_or_datetimes timezones ds_or_dts
     | `Periods ps -> `Periods (List.map (fun (ts, span, was_explicit) -> (normalize_timestamp timezones ts, span, was_explicit)) ps)
-  
+
   let expand_event range exceptions timezones event =
     let normalize = normalize_date_or_datetime timezones in
     let normalize' = normalize_dates_or_datetimes timezones in
@@ -459,13 +459,13 @@ module Make(Fs: Webdav_fs.S) = struct
       { event' with Icalendar.dtstart ; dtend_or_duration ; props = props' ; rrule = None } :: acc
     in
     expand_event_in_range timezones add_recur_id_normalize_tz [] range exceptions event
-  
+
   let expand_comp range exceptions timezones = function
     | `Event e -> List.map (fun e -> `Event e) (expand_event range exceptions timezones e)
     (* TODO normalise other timestamps with TZID as well: DUE *)
     (*| `Todo e -> List.map (fun e -> `Todo e) (expand_todo range exceptions timezones e)*)
     | _ -> []
-  
+
   (* both range and freebusy are in utc *)
   let fb_in_timerange range = function
     | `Freebusy fb ->
@@ -484,7 +484,7 @@ module Make(Fs: Webdav_fs.S) = struct
       in
       [ `Freebusy (List.filter prop_in_timerange fb) ]
     | _ -> []
-  
+
   (* transformation step *)
   let select_calendar_data (calprop, (comps : Icalendar.component list)) (requested_data: Xml.calendar_data) =
     let (_, range, freebusy) = requested_data in
@@ -517,7 +517,7 @@ module Make(Fs: Webdav_fs.S) = struct
         List.flatten (List.map (fb_in_timerange range) comps)
     in
     (calprop, limit_freebusy_set @@ limit_rec_set comps)
-  
+
   (*
   type comp_filter = [
     | `Is_defined (* represents empty filter in RFC *)
@@ -526,11 +526,11 @@ module Make(Fs: Webdav_fs.S) = struct
   ]
   and component_filter = string * comp_filter
   *)
-  
+
   let ts_in_range ts range =
     let (s, e) = range in
     Ptime.is_later ~than:s ts && Ptime.is_later ~than:ts e
-  
+
   (* TODO deal with repeating alarms *)
   let alarm_in_timerange range alarm by_parent =
     let trigger = match alarm with
@@ -546,8 +546,8 @@ module Make(Fs: Webdav_fs.S) = struct
       | Some x -> x
       in
       by_parent range d trig_rel
-  
-  
+
+
   let matches_alarm_filter by_parent alarm (comp_name, comp_filter) =
     let is_match = String.equal comp_name "VALARM" in
     match comp_filter, is_match with
@@ -561,7 +561,7 @@ module Make(Fs: Webdav_fs.S) = struct
       match tr_opt with
       | None -> true
       | Some range -> alarm_in_timerange range alarm by_parent
-  
+
   let matches_comp_filter timezones component (comp_name, comp_filter) =
     let is_match =
       String.equal comp_name (Icalendar.component_to_ics_key component)
@@ -606,7 +606,7 @@ module Make(Fs: Webdav_fs.S) = struct
                 ts_in_range alarm_start range
               | _ -> assert false
             in
-  
+
         List.exists (fun alarm -> List.exists (matches_alarm_filter by_parent alarm) cfs) alarms
       | _, `Event event ->
         let exceptions = [] in (* TODO missing! *)
@@ -633,13 +633,13 @@ module Make(Fs: Webdav_fs.S) = struct
       | _, _ -> false in
       (* TODO: treat pfs *)
       matches_timerange && matches_cfs
-  
+
   let get_timezones_for_resp calendar tzids =
     let get_timezone tzid =
       let has_matching_tzid props = List.exists (function `Timezone_id (_, (_, tzid')) -> tzid = tzid' | _ -> false) props in
       List.find (function `Timezone props -> has_matching_tzid props | _ -> false ) (snd calendar) in
     List.map get_timezone @@ Astring.String.Set.elements tzids
-  
+
   (* returns the entire calendar if any component matches the component filter.
      this is fine, because in caldav rfc and apple testsuite, each calendar only uses one component per file *)
   let vcalendar_matches_comp_filter filter (props, comps) =
@@ -664,7 +664,7 @@ module Make(Fs: Webdav_fs.S) = struct
       let matches_pfs = List.for_all (apply_to_props props) pfs in
       matches_timerange && matches_cfs && matches_pfs
     | _ -> false
-  
+
   let apply_transformation (t : Xml.report_prop option) d map = match t with
     | None -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics ~cr:false d)]]]
     | Some `All_props -> [`OK, Xml.props_to_tree map]
@@ -690,13 +690,13 @@ module Make(Fs: Webdav_fs.S) = struct
         let ics = Icalendar.to_ics ~cr:false ~filter output in
         let cs = [ Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata ics] ] in
         [`OK, ok_props' @ cs ] @ rest_props
-  
+
   let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.component_filter) data map =
     if vcalendar_matches_comp_filter filter data then
       apply_transformation transform data map
     else
       []
-  
+
   let handle_calendar_query_report calendar_query state host path =
     let report_one query = function
       | `Dir _ -> Lwt.return (Error `Bad_request)
@@ -739,7 +739,7 @@ module Make(Fs: Webdav_fs.S) = struct
             | Ok None -> acc
             | Error _ -> acc) [] responses in
         Lwt.return (Ok (multistatus responses'))
-  
+
   let handle_calendar_multiget_report (transformation, filenames) state host path =
     let report_one (filename : string) =
       Printf.printf "calendar_multiget: filename %s\n%!" filename ;
@@ -772,13 +772,13 @@ module Make(Fs: Webdav_fs.S) = struct
         | Ok r -> r :: acc
         | Error _ -> acc) [] responses in
     Lwt.return (Ok (multistatus @@ List.rev responses'))
-  
+
   let report state ~host ~path req =
     match Xml.parse_calendar_query_xml req, Xml.parse_calendar_multiget_xml req with
     | Ok calendar_query, _ -> handle_calendar_query_report calendar_query state host path
     | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget state host path
     | Error e, Error _ -> Lwt.return (Error `Bad_request)
-  
+
   let required_privs verb target_exists = match verb with
     | `GET -> `Read, `Target
     | `HEAD -> `Read, `Target
@@ -817,7 +817,7 @@ module Make(Fs: Webdav_fs.S) = struct
      | MKACTIVITY                      | <D:write-content> on parent     |
      |                                 | collection                      | *)
 
-    let privilege_met requirements privs =
+  let privilege_met requirements privs =
     List.exists (fun priv ->
       match requirements, priv with
         | _, `All -> true
@@ -835,7 +835,7 @@ module Make(Fs: Webdav_fs.S) = struct
         | `Bind, `Bind -> true
         | `Unbind, `Unbind -> true
         | _ -> false) privs
- 
+
   (* TODO groups only one level deep right now *)
   let identities props =
     let url = function
@@ -850,23 +850,23 @@ module Make(Fs: Webdav_fs.S) = struct
     | None, _ -> []
     | Some (_, principal), Some (_, groups) -> urls principal @ urls groups
     | Some (_, principal), None -> urls principal
-   
+
   let read_acl fs path target_or_parent =
     (match target_or_parent with
-    | `Target -> Fs.from_string fs path
-    | `Parent -> Lwt.return @@ Ok (Fs.parent @@ (Fs.file_from_string path :> Webdav_fs.file_or_dir) :> Webdav_fs.file_or_dir)) >>= function
+     | `Target -> Fs.from_string fs path
+     | `Parent -> Lwt.return @@ Ok (Fs.parent @@ (Fs.file_from_string path :> Webdav_fs.file_or_dir) :> Webdav_fs.file_or_dir)) >>= function
     | Error _ -> Lwt.return []
     | Ok f_or_d -> Fs.get_property_map fs f_or_d >|= function
-    | None ->
-      Printf.printf "forbidden: no property map found!\n" ;
-      []
-    | Some props ->
-      match Xml.get_prop (Xml.dav_ns, "acl") props with
       | None ->
-        Printf.printf "ACL not present for %s\n" path ;
+        Printf.printf "forbidden: no property map found!\n" ;
         []
-      | Some (_, aces) -> aces
-  
+      | Some props ->
+        match Xml.get_prop (Xml.dav_ns, "acl") props with
+        | None ->
+          Printf.printf "ACL not present for %s\n" path ;
+          []
+        | Some (_, aces) -> aces
+
   let access_granted_for_acl fs path http_verb auth_user_props =
     Fs.exists fs path >>= fun target_exists ->
     let requirements, target_or_parent = required_privs http_verb target_exists in
@@ -881,6 +881,5 @@ module Make(Fs: Webdav_fs.S) = struct
     Format.printf "aces''' is %a\n%!" Fmt.(list ~sep:(unit "; ") Xml.pp_ace) aces''' ;
     if aces''' = []
     then false
-    else
-        List.exists (function (_, `Grant privs) -> privilege_met requirements privs | _ -> false) aces'''
+    else List.exists (function (_, `Grant privs) -> privilege_met requirements privs | _ -> false) aces'''
 end
