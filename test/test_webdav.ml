@@ -1254,7 +1254,9 @@ let webdav_api_tests = [
   "delete", `Quick, delete_test
 ]
 
-let principal_url config principal = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; principal ])) 
+let config = { principals = "principals" ; calendars = "calendars" ; user_password = [] ; host = Uri.of_string "http://example.com" }
+
+let principal_url principal = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; principal ]))
 
 let test_fs_with_acl path acl = Lwt_main.run (
   let open Lwt.Infix in
@@ -1263,46 +1265,41 @@ let test_fs_with_acl path acl = Lwt_main.run (
   let props' = Xml.PairMap.add (Xml.dav_ns, "acl") acl props in
   Fs.mkdir fs (`Dir [path]) props' >|= fun _ -> fs)
 
-let grant_test config =
-  let url = principal_url config "test" in
-  ([], [ Xml.ace_to_xml (`Href url, `Grant [ `Read ]) ; Xml.ace_to_xml (`Href url, `Grant [ `Write ]) ])
+let grant_test =
+  let url = principal_url "test" in
+  "grant for user test", [ (`Href url, `Grant [ `Read ]) ; (`Href url, `Grant [ `Write ]) ]
 
-let deny_all = ([], [ Xml.ace_to_xml (`All, `Deny [ `All ]) ])
-let grant_all = ([], [ Xml.ace_to_xml (`All, `Grant [ `Read ]) ])
+let deny_all = "deny all", [ (`All, `Deny [ `All ]) ]
+let grant_all ="grant all",  [ (`All, `Grant [ `Read ]) ]
 
-let acl_test_cases = [ `GET, [true; false; true]; `HEAD, [true; false; true]; `OPTIONS, [true; false; true]; `PUT, [false; false; true ] ]
+let user principal =
+  principal,
+  Xml.PairMap.add
+    (Xml.dav_ns, "principal-URL")
+    ([], [Xml.dav_node "href" [ Xml.Pcdata (Uri.to_string @@ principal_url principal) ]])
+    Xml.PairMap.empty
 
-
-let get_calendars_grant_read_for_all http_verb res () =
-  let path = "calendars" in
-  let fs = test_fs_with_acl path grant_all in
-  let user_props = Xml.PairMap.add (Xml.dav_ns, "principal-URL") ([], [Xml.dav_node "href" [ Xml.Pcdata "something arbitrary" ]]) Xml.PairMap.empty in
-  Alcotest.(check bool __LOC__ res (Lwt_main.run @@ Dav.access_granted_for_acl fs path http_verb user_props))
-
-let get_calendars_deny_all http_verb res () =
-  let path = "calendars" in
-  let fs = test_fs_with_acl path deny_all in
-  let user_props = Xml.PairMap.add (Xml.dav_ns, "principal-URL") ([], [Xml.dav_node "href" [ Xml.Pcdata "something arbitrary" ]]) Xml.PairMap.empty in
-  Alcotest.(check bool __LOC__ res (Lwt_main.run @@ Dav.access_granted_for_acl fs path http_verb user_props))
-
-let get_calendars_grant_user_test http_verb res () =
-  let path = "calendars" in
-  let config = { principals = "principals" ; calendars = "calendars" ; user_password = [] ; host = Uri.of_string "http://example.com" } in 
-  let fs = test_fs_with_acl path (grant_test config) in
-  let url = principal_url config "test" in
-  let user_props = Xml.PairMap.add (Xml.dav_ns, "principal-URL") ([], [Xml.dav_node "href" [ Xml.Pcdata (Uri.to_string url) ]]) Xml.PairMap.empty in
-  Alcotest.(check bool __LOC__ res (Lwt_main.run @@ Dav.access_granted_for_acl fs path http_verb user_props));
-  let url = principal_url config "invader" in
-  let user_props = Xml.PairMap.add (Xml.dav_ns, "principal-URL") ([], [Xml.dav_node "href" [ Xml.Pcdata (Uri.to_string url) ]]) Xml.PairMap.empty in
-  Alcotest.(check bool __LOC__ false (Lwt_main.run @@ Dav.access_granted_for_acl fs path http_verb user_props))
-
-let webdav_acl_tests (http_verb, result) = 
-  let name = Sexplib.Sexp.to_string_hum @@ Cohttp.Code.sexp_of_meth http_verb in
-  [
-  name ^ " calendars, granted for all", `Quick, get_calendars_grant_read_for_all http_verb (List.nth result 0);
-  name ^ " calendars, denied for all", `Quick, get_calendars_deny_all http_verb (List.nth result 1);
-  name ^ " calendars, granted for user", `Quick, get_calendars_grant_user_test http_verb (List.nth result 2); 
+(* HTTP verb * (access control list * expected result) list *)
+let acl_test_cases = [
+  `GET,     [ (grant_all, user "any", true); (deny_all, user "any", false); (grant_test, user "test", true); (grant_test, user "invader", false) ];
+  `HEAD,    [ (grant_all, user "any", true); (deny_all, user "any", false); (grant_test, user "test", true); (grant_test, user "invader", false) ];
+  `OPTIONS, [ (grant_all, user "any", true); (deny_all, user "any", false); (grant_test, user "test", true); (grant_test, user "invader", false) ];
+  `PUT,     [ (grant_all, user "any", false); (deny_all, user "any", false); (grant_test, user "test", true); (grant_test, user "invader", false) ]
 ]
+
+let request_calendars_for_acl http_verb aces user_props res () =
+  let path = "calendars" in
+  let acl = ([], List.map Xml.ace_to_xml aces ) in
+  let fs = test_fs_with_acl path acl in
+  Alcotest.(check bool __LOC__ res (Lwt_main.run @@ Dav.access_granted_for_acl fs path http_verb user_props))
+
+let webdav_acl_tests (http_verb, acls_results) =
+  let http_verb_str = Sexplib.Sexp.to_string_hum @@ Cohttp.Code.sexp_of_meth http_verb in
+  let test ((ace_str, aces), (principal_str, user_props), result) =
+    http_verb_str ^ " calendars, " ^ ace_str ^ ", principal " ^ principal_str, `Quick,
+    request_calendars_for_acl http_verb aces user_props result
+  in
+  List.map test acls_results
 
 let tests = [
   "Read propfind", parse_propfind_xml_tests ;
