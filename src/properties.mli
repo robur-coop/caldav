@@ -17,10 +17,12 @@ val to_string : t -> string
 
 val from_tree : Xml.tree -> t
 
+val privileges : userprops:t -> t -> Xml.privilege list
+
+val privilege_met : requirement:Xml.privilege -> Xml.privilege list -> bool
+
+val find_many : userprops:t -> Xml.fqname list -> t -> (Cohttp.Code.status_code * Xml.tree list) list
+
 val allprop : t -> Xml.tree list
 
 val propname : t -> Xml.tree list
-
-val current_user_privilege_set : userprops:t -> t -> (Xml.attribute list * Xml.tree list) option
-
-val privileges : userprops:t -> t -> Xml.privilege list

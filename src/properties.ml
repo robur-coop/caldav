@@ -109,3 +109,57 @@ let privileges ~userprops map =
 let current_user_privilege_set ~userprops map =
   let make_node p = Xml.dav_node "privilege" [ Xml.priv_to_xml p ] in
   Some ([], (List.map make_node (privileges ~userprops map)))
+
+let privilege_met ~requirement privileges =
+  List.exists (fun privilege -> match requirement, privilege with
+  | _, `All -> true
+  | `Read, `Read -> true
+  | `Read_acl, `Read_acl -> true
+  | `Read_current_user_privilege_set, `Read_current_user_privilege_set -> true
+  | `Read_current_user_privilege_set, `Read_acl -> true
+  | `Write, `Write -> true
+  | `Write_content, `Write -> true
+  | `Write_properties, `Write -> true
+  | `Write_acl, `Write -> true
+  | `Bind, `Write -> true
+  | `Unbind, `Write -> true
+  | `Write_content, `Write_content -> true
+  | `Write_properties, `Write_properties -> true
+  | `Write_acl, `Write_acl -> true
+  | `Bind, `Bind -> true
+  | `Unbind, `Unbind -> true
+  | _ -> false ) privileges
+
+let can_read_prop fqname privileges = 
+  let requirement = match fqname with
+    | ns, "current-user-privilege-set" when ns = Xml.dav_ns -> Some `Read_current_user_privilege_set
+    | ns, "acl" when ns = Xml.dav_ns -> Some `Read_acl
+    | _ -> None
+  in
+  match requirement with 
+  | Some requirement -> privilege_met ~requirement privileges 
+  | None -> true
+
+let get_prop userprops m = function 
+| ns, "current-user-privilege-set" when ns = Xml.dav_ns -> current_user_privilege_set ~userprops m 
+| fqname -> find fqname m
+
+let find_many ~userprops property_names m =
+  let privileges = privileges ~userprops m in
+  let props = List.map (fun fqname ->
+    if can_read_prop fqname privileges
+    then match get_prop userprops m fqname with 
+      | None -> `Not_found
+      | Some v -> `Found v
+    else `Forbidden
+  ) property_names in
+  let results = List.map2 (fun (ns, name) p -> p, match p with
+  | `Found (a, c) -> Xml.node ~ns ~a name c
+  | `Forbidden  
+  | `Not_found    -> Xml.node ~ns name []) property_names props
+  in
+  (* group by return code *)
+  let found, rest = List.partition (function | `Found _, _ -> true | _ -> false) results in
+  let not_found, forbidden = List.partition (function | `Not_found, _ -> true | `Forbidden, _ -> false | `Found _, _ -> assert false) rest in
+  let apply_tag tag l = if l = [] then [] else [ tag, List.map snd l ] in
+  apply_tag `OK found @ apply_tag `Not_found not_found @ apply_tag `Forbidden forbidden
