@@ -105,24 +105,60 @@ module Make(Fs: Webdav_fs.S) = struct
   let uri_string host f_or_d =
     Uri.to_string @@ Uri.with_path host (Fs.to_string f_or_d)
 
-  (* TODO extract map and sort *)
-  let find_props userprops ps m =
-    let props = List.map (fun ((ns, name) as k) ->
-        if ns = Xml.dav_ns && name = "current-user-privilege-set" then
-          k, Properties.current_user_privilege_set ~userprops m
-        else
-          k, Properties.find k m) ps in
-    let (found, not_found) =
-      List.fold_left (fun (found, not_found) ((ns, name), v) -> match v with
-          | None        -> (found, Xml.node ~ns name [] :: not_found)
-          | Some (a, v) -> (Xml.node ~ns ~a name v :: found, not_found))
-        ([], []) props
+  let privilege_met requirement privilege =
+    match requirement, privilege with
+    | _, `All -> true
+    | `Read, `Read -> true
+    | `Read_acl, `Read_acl -> true
+    | `Read_current_user_privilege_set, `Read_current_user_privilege_set -> true
+    | `Read_current_user_privilege_set, `Read_acl -> true
+    | `Read_current_user_privilege_set, `Read -> true
+    | `Write, `Write -> true
+    | `Write_content, `Write -> true
+    | `Write_properties, `Write -> true
+    | `Write_acl, `Write -> true
+    | `Bind, `Write -> true
+    | `Unbind, `Write -> true
+    | `Write_content, `Write_content -> true
+    | `Write_properties, `Write_properties -> true
+    | `Write_acl, `Write_acl -> true
+    | `Bind, `Bind -> true
+    | `Unbind, `Unbind -> true
+    | _ -> false
+
+  let can_read_prop fqname privileges = 
+    let requirement = match fqname with
+      | ns, "current-user-privilege-set" when ns = Xml.dav_ns -> Some `Read_current_user_privilege_set
+      | ns, "acl" when ns = Xml.dav_ns -> Some `Read_acl
+      | _ -> None
     in
-    match found, not_found with
-    | [], [] -> []
-    | [], nf -> [ (`Not_found, nf) ]
-    | f, [] -> [ (`OK, f) ]
-    | f, nf -> [ (`OK, f) ; (`Not_found, nf) ]
+    match requirement with 
+    | Some r -> List.exists (privilege_met r) privileges 
+    | None -> true
+
+  let get_prop userprops m = function 
+  | ns, "current-user-privilege-set" when ns = Xml.dav_ns -> Properties.current_user_privilege_set ~userprops m 
+  | fqname -> Properties.find fqname m
+
+  let find_props userprops property_names m =
+    let privileges = Properties.privileges ~userprops m in
+    let props = List.map (fun fqname ->
+      if can_read_prop fqname privileges
+      then match get_prop userprops m fqname with 
+        | None -> `Not_found
+        | Some v -> `Found v
+      else `Forbidden
+    ) property_names in
+    let results = List.map2 (fun (ns, name) p -> p, match p with
+    | `Found (a, c) -> Xml.node ~ns ~a name c
+    | `Forbidden  
+    | `Not_found    -> Xml.node ~ns name []) property_names props
+    in
+    (* group by return code *)
+    let found, rest = List.partition (function | `Found _, _ -> true | _ -> false) results in
+    let not_found, forbidden = List.partition (function | `Not_found, _ -> true | `Forbidden, _ -> false | `Found _, _ -> assert false) rest in
+    let apply_tag tag l = if l = [] then [] else [ tag, List.map snd l ] in 
+    apply_tag `OK found @ apply_tag `Not_found not_found @ apply_tag `Forbidden forbidden
 
   let property_selector fs host propfind_request user f_or_d =
     Fs.get_property_map fs f_or_d >>= function
@@ -841,24 +877,6 @@ module Make(Fs: Webdav_fs.S) = struct
      |                                 | <D:write-content>               |
      | MKACTIVITY                      | <D:write-content> on parent     |
      |                                 | collection                      | *)
-
-  let privilege_met requirements privilege =
-    match requirements, privilege with
-    | _, `All -> true
-    | `Read, `Read -> true
-    | `Read_acl, `Read_acl -> true
-    | `Write, `Write -> true
-    | `Write_content, `Write -> true
-    | `Write_properties, `Write -> true
-    | `Write_acl, `Write -> true
-    | `Bind, `Write -> true
-    | `Unbind, `Write -> true
-    | `Write_content, `Write_content -> true
-    | `Write_properties, `Write_properties -> true
-    | `Write_acl, `Write_acl -> true
-    | `Bind, `Bind -> true
-    | `Unbind, `Unbind -> true
-    | _ -> false
 
   let read_target_or_parent_properties fs path target_or_parent =
     (match target_or_parent with
