@@ -737,28 +737,36 @@ module Make(Fs: Webdav_fs.S) = struct
     let report_one (filename : string) =
       Printf.printf "calendar_multiget: filename %s\n%!" filename ;
       let file = Fs.file_from_string filename in
-      (* TODO check if we're allowed to read the file file *)
-      Fs.read state file >|= function
-      | Error _ ->
-        let node =
-          Xml.dav_node "response"
+      Fs.get_property_map state (file :> Webdav_fs.file_or_dir) >>= fun props ->
+      let privileges = Properties.privileges ~userprops props in
+      if not (Properties.privilege_met ~requirement:`Read privileges) then
+        let node = Xml.dav_node "response"
             [ Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Webdav_fs.file_or_dir)) ] ;
-              Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Not_found) ] ]
+              Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
         in
-        Ok node
-      | Ok (data, map) ->
-        match Icalendar.parse (Cstruct.to_string data) with
-        | Error e ->
-          Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
-          Error `Bad_request
-        | Ok ics ->
-          let xs = apply_transformation transformation ics map ~userprops in
+        Lwt.return @@ Ok node
+      else
+        Fs.read state file >|= function
+        | Error _ ->
           let node =
             Xml.dav_node "response"
-              (Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Webdav_fs.file_or_dir)) ]
-               :: List.map propstat_node xs)
+              [ Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Webdav_fs.file_or_dir)) ] ;
+                Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Not_found) ] ]
           in
           Ok node
+        | Ok (data, map) ->
+          match Icalendar.parse (Cstruct.to_string data) with
+          | Error e ->
+            Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
+            Error `Bad_request
+          | Ok ics ->
+            let xs = apply_transformation transformation ics map ~userprops in
+            let node =
+              Xml.dav_node "response"
+                (Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Webdav_fs.file_or_dir)) ]
+                 :: List.map propstat_node xs)
+            in
+            Ok node
     in
     Lwt_list.map_p report_one filenames >>= fun responses ->
     (* TODO we remove individual file parse errors, should we report them back? *)
