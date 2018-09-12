@@ -5,7 +5,9 @@ type t
 val empty : t
 
 val create : ?content_type:string -> ?language:string -> ?etag:string ->
-  ?resourcetype:Xml.tree list -> string -> int -> string -> t
+  ?resourcetype:Xml.tree list -> Ptime.t -> int -> string -> t
+
+val create_dir : ?resourcetype:Xml.tree list -> Ptime.t -> string -> t
 
 val add : Xml.fqname -> (Xml.attribute list * Xml.tree list) -> t -> t
 

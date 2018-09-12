@@ -60,7 +60,7 @@ module Make(Fs: Webdav_fs.S) = struct
         let props =
           let etag = match etag with None -> compute_etag data | Some e -> e in
           Properties.create ~content_type ~etag
-            (Ptime.to_rfc3339 (Ptime_clock.now ()))
+            (Ptime_clock.now ())
             (String.length data) (Fs.to_string (`File file))
         in
         Fs.write state (`File file) (Cstruct.of_string data) props >|= function
@@ -223,41 +223,36 @@ module Make(Fs: Webdav_fs.S) = struct
         let status = multistatus [ nodes ] in
         Ok (state, status)
 
-  let body_to_props body default_props =
+  let body_to_proppatch body =
     match body with
-    | None -> Ok default_props
+    | None -> Ok []
     | Some body' ->
     match Xml.parse_mkcol_xml body' with
     | Error _ -> Error `Bad_request
-    | Ok set_props ->
-      match apply_updates default_props set_props with
-      | None, errs ->
-        let propstats =
-          List.map (fun (s, (ns, n)) -> propstat_node (s, [ Xml.node ~ns n [] ])) errs
-        in
-        let xml = Xml.dav_node "mkcol-response" propstats in
-        Printf.printf "forbidden from body_to_props!\n" ;
-        Error (`Forbidden xml)
-      | Some map, _ -> Ok map
+    | Ok set_props -> Ok set_props
 
   (* assumption: path is a relative path! *)
-  let mkcol ?(now = Ptime_clock.now ()) state (`Dir dir) body =
+  let mkcol ?(now = Ptime_clock.now ()) state (`Dir d as dir) body =
     (* TODO: move to caller *)
-    let parent = Fs.parent (`Dir dir) in
+    let parent = Fs.parent dir in
     Fs.dir_exists state parent >>= function
     | false -> Lwt.return (Error `Conflict)
-    | true ->
-      let default_props =
-        Properties.create ~content_type:"text/directory"
-          ~resourcetype:[ Xml.node ~ns:Xml.dav_ns "collection" [] ]
-          (Ptime.to_rfc3339 now) 0
-          (Fs.to_string (`Dir dir))
-      in
-      match body_to_props body default_props with
+    | true -> match body_to_proppatch body with
       | Error e -> Lwt.return (Error e)
-      | Ok map -> Fs.mkdir state (`Dir dir) map >|= function
-        | Error _ -> Error `Conflict
-        | Ok () -> Ok state
+      | Ok set_props -> 
+        let col_props = Properties.create_dir now (Fs.to_string dir) in
+        match apply_updates col_props set_props with
+        | None, errs ->
+          let propstats =
+            List.map (fun (s, (ns, n)) -> propstat_node (s, [ Xml.node ~ns n [] ])) errs
+          in
+          let xml = Xml.dav_node "mkcol-response" propstats in
+          Printf.printf "forbidden from body_to_props!\n" ;
+          Lwt.return @@ Error (`Forbidden xml)
+        | Some map, _ -> 
+          Fs.mkdir state dir map >|= function
+          | Error _ -> Error `Conflict
+          | Ok () -> Ok state
 
   let check_in_bounds p s e = true
   let apply_to_params pfs p = true

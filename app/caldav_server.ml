@@ -314,7 +314,7 @@ class handler config fs = object(self)
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "MKCOL/MKCALENDAR: %s\n%!" body;
     let body' = match rd.Wm.Rd.meth with
-    | `Other "MKCALENDAR" -> calendar_to_collection body
+    | `Other "MKCALENDAR" -> calendar_to_collection body (* TODO add calendar resource type property *)
     | `Other "MKCOL" -> Ok body 
     | _ -> assert false in
     match body' with
@@ -395,9 +395,7 @@ let carddav_ns = "urn:ietf:params:xml:ns:carddav"
 
 let make_dir fs ?(resourcetype = []) ?(props=[]) dir =
   let propmap =
-    let resourcetype' = Xml.node ~ns:Xml.dav_ns "collection" [] :: resourcetype in
-    Properties.create ~content_type:"text/directory" ~resourcetype:resourcetype'
-      (Ptime.to_rfc3339 (Ptime_clock.now ())) 0 (Fs.basename (dir :> file_or_dir))
+    Properties.create_dir ~resourcetype (Ptime_clock.now ()) (Fs.basename (dir :> file_or_dir))
   in
   let propmap' = List.fold_left (fun p (k, v) -> Properties.add k v p) propmap props in
   Fs.mkdir fs dir propmap'

@@ -534,12 +534,9 @@ let report_parse_tests = [
 let appendix_b_data =
   let open Lwt.Infix in
   Lwt_main.run (
-    let now =
-      let ts = Ptime.v (1, 0L) in
-      Ptime.to_rfc3339 ts
-    in
+    let now = Ptime.v (1, 0L) in
     Mirage_fs_mem.connect "/tmp/caldavtest" >>= fun res_fs ->
-    let props name = Properties.create ~resourcetype:([Xml.dav_node "collection" []]) now 0 name in
+    let props name = Properties.create_dir now name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
     Lwt_list.iter_s (fun (fn, etag, data) ->
@@ -555,12 +552,9 @@ let appendix_b_data =
 let appendix_b_1_data =
   let open Lwt.Infix in
   Lwt_main.run (
-    let now =
-      let ts = Ptime.v (1, 0L) in
-      Ptime.to_rfc3339 ts
-    in
+    let now = Ptime.v (1, 0L) in
     Mirage_fs_mem.connect "" >>= fun res_fs ->
-    let props name = Properties.create ~resourcetype:([Xml.dav_node "collection" []]) now 0 name in
+    let props name = Properties.create_dir now name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
     (match Appendix_b.all with
@@ -1263,7 +1257,7 @@ let principal_url principal = Uri.with_path config.host (Fs.to_string (`Dir [ co
 let test_fs_with_acl path acl = Lwt_main.run (
   let open Lwt.Infix in
   Mirage_fs_mem.connect "" >>= fun fs ->
-  let props = Properties.create (Ptime.to_rfc3339(Ptime_clock.now ())) 0 path in
+  let props = Properties.create_dir (Ptime_clock.now ()) path in
   let props' = Properties.add (Xml.dav_ns, "acl") acl props in
   Fs.mkdir fs (`Dir [path]) props' >|= fun _ -> fs)
 
