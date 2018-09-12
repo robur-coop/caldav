@@ -1427,13 +1427,42 @@ let webdav_acl_tests (http_verb, request_path, acls_results) =
   in
   List.map test acls_results
 
+let check_status =
+  let module M = struct
+    type t = Cohttp.Code.status_code
+    let pp fmt status = Fmt.string fmt (Cohttp.Code.string_of_status status)
+    let equal a b = compare a b = 0
+  end in
+  (module M : Alcotest.TESTABLE with type t = M.t)
+
+let find_many_acl_forbidden () =
+  let userprops = Properties.empty
+  and fqname = [ (Xml.dav_ns, "acl") ]
+  and properties = Properties.empty
+  and expected = [ (`Forbidden, [ Xml.dav_node "acl" [] ]) ] in
+  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops fqname properties))
+
+let find_many_acl () =
+  let userprops = snd @@ user "read-acl"
+  and fqname = (Xml.dav_ns, "acl") 
+  and aces = List.map Xml.ace_to_xml (snd grant_read_acl) in
+  let properties = Properties.add fqname ([], aces) Properties.empty in
+  let expected = [ (`OK, [ Xml.dav_node "acl" aces ]) ] in
+  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops [fqname] properties))
+
+let properties_find_many_tests = [ 
+  "Find many for acl, forbidden", `Quick, find_many_acl_forbidden ;
+  "Find many for acl", `Quick, find_many_acl
+]
+
 let tests = [
   "Read propfind", parse_propfind_xml_tests ;
   "Read propertyupdate", parse_propupdate_xml_tests ;
   "Report parse tests", report_parse_tests ;
   "Report tests", report_tests ;
   "Webdav API", webdav_api_tests ;
-  "ACL tests", List.flatten @@ List.map webdav_acl_tests acl_test_cases
+  "ACL tests", List.flatten @@ List.map webdav_acl_tests acl_test_cases ;
+  "Properties.find_many tests", properties_find_many_tests ;
 ]
 
 let () =
