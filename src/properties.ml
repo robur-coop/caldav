@@ -41,6 +41,10 @@ let not_returned_by_allprop = [
   (Xml.caldav_ns, "supported-collation-set");
 ]
 
+let protected = [
+  (Xml.dav_ns, "resourcetype");
+]
+
 let to_trees m =
   PairMap.fold (fun (ns, k) (a, v) acc ->
     Xml.node ~ns ~a k v :: acc) m []

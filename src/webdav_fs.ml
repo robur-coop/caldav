@@ -30,7 +30,7 @@ sig
 
   val parent : file_or_dir -> dir
 
-  val get_property_map : t -> file_or_dir -> Properties.t option Lwt.t
+  val get_property_map : t -> file_or_dir -> Properties.t Lwt.t
 
   val write_property_map : t -> file_or_dir -> Properties.t ->
     (unit, write_error) result Lwt.t
@@ -256,7 +256,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
 
   let get_property_map fs f_or_d =
     get_raw_property_map fs f_or_d >>= function
-    | None -> Lwt.return None
+    | None -> Lwt.return Properties.empty
     | Some map -> match f_or_d with
       | `File _ ->
         begin match Properties.find (Xml.dav_ns, "getlastmodified") map with
@@ -271,24 +271,22 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
                   Properties.add (Xml.dav_ns, "getlastmodified")
                     ([], [ Xml.pcdata http_date ]) map
                 in
-                Lwt.return (Some map')
+                Lwt.return map'
             end
-          | _ -> Lwt.return (Some map)
+          | _ -> Lwt.return map
         end
       | `Dir d ->
         last_modified_of_dir map fs (`Dir d) >>= fun last_modified ->
         etag_of_dir fs (`Dir d) >|= fun etag ->
-        Some
-          (Properties.add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata last_modified ])
-             (Properties.add (Xml.dav_ns, "getetag") ([], [ Xml.pcdata etag ]) map))
+        Properties.add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata last_modified ])
+          (Properties.add (Xml.dav_ns, "getetag") ([], [ Xml.pcdata etag ]) map)
 
   let read fs (`File file) =
     let name = to_string (`File file) in
     Fs.size fs name >>== fun length ->
     Fs.read fs name 0 (Int64.to_int length) >>== fun data ->
-    get_property_map fs (`File file) >|= function
-    | None -> assert false
-    | Some props -> Ok (Cstruct.concat data, props)
+    get_property_map fs (`File file) >|= fun props -> 
+    Ok (Cstruct.concat data, props)
 
   let mkdir fs (`Dir dir) propmap =
     Fs.mkdir fs (to_string (`Dir dir)) >>== fun () ->

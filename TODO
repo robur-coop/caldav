@@ -15,10 +15,10 @@ DONE:
 - client interoperability: thunderbird! calendar.app! create and delete and rename event, todo
 - slash normalisation with prefix
 - timezone and date normalisation
+- finish tests for access control for all verbs
 
 -- 31st August 2018:
 
-- finish tests for access control for all verbs
 - implement access control for report
 - automatic discovery of calendar url
 - test access control with apple and thunderbird

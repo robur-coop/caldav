@@ -26,3 +26,5 @@ val find_many : userprops:t -> Xml.fqname list -> t -> (Cohttp.Code.status_code 
 val allprop : t -> Xml.tree list
 
 val propname : t -> Xml.tree list
+
+val protected : Xml.fqname list

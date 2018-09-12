@@ -30,7 +30,7 @@ sig
 
   val parent : file_or_dir -> dir
 
-  val get_property_map : t -> file_or_dir -> Properties.t option Lwt.t
+  val get_property_map : t -> file_or_dir -> Properties.t Lwt.t
 
   val write_property_map : t -> file_or_dir -> Properties.t ->
     (unit, write_error) result Lwt.t

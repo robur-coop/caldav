@@ -26,17 +26,15 @@ let etag str = Digest.to_hex @@ Digest.string str
 let list_dir fs (`Dir dir) =
   let list_file f_or_d =
     (* maybe implement a Fs.get_property? *)
-    Fs.get_property_map fs f_or_d >|= function
-    | None -> assert false
-    | Some m ->
-      let last_modified = match Properties.find (Xml.dav_ns, "getlastmodified") m with
-        | Some (_, [ Xml.Pcdata lm ]) -> lm
-        | _ -> assert false
-      in
-      let is_dir = match f_or_d with
-        | `File _ -> false | `Dir _ -> true
-      in
-      (Fs.to_string f_or_d, is_dir, last_modified)
+    Fs.get_property_map fs f_or_d >|= fun m ->
+    let last_modified = match Properties.find (Xml.dav_ns, "getlastmodified") m with
+      | Some (_, [ Xml.Pcdata lm ]) -> lm
+      | _ -> assert false
+    in
+    let is_dir = match f_or_d with
+      | `File _ -> false | `Dir _ -> true
+    in
+    (Fs.to_string f_or_d, is_dir, last_modified)
   in
   Fs.listdir fs (`Dir dir) >>= function
   | Error e -> assert false
@@ -71,21 +69,19 @@ let directory_as_ics fs (`Dir dir) =
   | Error _ -> assert false (* previously checked that directory exists *)
   | Ok files ->
     (* TODO: hardcoded calprops, put them elsewhere *)
-    Fs.get_property_map fs (`Dir dir) >>= function
-    | None -> assert false (* invariant: each file and directory has a property map *)
-    | Some props ->
-      let empty = Icalendar.Params.empty in
-      let name =
-        match Properties.find (Xml.dav_ns, "displayname") props with
-        | Some (_, [ Xml.Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), empty, name) ]
-        | _ -> []
-      in
-      let calprops = [
-        `Prodid (empty, "-//ROBUR.IO//EN") ;
-        `Version (empty, "2.0")
-      ] @ name in
-      Lwt_list.map_p calendar_components files >|= fun components ->
-      Icalendar.to_ics (calprops, List.flatten components)
+    Fs.get_property_map fs (`Dir dir) >>= fun props ->
+    let empty = Icalendar.Params.empty in
+    let name =
+      match Properties.find (Xml.dav_ns, "displayname") props with
+      | Some (_, [ Xml.Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), empty, name) ]
+      | _ -> []
+    in
+    let calprops = [
+      `Prodid (empty, "-//ROBUR.IO//EN") ;
+      `Version (empty, "2.0")
+    ] @ name in
+    Lwt_list.map_p calendar_components files >|= fun components ->
+    Icalendar.to_ics (calprops, List.flatten components)
 
 let hash_password password =
   let server_secret = "server_secret--" in
@@ -245,9 +241,7 @@ class handler config fs = object(self)
     in
     let get_property_map_for_user name =
       let user_path = `Dir [ config.principals ; name ] in
-      Fs.get_property_map fs user_path >|= function
-      | None -> Properties.empty
-      | Some x -> x
+      Fs.get_property_map fs user_path
     in
     get_property_map_for_user user >>= fun auth_user_props ->
     Dav.access_granted_for_acl fs path rd.Wm.Rd.meth auth_user_props >>= fun granted ->
@@ -347,34 +341,31 @@ class handler config fs = object(self)
     Fs.from_string fs (self#path rd) >>= function
     | Error _ -> Wm.continue None rd
     | Ok f_or_d ->
-      Fs.get_property_map fs f_or_d >|= (function
-          | None -> None
-          | Some map -> match Properties.find (Xml.dav_ns, "getlastmodified") map with
-            | Some (_, [ Xml.Pcdata lm]) -> Some lm
-            | _ -> None) >>= fun res ->
+      Fs.get_property_map fs f_or_d >|= (fun map ->
+        match Properties.find (Xml.dav_ns, "getlastmodified") map with
+          | Some (_, [ Xml.Pcdata lm]) -> Some lm
+          | _ -> None) >>= fun res ->
       Wm.continue res rd
 
   method generate_etag rd =
     Fs.from_string fs (self#path rd) >>= function
     | Error _ -> Wm.continue None rd
     | Ok f_or_d ->
-      Fs.get_property_map fs f_or_d >>= function
-      | None -> Wm.continue None rd
-      | Some map ->
-        let rd' =
-          match Properties.find (Xml.dav_ns, "getlastmodified") map with
-          | Some (_, [ Xml.Pcdata lm ]) ->
-            let add_headers h = Cohttp.Header.add_list h [ ("Last-Modified", lm) ] in
-            Wm.Rd.with_resp_headers add_headers rd
-          | _ -> rd
-        in
-        let etag = match Properties.find (Xml.dav_ns, "getetag") map with
-          | Some (_, [ Xml.Pcdata etag ]) -> Some etag
-          | _ -> None
-        in
-        Printf.printf "etag of %s is %s\n%!" (Fs.to_string f_or_d)
-          (match etag with None -> "none" | Some x -> x) ;
-        Wm.continue etag rd'
+      Fs.get_property_map fs f_or_d >>= fun map ->
+      let rd' =
+        match Properties.find (Xml.dav_ns, "getlastmodified") map with
+        | Some (_, [ Xml.Pcdata lm ]) ->
+          let add_headers h = Cohttp.Header.add_list h [ ("Last-Modified", lm) ] in
+          Wm.Rd.with_resp_headers add_headers rd
+        | _ -> rd
+      in
+      let etag = match Properties.find (Xml.dav_ns, "getetag") map with
+        | Some (_, [ Xml.Pcdata etag ]) -> Some etag
+        | _ -> None
+      in
+      Printf.printf "etag of %s is %s\n%!" (Fs.to_string f_or_d)
+        (match etag with None -> "none" | Some x -> x) ;
+      Wm.continue etag rd'
 
   method finish_request rd =
     let rd' = if rd.Wm.Rd.meth = `OPTIONS then
@@ -510,15 +501,13 @@ let make_group fs config name members =
   let group_key = (Xml.dav_ns, "group-membership") in
   Lwt_list.iter_p (fun path ->
       let f_or_d = (Fs.dir_from_string path :> file_or_dir) in
-      Fs.get_property_map fs f_or_d >>= function
-      | None -> Lwt.return_unit
-      | Some props ->
-        let props' = match Properties.find group_key props with
-          | None -> Properties.add group_key ([], [ group_node ]) props
-          | Some (attrs, groups) -> Properties.add group_key (attrs, group_node :: groups) props
-        in
-        Fs.write_property_map fs f_or_d props' >>= fun _ ->
-        Lwt.return_unit)
+      Fs.get_property_map fs f_or_d >>= fun props ->
+      let props' = match Properties.find group_key props with
+        | None -> Properties.add group_key ([], [ group_node ]) props
+        | Some (attrs, groups) -> Properties.add group_key (attrs, group_node :: groups) props
+      in
+      Fs.write_property_map fs f_or_d props' >>= fun _ ->
+      Lwt.return_unit)
     new_member_paths
 
 let init_users fs config =

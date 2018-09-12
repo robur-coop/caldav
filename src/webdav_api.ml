@@ -72,15 +72,13 @@ module Make(Fs: Webdav_fs.S) = struct
     let now = Ptime.to_rfc3339 now in
     let rec update_parent f_or_d =
       let (`Dir parent) = Fs.parent f_or_d in
-      Fs.get_property_map state (`Dir parent) >>= function
-      | None -> assert false
-      | Some map ->
-        let map' = Properties.add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
-        Fs.write_property_map state (`Dir parent) map' >>= function
-        | Error e -> assert false
-        | Ok () -> match parent with
-          | [] -> Lwt.return_unit
-          | dir -> update_parent (`Dir dir)
+      Fs.get_property_map state (`Dir parent) >>= fun map ->
+      let map' = Properties.add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
+      Fs.write_property_map state (`Dir parent) map' >>= function
+      | Error e -> assert false
+      | Ok () -> match parent with
+        | [] -> Lwt.return_unit
+        | dir -> update_parent (`Dir dir)
     in
     update_parent path >|= fun () ->
     state
@@ -106,14 +104,11 @@ module Make(Fs: Webdav_fs.S) = struct
     Uri.to_string @@ Uri.with_path host (Fs.to_string f_or_d)
 
   let property_selector fs host propfind_request user f_or_d =
-    Fs.get_property_map fs f_or_d >>= function
-    | None -> Lwt.return `Not_found
-    | Some map ->
-      Fs.get_property_map fs user >|= fun user_map ->
-      let userprops = match user_map with
-        | None -> Properties.empty
-        | Some usermap -> usermap
-      in
+    Fs.get_property_map fs f_or_d >>= fun map ->
+    if map = Properties.empty 
+    then Lwt.return `Not_found
+    else
+      Fs.get_property_map fs user >|= fun userprops ->
       (* results for props, grouped by code *)
       let propstats = match propfind_request with
         | `Propname -> [`OK, Properties.propname map]
@@ -169,13 +164,15 @@ module Make(Fs: Webdav_fs.S) = struct
         | Ok body -> Ok body
         | Error e -> Error e
 
-  let apply_updates ?(validate_key = fun _ -> Ok ()) m updates =
-    let set_prop k v m = match validate_key k with
-      | Error e -> None, (e, k)
-      | Ok () ->
+  let apply_updates ?(validate_key = fun _ -> true) m updates =
+    let set_prop k v m = 
+      if validate_key k 
+      then
         (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
         let map = Properties.add k v m in
         Some map, (`OK, k)
+      else
+        None, (`Forbidden, k)
     in
     (* if an update did not apply, m will be None! *)
     let apply (m, propstats) update = match m, update with
@@ -188,7 +185,7 @@ module Make(Fs: Webdav_fs.S) = struct
         let map = Properties.remove k m in
         Some map, (`OK, k) :: propstats
     in
-    match List.fold_left apply (m, []) updates with
+    match List.fold_left apply (Some m, []) updates with
     | Some m, xs -> Some m, xs
     | None, xs ->
       (* some update did not apply -> tree: None *)
@@ -215,12 +212,7 @@ module Make(Fs: Webdav_fs.S) = struct
     match Xml.parse_propupdate_xml body with
     | Error _ -> Lwt.return (Error `Bad_request)
     | Ok updates ->
-      let validate_key (ns, k) =
-        if ns = Xml.dav_ns then match k with
-          | "resourcetype" -> Error `Forbidden
-          | _ -> Ok ()
-        else Ok ()
-      in
+      let validate_key fqname = List.mem fqname Properties.protected in
       update_properties ~validate_key state path updates >|= function
       | Error _      -> Error `Bad_request
       | Ok propstats ->
@@ -238,7 +230,7 @@ module Make(Fs: Webdav_fs.S) = struct
     match Xml.parse_mkcol_xml body' with
     | Error _ -> Error `Bad_request
     | Ok set_props ->
-      match apply_updates (Some default_props) set_props with
+      match apply_updates default_props set_props with
       | None, errs ->
         let propstats =
           List.map (fun (s, (ns, n)) -> propstat_node (s, [ Xml.node ~ns n [] ])) errs
@@ -781,9 +773,7 @@ module Make(Fs: Webdav_fs.S) = struct
     Lwt.return (Ok (multistatus @@ List.rev responses'))
 
   let report state ~host ~path req ~user =
-    Fs.get_property_map state user >>= (function 
-    | None -> Lwt.return Properties.empty
-    | Some props -> Lwt.return props) >>= fun userprops ->
+    Fs.get_property_map state user >>= fun userprops ->
     match Xml.parse_calendar_query_xml req, Xml.parse_calendar_multiget_xml req with
     | Ok calendar_query, _ -> handle_calendar_query_report calendar_query state host path ~userprops
     | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget state host path ~userprops
@@ -832,11 +822,7 @@ module Make(Fs: Webdav_fs.S) = struct
      | `Target -> Fs.from_string fs path
      | `Parent -> Lwt.return @@ Ok (Fs.parent @@ (Fs.file_from_string path :> Webdav_fs.file_or_dir) :> Webdav_fs.file_or_dir)) >>= function
     | Error _ -> Lwt.return Properties.empty
-    | Ok f_or_d -> Fs.get_property_map fs f_or_d >|= function
-      | None ->
-        Printf.printf "forbidden: no property map found!\n" ;
-        Properties.empty
-      | Some props -> props
+    | Ok f_or_d -> Fs.get_property_map fs f_or_d 
 
   let access_granted_for_acl fs path http_verb userprops =
     Fs.exists fs path >>= fun target_exists ->
