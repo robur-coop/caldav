@@ -1273,9 +1273,9 @@ let grant_read_write =
   let url = principal_url "read-write" in
   "grant for user test", [ (`Href url, `Grant [ `Read ]) ; (`Href url, `Grant [ `Write ]) ]
 
-let grant_read_only =
-  let url = principal_url "read-only" in
-  "grant for user read-only", [ (`Href url, `Grant [ `Read ]) ]
+let grant_read =
+  let url = principal_url "read" in
+  "grant for user read", [ (`Href url, `Grant [ `Read ]) ]
 
 let grant_read_acl =
   let url = principal_url "read-acl" in
@@ -1320,7 +1320,7 @@ let test_cases_for_get = [
   (grant_all, user "any", true);
   (deny_all, user "any", false);
   (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
-  (grant_read_only, user "read-only", true); (grant_read_only, user "invader", false);
+  (grant_read, user "read", true); (grant_read, user "invader", false);
   (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
   (grant_bind, user "bind", false); (grant_bind, user "invader", false);
   (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
@@ -1334,7 +1334,7 @@ let test_cases_for_put_target_exists = [
   (grant_all, user "any", true);
   (deny_all, user "any", false);
   (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
-  (grant_read_only, user "read-only", false); (grant_read_only, user "invader", false);
+  (grant_read, user "read", false); (grant_read, user "invader", false);
   (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
   (grant_bind, user "bind", false); (grant_bind, user "invader", false);
   (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
@@ -1348,7 +1348,7 @@ let test_cases_for_put_not_target_exists = [
   (grant_all, user "any", true);
   (deny_all, user "any", false);
   (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
-  (grant_read_only, user "read-only", false); (grant_read_only, user "invader", false);
+  (grant_read, user "read", false); (grant_read, user "invader", false);
   (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
   (grant_bind, user "bind", true); (grant_bind, user "invader", false);
   (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
@@ -1362,7 +1362,7 @@ let test_cases_for_proppatch = [
   (grant_all, user "any", true);
   (deny_all, user "any", false);
   (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
-  (grant_read_only, user "read-only", false); (grant_read_only, user "invader", false);
+  (grant_read, user "read", false); (grant_read, user "invader", false);
   (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
   (grant_bind, user "bind", false); (grant_bind, user "invader", false);
   (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
@@ -1376,7 +1376,7 @@ let test_cases_for_acl = [
   (grant_all, user "any", true);
   (deny_all, user "any", false);
   (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
-  (grant_read_only, user "read-only", false); (grant_read_only, user "invader", false);
+  (grant_read, user "read", false); (grant_read, user "invader", false);
   (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
   (grant_bind, user "bind", false); (grant_bind, user "invader", false);
   (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
@@ -1390,7 +1390,7 @@ let test_cases_for_propfind = [
   (grant_all, user "any", true);
   (deny_all, user "any", false);
   (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
-  (grant_read_only, user "read-only", true); (grant_read_only, user "invader", false);
+  (grant_read, user "read", true); (grant_read, user "invader", false);
   (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
   (grant_bind, user "bind", false); (grant_bind, user "invader", false);
   (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
@@ -1435,24 +1435,67 @@ let check_status =
   end in
   (module M : Alcotest.TESTABLE with type t = M.t)
 
-let find_many_acl_forbidden () =
+let find_many_acl_props_empty_forbidden () =
   let userprops = Properties.empty
   and fqname = [ (Xml.dav_ns, "acl") ]
   and properties = Properties.empty
   and expected = [ (`Forbidden, [ Xml.dav_node "acl" [] ]) ] in
   Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops fqname properties))
 
-let find_many_acl () =
+let find_many_acl aces () =
   let userprops = snd @@ user "read-acl"
   and fqname = (Xml.dav_ns, "acl") 
-  and aces = List.map Xml.ace_to_xml (snd grant_read_acl) in
-  let properties = Properties.add fqname ([], aces) Properties.empty in
-  let expected = [ (`OK, [ Xml.dav_node "acl" aces ]) ] in
+  and aces_xml = List.map Xml.ace_to_xml (snd aces) in
+  let properties = Properties.add fqname ([], aces_xml) Properties.empty in
+  let expected = [ (`OK, [ Xml.dav_node "acl" aces_xml ]) ] in
   Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops [fqname] properties))
 
+let find_many_acl_forbidden principal aces () =
+  let userprops = snd @@ user principal
+  and fqname = (Xml.dav_ns, "acl") 
+  and aces_xml = List.map Xml.ace_to_xml (snd aces) in
+  let properties = Properties.add fqname ([], aces_xml) Properties.empty in
+  let expected = [ (`Forbidden, [ Xml.dav_node "acl" [] ]) ] in
+  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops [fqname] properties))
+
+let find_many_current_user_privset_empty_forbidden () =
+  let userprops = Properties.empty
+  and fqname = [ (Xml.dav_ns, "current-user-privilege-set") ]
+  and properties = Properties.empty
+  and expected = [ (`Forbidden, [ Xml.dav_node "current-user-privilege-set" [] ]) ] in
+  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops fqname properties))
+
+let find_many_current_user_privset_forbidden principal aces () =
+  let userprops = snd @@ user principal
+  and fqname = [ (Xml.dav_ns, "current-user-privilege-set") ]
+  and aces_xml = List.map Xml.ace_to_xml (snd aces) in
+  let properties = Properties.add (Xml.dav_ns, "acl") ([], aces_xml) Properties.empty in
+  let expected = [ (`Forbidden, [ Xml.dav_node "current-user-privilege-set" [] ]) ] in
+  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops fqname properties))
+
+let find_many_current_user_privset principal aces privilege () =
+  let userprops = snd @@ user principal 
+  and fqname = (Xml.dav_ns, "current-user-privilege-set") 
+  and aces_xml = List.map Xml.ace_to_xml (snd aces) in
+  let properties = Properties.add (Xml.dav_ns, "acl") ([], aces_xml) Properties.empty in
+  let privilege_set = [ Xml.dav_node "privilege" [ Xml.priv_to_xml privilege ]] in
+  let expected = [ (`OK, [ Xml.dav_node "current-user-privilege-set" privilege_set ]) ] in
+  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops [fqname] properties))
+
+
 let properties_find_many_tests = [ 
-  "Find many for acl, forbidden", `Quick, find_many_acl_forbidden ;
-  "Find many for acl", `Quick, find_many_acl
+  "Find many for acl, forbidden", `Quick, find_many_acl_props_empty_forbidden ;
+  "Find many for acl", `Quick, find_many_acl grant_read_acl ;
+  "Find many for acl, invader can do nothing, read-acl can read_acl", `Quick, find_many_acl_forbidden "invader" grant_read_acl;
+  "Find many for acl, invader can only do current-user-privilege-set, but reads acl", `Quick, find_many_acl_forbidden "read-current-user-privilege-set" grant_read_current_user_privilege_set;
+  "Find many for acl, read can read - wants to read acl", `Quick, find_many_acl_forbidden "read" grant_read ;
+  "Find many for acl, grant_all", `Quick, find_many_acl grant_all ;
+  "Find many for current-user-privilege-set, read can read - wants to read current user privset", `Quick, find_many_current_user_privset_forbidden "read" grant_read ; 
+  "Find many for current-user-privilege-set, read can read, invader can do nothing - wants to read current user privset", `Quick, find_many_current_user_privset_forbidden "invader" grant_read ; 
+  "Find many for current-user-privilege-set, forbidden", `Quick, find_many_current_user_privset_empty_forbidden ;
+  "Find many for current-user-privilege-set", `Quick, find_many_current_user_privset "read-current-user-privilege-set" grant_read_current_user_privilege_set `Read_current_user_privilege_set ;
+  "Find many for current-user-privilege-set, user: read-acl", `Quick, find_many_current_user_privset "read-acl" grant_read_acl `Read_acl;
+  "Find many for current-user-privilege-set, user: somebody", `Quick, find_many_current_user_privset "somebody" grant_all `All ;
 ]
 
 let tests = [
