@@ -583,9 +583,10 @@ let t_tree =
   (module M : Alcotest.TESTABLE with type t = M.t)
 
 let report path request data =
+  let user = (`Dir ["principals" ; "user"]) in
   let open Lwt.Infix in
   Lwt_main.run (
-    Dav.report data ~host:(Uri.of_string "http://cal.example.com") ~path request >|= function
+    Dav.report data ~host:(Uri.of_string "http://cal.example.com") ~path request ~user >|= function
     | Ok t -> Ok (tree (Xml.tree_to_string t))
     | Error _ -> Error "failed")
 

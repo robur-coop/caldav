@@ -13,7 +13,7 @@ sig
   val proppatch : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree ->
     (state * tree, [ `Bad_request ]) result Lwt.t
 
-  val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree ->
+  val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> user:Webdav_fs.file_or_dir ->
     (tree, [`Bad_request]) result Lwt.t
 
   val write : state -> path:Webdav_fs.file -> ?etag:string -> content_type:string -> string ->

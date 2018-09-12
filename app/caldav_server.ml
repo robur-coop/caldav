@@ -301,7 +301,12 @@ class handler config fs = object(self)
       match Xml.string_to_tree body with
       | None -> Wm.respond (to_status `Bad_request) rd
       | Some tree ->
-        Dav.report fs ~host:config.host ~path:f_or_d tree >>= function
+        let user =
+          match Cohttp.Header.get rd.Wm.Rd.req_headers "Authorization" with
+          | None -> assert false
+          | Some user -> (`Dir [ config.principals ; user ])
+        in
+        Dav.report fs ~host:config.host ~path:f_or_d tree ~user >>= function
         | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
         | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 

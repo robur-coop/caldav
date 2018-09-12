@@ -13,7 +13,7 @@ sig
   val proppatch : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree ->
     (state * tree, [ `Bad_request ]) result Lwt.t
 
-  val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree ->
+  val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> user:Webdav_fs.file_or_dir ->
     (tree, [`Bad_request]) result Lwt.t
 
   val write : state -> path:Webdav_fs.file -> ?etag:string -> content_type:string -> string ->
@@ -670,7 +670,7 @@ module Make(Fs: Webdav_fs.S) = struct
       matches_timerange && matches_cfs && matches_pfs
     | _ -> false
 
-  let apply_transformation (t : Xml.report_prop option) d map = match t with
+  let apply_transformation (t : Xml.report_prop option) d map ~userprops = match t with
     | None -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics ~cr:false d)]]]
     | Some `All_props -> [`OK, Properties.allprop map]
     | Some `Propname -> [`OK, Properties.propname map]
@@ -686,8 +686,7 @@ module Make(Fs: Webdav_fs.S) = struct
         | None -> d, None
         | Some ((filter, _, _) as tr) -> select_calendar_data d tr, filter
       in
-      (* TODO real user props! *)
-      let found_props = Properties.find_many ~userprops:Properties.empty props' map in
+      let found_props = Properties.find_many ~userprops props' map in
       let ok_props, rest_props = List.partition (fun (st, _) -> st = `OK) found_props in
       let ok_props' = List.flatten (List.map snd ok_props) in
       match snd output with (* kill whole calendar if comps are empty *)
@@ -697,16 +696,17 @@ module Make(Fs: Webdav_fs.S) = struct
         let cs = [ Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata ics] ] in
         [`OK, ok_props' @ cs ] @ rest_props
 
-  let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.component_filter) data map =
+  let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.component_filter) data map ~userprops =
     if vcalendar_matches_comp_filter filter data then
-      apply_transformation transform data map
+      apply_transformation transform data map ~userprops
     else
       []
 
-  let handle_calendar_query_report calendar_query state host path =
+  let handle_calendar_query_report calendar_query state host path ~userprops =
     let report_one query = function
       | `Dir _ -> Lwt.return (Error `Bad_request)
       | `File f ->
+        (* TODO check if we're allowed to read the file file *)
         Fs.read state (`File f) >|= function
         | Error _ -> Error `Bad_request
         | Ok (data, map) ->
@@ -715,7 +715,7 @@ module Make(Fs: Webdav_fs.S) = struct
             Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
             Error `Bad_request
           | Ok ics ->
-            match apply_to_vcalendar query ics map with
+            match apply_to_vcalendar query ics map ~userprops with
             | [] -> Ok None
             | xs ->
               let node =
@@ -746,10 +746,11 @@ module Make(Fs: Webdav_fs.S) = struct
             | Error _ -> acc) [] responses in
         Lwt.return (Ok (multistatus responses'))
 
-  let handle_calendar_multiget_report (transformation, filenames) state host path =
+  let handle_calendar_multiget_report (transformation, filenames) state host path ~userprops =
     let report_one (filename : string) =
       Printf.printf "calendar_multiget: filename %s\n%!" filename ;
       let file = Fs.file_from_string filename in
+      (* TODO check if we're allowed to read the file file *)
       Fs.read state file >|= function
       | Error _ ->
         let node =
@@ -764,7 +765,7 @@ module Make(Fs: Webdav_fs.S) = struct
           Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
           Error `Bad_request
         | Ok ics ->
-          let xs = apply_transformation transformation ics map in
+          let xs = apply_transformation transformation ics map ~userprops in
           let node =
             Xml.dav_node "response"
               (Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Webdav_fs.file_or_dir)) ]
@@ -779,10 +780,13 @@ module Make(Fs: Webdav_fs.S) = struct
         | Error _ -> acc) [] responses in
     Lwt.return (Ok (multistatus @@ List.rev responses'))
 
-  let report state ~host ~path req =
+  let report state ~host ~path req ~user =
+    Fs.get_property_map state user >>= (function 
+    | None -> Lwt.return Properties.empty
+    | Some props -> Lwt.return props) >>= fun userprops ->
     match Xml.parse_calendar_query_xml req, Xml.parse_calendar_multiget_xml req with
-    | Ok calendar_query, _ -> handle_calendar_query_report calendar_query state host path
-    | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget state host path
+    | Ok calendar_query, _ -> handle_calendar_query_report calendar_query state host path ~userprops
+    | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget state host path ~userprops
     | Error e, Error _ -> Lwt.return (Error `Bad_request)
 
   let required_privilege verb target_exists = match verb with
