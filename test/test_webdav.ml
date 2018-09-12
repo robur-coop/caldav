@@ -1386,19 +1386,33 @@ let test_cases_for_acl = [
   (grant_write_acl, user "write-acl", true); (grant_write_acl, user "invader", false);
 ]
 
-let test_cases_for_propfind = [
+let test_cases_for_delete = [
   (grant_all, user "any", true);
   (deny_all, user "any", false);
   (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
-  (grant_read, user "read", true); (grant_read, user "invader", false);
+  (grant_read, user "read", false); (grant_read, user "invader", false);
   (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
   (grant_bind, user "bind", false); (grant_bind, user "invader", false);
-  (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
-  (grant_write, user "write", false); (grant_write, user "invader", false);
+  (grant_unbind, user "unbind", true); (grant_unbind, user "invader", false);
+  (grant_write, user "write", true); (grant_write, user "invader", false);
   (grant_write_properties, user "write-props", false); (grant_write_properties, user "invader", false);
   (grant_write_content, user "write-content", false); (grant_write_content, user "invader", false);
   (grant_write_acl, user "write-acl", false); (grant_write_acl, user "invader", false);
-]
+] 
+
+let test_cases_for_mkcol = [
+  (grant_all, user "any", true);
+  (deny_all, user "any", false);
+  (grant_read_write, user "read-write", true); (grant_read_write, user "invader", false);
+  (grant_read, user "read", false); (grant_read, user "invader", false);
+  (grant_read_acl, user "read-acl", false); (grant_read_acl, user "invader", false);
+  (grant_bind, user "bind", true); (grant_bind, user "invader", false);
+  (grant_unbind, user "unbind", false); (grant_unbind, user "invader", false);
+  (grant_write, user "write", true); (grant_write, user "invader", false);
+  (grant_write_properties, user "write-props", false); (grant_write_properties, user "invader", false);
+  (grant_write_content, user "write-content", false); (grant_write_content, user "invader", false);
+  (grant_write_acl, user "write-acl", false); (grant_write_acl, user "invader", false);
+] 
 
 (* HTTP verb * requested_path * (access control lists * authenticated user * expected result) list *)
 let acl_test_cases = [
@@ -1409,7 +1423,11 @@ let acl_test_cases = [
   `PUT,     "calendars/non_existing", test_cases_for_put_not_target_exists ;
   `Other "PROPPATCH", "calendars", test_cases_for_proppatch ;
   `Other "ACL", "calendars", test_cases_for_acl ;
-  `Other "PROPFIND", "calendars", test_cases_for_propfind ;
+  `Other "PROPFIND", "calendars", test_cases_for_get ;
+  `DELETE, "calendars/something", test_cases_for_delete ;
+  `Other "MKCOL", "calendars/something_new", test_cases_for_mkcol ;
+  `Other "MKCALENDAR", "calendars/something_new", test_cases_for_mkcol ;
+  `Other "REPORT", "calendars", test_cases_for_get ;
 ]
 
 let request_calendars_for_acl http_verb request_path aces user_props res () =

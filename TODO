@@ -18,6 +18,13 @@ DONE:
 
 -- 31st August 2018:
 
+- finish tests for access control for all verbs
+- implement access control for report
+- automatic discovery of calendar url
+- test access control with apple and thunderbird
+- readonly xml props (sind live properties)
+- how to add user and set acl
+
 - client interoperability: android! create new todo lists and new calendars, use different users
 - user management (config file: users, hostname, routing, etc.)
 - research scope of implementing calendar sharing
