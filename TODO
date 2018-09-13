@@ -25,6 +25,8 @@ DONE:
 - readonly xml props (sind live properties)
 - how to add user and set acl
 
+- a private calendar which should turn into a public one: how to adjust all the event ACLs? maybe DAV:inherited ACL?
+
 - client interoperability: android! create new todo lists and new calendars, use different users
 - user management (config file: users, hostname, routing, etc.)
 - research scope of implementing calendar sharing

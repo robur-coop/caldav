@@ -97,7 +97,6 @@ let verify_auth_header user_password v =
       | Some data -> match Astring.String.cut ~sep:":" (Cstruct.to_string data) with
         | None -> Error "invalid user:password encoding"
         | Some (user, password) ->
-          Printf.printf "user is %s, password %s\n%!" user password ;
           let hashed = hash_password password in
           if List.mem (user, hashed) user_password
           then Ok user
@@ -110,6 +109,14 @@ let calendar_to_collection data =
   match Xml.string_to_tree data with
   | Some (Xml.Node (ns, "mkcalendar", a, c)) when ns = Xml.dav_ns -> Ok (Xml.tyxml_to_body (Xml.tree_to_tyxml (Xml.node ~ns:Xml.dav_ns ~a "mkcol" c)))
   | _ -> Error `Bad_request
+
+let parent_acl fs file =
+  Fs.get_property_map fs (Fs.parent (file :> file_or_dir) :> file_or_dir) >|= fun map ->
+  match Properties.find (Xml.dav_ns, "acl") map with
+  | None -> []
+  | Some (_, aces) ->
+    let aces' = List.map Xml.xml_to_ace aces in
+    List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces'
 
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
@@ -133,13 +140,7 @@ class handler config fs = object(self)
       let ics = Icalendar.to_ics cal in
       let etag = etag ics in
       let file = Fs.file_from_string path in
-      Fs.get_property_map fs (Fs.parent (file :> file_or_dir) :> file_or_dir) >>= fun map ->
-      let acl = match Properties.find (Xml.dav_ns, "acl") map with
-        | None -> []
-        | Some (_, aces) ->
-          let aces' = List.map Xml.xml_to_ace aces in
-          List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces'
-      in
+      parent_acl fs file >>= fun acl ->
       Dav.write_component fs ~path:file ~etag ~content_type acl (Ptime_clock.now ()) ics >>= function
       | Error e -> Wm.respond (to_status e) rd
       | Ok _ ->
@@ -331,7 +332,8 @@ class handler config fs = object(self)
       | None when body'' <> "" -> Wm.continue `Conflict rd
       | tree ->
         let path = Fs.dir_from_string (self#path rd) in
-        Dav.mkcol fs ~path config.default_acl (Ptime_clock.now ()) tree >>= function
+        parent_acl fs path >>= fun acl ->
+        Dav.mkcol fs ~path acl (Ptime_clock.now ()) tree >>= function
         | Ok _ -> Wm.continue `Created rd
         | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string t) }
         | Error `Conflict -> Wm.continue `Conflict rd
@@ -339,7 +341,8 @@ class handler config fs = object(self)
 
   method delete_resource rd =
     Fs.from_string fs (self#path rd) >>= function
-    | Error _ -> Wm.continue false rd
+    | Error _ ->
+      Wm.continue false rd
     | Ok f_or_d ->
       Dav.delete fs ~path:f_or_d (Ptime_clock.now ()) >>= fun _ ->
       Wm.continue true rd
@@ -558,15 +561,17 @@ let main () =
   and hostname = "127.0.0.1"
   in
   let host = Uri.make ~port ~scheme ~host:hostname () in
+  let principals = "principals" in
   let config = {
-    principals = "principals" ;
+    principals ;
     calendars = "calendars" ;
     host ;
     user_password = [
       ("test", hash_password "password") ;
       ("root", hash_password "toor") ;
       ("nobody", hash_password "1") ] ;
-    default_acl = [ (`All, `Grant [ `All ]) ]
+    default_acl = [ (`Href (Uri.with_path host @@ "/" ^ principals ^ "/root/"),
+                     `Grant [ `All ]) ]
   } in
   (* create the file system *)
   FS_unix.connect "/tmp/calendar" >>= fun fs ->
@@ -577,6 +582,7 @@ let main () =
   (* the route table *)
   let routes = [
     ("/" ^ config.principals, fun () -> new handler config fs) ;
+    ("/" ^ config.principals ^ "/*", fun () -> new handler config fs) ;
     ("/" ^ config.calendars, fun () -> new handler config fs) ;
     ("/" ^ config.calendars ^ "/*", fun () -> new handler config fs) ;
   ] in
@@ -601,7 +607,7 @@ let main () =
        *
        *  [$ DEBUG_PATH= ./crud_lwt.native]
        *
-       *)
+      *)
       let path =
         match Sys.getenv "DEBUG_PATH" with
         | _ -> Printf.sprintf " - %s" (String.concat ", " path)
