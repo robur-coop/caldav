@@ -116,9 +116,9 @@ let calendar_to_collection data =
 class handler config fs = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
 
-  method private write_calendar rd =
+  method private write_component rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
-    Printf.printf "write_calendar: %s\n%!" body ;
+    Printf.printf "write_component: %s\n%!" body ;
     let path = self#path rd in
     let content_type =
       match Cohttp.Header.get rd.Wm.Rd.req_headers "Content-Type" with
@@ -133,10 +133,17 @@ class handler config fs = object(self)
       let ics = Icalendar.to_ics cal in
       let etag = etag ics in
       let file = Fs.file_from_string path in
-      Dav.write fs ~path:file ~etag ~content_type config.default_acl (Ptime_clock.now ()) ics >>= function
+      Fs.get_property_map fs (Fs.parent (file :> file_or_dir) :> file_or_dir) >>= fun map ->
+      let acl = match Properties.find (Xml.dav_ns, "acl") map with
+        | None -> []
+        | Some (_, aces) ->
+          let aces' = List.map Xml.xml_to_ace aces in
+          List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces'
+      in
+      Dav.write_component fs ~path:file ~etag ~content_type acl (Ptime_clock.now ()) ics >>= function
       | Error e -> Wm.respond (to_status e) rd
       | Ok _ ->
-        Printf.printf "wrote calendar %s\n%!" path ;
+        Printf.printf "wrote component %s\n%!" path ;
         let rd = Wm.Rd.with_resp_headers (fun header ->
             let header' = Cohttp.Header.remove header "ETag" in
             let header'' = Cohttp.Header.add header' "Etag" etag in
@@ -209,8 +216,8 @@ class handler config fs = object(self)
 
   method content_types_accepted rd =
     Wm.continue [
-      "text/xml", self#write_calendar ;
-      "text/calendar", self#write_calendar
+      "text/xml", self#write_component ;
+      "text/calendar", self#write_component
     ] rd
 
   method is_authorized rd =
@@ -490,21 +497,22 @@ PROPFIND /principals/user -- <calendar-home-set>
 
 let make_user ?(props = []) fs config name =
   let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
-  let get_url dir = Uri.to_string @@ Uri.with_path config.host (Fs.to_string (dir :> file_or_dir)) in
+  let get_url dir = Uri.with_path config.host (Fs.to_string (dir :> file_or_dir)) in
   let principal_dir = `Dir [ config.principals ; name ] in
   let principal_url = get_url principal_dir in
   let home_set_dir = `Dir [ config.calendars ; name ] in
   let home_set_url = get_url home_set_dir in
   let props' =
     ((Xml.dav_ns, "principal-URL"),
-     ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata principal_url ] ]))
+     ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata @@ Uri.to_string principal_url ] ]))
     :: ((Xml.caldav_ns, "calendar-home-set"),
-        ([], [Xml.dav_node "href" [Xml.pcdata home_set_url ]])) ::
+        ([], [Xml.dav_node "href" [Xml.pcdata @@ Uri.to_string home_set_url ]])) ::
     props
   in
-  make_dir_if_not_present fs config.default_acl ~resourcetype ~props:props' principal_dir >>= fun _ ->
-  make_dir_if_not_present fs config.default_acl home_set_dir >>= fun _ ->
-  create_calendar fs config.default_acl (`Dir [config.calendars ; name ; "calendar"]) >>= fun _ ->
+  let acl = [ (`Href principal_url, `Grant [ `All ]) ; (`All, `Grant [ `Read ]) ] in
+  make_dir_if_not_present fs acl ~resourcetype ~props:props' principal_dir >>= fun _ ->
+  make_dir_if_not_present fs acl home_set_dir >>= fun _ ->
+  create_calendar fs acl (`Dir [config.calendars ; name ; "calendar"]) >>= fun _ ->
   Lwt.return_unit
 
 let make_group fs config name members =

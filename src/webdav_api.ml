@@ -16,7 +16,7 @@ sig
   val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> user:Webdav_fs.file_or_dir ->
     (tree, [`Bad_request]) result Lwt.t
 
-  val write : state -> path:Webdav_fs.file -> Webdav_xml.ace list -> Ptime.t -> ?etag:string -> content_type:string ->
+  val write_component : state -> path:Webdav_fs.file -> Webdav_xml.ace list -> Ptime.t -> ?etag:string -> content_type:string ->
     string ->
     (state, [ `Conflict | `Internal_server_error | `Method_not_allowed ]) result Lwt.t
 
@@ -48,7 +48,7 @@ module Make(Fs: Webdav_fs.S) = struct
 
   let compute_etag str = Digest.to_hex @@ Digest.string str
 
-  let write state ~path acl timestamp ?etag ~content_type data =
+  let write_component state ~path acl timestamp ?etag ~content_type data =
     match path with
     | `Dir _ -> Lwt.return (Error `Method_not_allowed)
     | `File file ->
