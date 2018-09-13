@@ -3,23 +3,24 @@ sig
   type state
   type tree = Webdav_xml.tree
 
-  val mkcol : ?now:Ptime.t -> state -> Webdav_fs.dir -> tree option ->
+  val mkcol : state -> path:Webdav_fs.dir -> Webdav_xml.ace list -> Ptime.t -> tree option ->
     (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
       result Lwt.t
 
   val propfind : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> user:Webdav_fs.file_or_dir -> depth:string option ->
     (tree, [ `Bad_request | `Forbidden of tree | `Property_not_found ]) result Lwt.t
 
-  val proppatch : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree ->
+  val proppatch : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> user:Webdav_fs.file_or_dir ->
     (state * tree, [ `Bad_request ]) result Lwt.t
 
   val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> user:Webdav_fs.file_or_dir ->
     (tree, [`Bad_request]) result Lwt.t
 
-  val write : state -> path:Webdav_fs.file -> ?etag:string -> content_type:string -> string ->
+  val write : state -> path:Webdav_fs.file -> Webdav_xml.ace list -> Ptime.t -> ?etag:string -> content_type:string ->
+    string ->
     (state, [ `Conflict | `Internal_server_error | `Method_not_allowed ]) result Lwt.t
 
-  val delete : ?now:Ptime.t -> state -> path:Webdav_fs.file_or_dir -> state Lwt.t
+  val delete : state -> path:Webdav_fs.file_or_dir -> Ptime.t -> state Lwt.t
 
   (*
   val get : state -> string ->

@@ -59,14 +59,12 @@ let to_string m =
   let c = to_trees m in
   Xml.tree_to_string (Xml.dav_node "prop" c)
 
-let default_policy = (`All, `Grant [ `All ])
-
-let create ?(content_type = "text/html") ?(language = "en") ?etag ?(resourcetype = []) timestamp length filename =
+let create ?(content_type = "text/html") ?(language = "en") ?etag ?(resourcetype = []) acl timestamp length filename =
   let filename = if filename = "" then "hinz und kunz" else filename in
   let etag' m = match etag with None -> m | Some e -> PairMap.add (Xml.dav_ns, "getetag") ([], [ Xml.Pcdata e ]) m in
   let timestamp' = Ptime.to_rfc3339 timestamp in
   etag' @@
-  PairMap.add (Xml.dav_ns, "acl") ([], [ Xml.ace_to_xml default_policy ]) @@
+  PairMap.add (Xml.dav_ns, "acl") ([], List.map Xml.ace_to_xml acl) @@
   PairMap.add (Xml.dav_ns, "creationdate") ([], [ Xml.Pcdata timestamp' ]) @@
   PairMap.add (Xml.dav_ns, "displayname") ([], [ Xml.Pcdata filename ]) @@
   PairMap.add (Xml.dav_ns, "getcontentlanguage") ([], [ Xml.Pcdata language ]) @@
@@ -77,10 +75,10 @@ let create ?(content_type = "text/html") ?(language = "en") ?etag ?(resourcetype
   PairMap.add (Xml.dav_ns, "resourcetype") ([], resourcetype) PairMap.empty
   (* PairMap.add "supportedlock" *)
 
-let create_dir ?(resourcetype = []) timestamp dirname =
+let create_dir ?(resourcetype = []) acl timestamp dirname =
   create ~content_type:"text/directory"
     ~resourcetype:(Xml.dav_node "collection" [] :: resourcetype)
-    timestamp 0 dirname
+    acl timestamp 0 dirname
 
 let from_tree = function
   | Xml.Node (_, "prop", _, children) ->

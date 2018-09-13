@@ -3,23 +3,24 @@ sig
   type state
   type tree = Webdav_xml.tree
 
-  val mkcol : ?now:Ptime.t -> state -> Webdav_fs.dir -> tree option ->
+  val mkcol : state -> path:Webdav_fs.dir -> Webdav_xml.ace list -> Ptime.t -> tree option ->
     (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
       result Lwt.t
 
   val propfind : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> user:Webdav_fs.file_or_dir -> depth:string option ->
     (tree, [ `Bad_request | `Forbidden of tree | `Property_not_found ]) result Lwt.t
 
-  val proppatch : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree ->
+  val proppatch : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> user:Webdav_fs.file_or_dir ->
     (state * tree, [ `Bad_request ]) result Lwt.t
 
   val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> user:Webdav_fs.file_or_dir ->
     (tree, [`Bad_request]) result Lwt.t
 
-  val write : state -> path:Webdav_fs.file -> ?etag:string -> content_type:string -> string ->
+  val write : state -> path:Webdav_fs.file -> Webdav_xml.ace list -> Ptime.t -> ?etag:string -> content_type:string ->
+    string ->
     (state, [ `Conflict | `Internal_server_error | `Method_not_allowed ]) result Lwt.t
 
-  val delete : ?now:Ptime.t -> state -> path:Webdav_fs.file_or_dir -> state Lwt.t
+  val delete : state -> path:Webdav_fs.file_or_dir -> Ptime.t -> state Lwt.t
 
   (*
   val get : state -> string ->
@@ -47,7 +48,7 @@ module Make(Fs: Webdav_fs.S) = struct
 
   let compute_etag str = Digest.to_hex @@ Digest.string str
 
-  let write state ~path ?etag ~content_type data =
+  let write state ~path acl timestamp ?etag ~content_type data =
     match path with
     | `Dir _ -> Lwt.return (Error `Method_not_allowed)
     | `File file ->
@@ -60,14 +61,13 @@ module Make(Fs: Webdav_fs.S) = struct
         let props =
           let etag = match etag with None -> compute_etag data | Some e -> e in
           Properties.create ~content_type ~etag
-            (Ptime_clock.now ())
-            (String.length data) (Fs.to_string (`File file))
+            acl timestamp (String.length data) (Fs.to_string (`File file))
         in
         Fs.write state (`File file) (Cstruct.of_string data) props >|= function
         | Error e -> Error `Internal_server_error
         | Ok () -> Ok state
 
-  let delete ?(now = Ptime_clock.now ()) state ~path =
+  let delete state ~path now =
     Fs.destroy state path >>= fun res ->
     let now = Ptime.to_rfc3339 now in
     let rec update_parent f_or_d =
@@ -208,7 +208,7 @@ module Make(Fs: Webdav_fs.S) = struct
       | Error e -> Error e
       | Ok () -> Ok propstats
 
-  let proppatch state ~host ~path body =
+  let proppatch state ~host ~path body ~user =
     match Xml.parse_propupdate_xml body with
     | Error _ -> Lwt.return (Error `Bad_request)
     | Ok updates ->
@@ -230,7 +230,7 @@ module Make(Fs: Webdav_fs.S) = struct
       | Ok set_props -> Ok set_props
 
   (* assumption: path is a relative path! *)
-  let mkcol ?(now = Ptime_clock.now ()) state (`Dir d as dir) body =
+  let mkcol state ~path:(`Dir d as dir) acl now body =
     (* TODO: move to caller *)
     let parent = Fs.parent dir in
     Fs.dir_exists state parent >>= function
@@ -238,7 +238,7 @@ module Make(Fs: Webdav_fs.S) = struct
     | true -> match body_to_proppatch body with
       | Error e -> Lwt.return (Error e)
       | Ok set_props ->
-        let col_props = Properties.create_dir now (Fs.to_string dir) in
+        let col_props = Properties.create_dir acl now (Fs.to_string dir) in
         match apply_updates col_props set_props with
         | None, errs ->
           let propstats =

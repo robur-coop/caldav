@@ -147,7 +147,7 @@ let parse_simple_report_query_with_calendar_data () =
   let expected =
     Ok (Some (`Proplist [
         `Prop (Xml.dav_ns, "getetag") ;
-        `Calendar_data 
+        `Calendar_data
           (Some ("VCALENDAR",
            `Prop [ ("VERSION", false) ],
            `Comp [ ("VEVENT",
@@ -208,7 +208,7 @@ let parse_report_query_7_8_1 () =
   and expected =
     Ok (Some (`Proplist [
         `Prop (Xml.dav_ns, "getetag") ;
-        `Calendar_data (Some 
+        `Calendar_data (Some
           ("VCALENDAR",
            `Prop [ ("VERSION", false) ],
            `Comp [ ("VEVENT",
@@ -230,7 +230,7 @@ let parse_report_query_7_8_1 () =
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
-let report_7_8_2 = 
+let report_7_8_2 =
   header ^ {|<C:calendar-query xmlns:D="DAV:"
                      xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:prop>
@@ -251,7 +251,7 @@ let report_7_8_2 =
                           </C:calendar-query>|}
 
 let parse_report_query_7_8_2 () =
-  let xml = report_7_8_2 
+  let xml = report_7_8_2
   and expected =
     Ok (Some (`Proplist [
         `Prop (("DAV:", "getetag")); `Calendar_data (None, Some (`Limit_recurrence_set (to_ptime (2006,01,03) (00,00,00), to_ptime (2006,01,05) (00,00,00))), None) ] ),
@@ -260,7 +260,7 @@ let parse_report_query_7_8_2 () =
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
 
-let report_7_8_3 = 
+let report_7_8_3 =
   header ^ {|<C:calendar-query xmlns:D="DAV:"
                      xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:prop>
@@ -284,7 +284,7 @@ let parse_report_query_7_8_3 () =
   let xml = report_7_8_3
   and expected =
     Ok (Some (`Proplist [
-        `Prop (("DAV:", "getetag")); 
+        `Prop (("DAV:", "getetag"));
         `Calendar_data (None, Some (`Expand (to_ptime (2006,01,03) (00,00,00), to_ptime (2006,01,05) (00,00,00))), None) ] ),
         ("VCALENDAR", `Comp_filter (None, [], [ ("VEVENT", `Comp_filter (Some (to_ptime (2006,01,03) (00,00,00), to_ptime (2006,01,05) (00,00,00)), [], [])) ])))
   in
@@ -315,7 +315,7 @@ let parse_report_query_7_8_4 () =
   let xml = report_7_8_4
   and expected =
     Ok (Some (`Proplist [
-        `Prop (("DAV:", "getetag")); 
+        `Prop (("DAV:", "getetag"));
         `Calendar_data (None, None, Some (`Limit_freebusy_set (to_ptime (2006,01,02) (00,00,00), to_ptime (2006,01,03) (00,00,00)))) ] ),
         ("VCALENDAR", `Comp_filter (None, [], [ ("VFREEBUSY", `Comp_filter (Some (to_ptime (2006,01,02) (00,00,00), to_ptime (2006,01,03) (00,00,00)), [], [])) ])))
   in
@@ -351,7 +351,7 @@ let parse_report_query_7_8_5 () =
                                                             to_ptime (2006,01,07) (10,00,00))),
                                                      [], [])))
                                       ])))
-                     ]))) 
+                     ])))
   in
   Alcotest.(check (result calendar_query string) __LOC__ expected
               (Xml.parse_calendar_query_xml (tree xml)))
@@ -531,17 +531,25 @@ let report_parse_tests = [
   "Parse report query from section 7.8.10", `Quick, parse_report_query_7_8_10
 ]
 
+let config = {
+  principals = "principals" ;
+  calendars = "calendars" ;
+  user_password = [] ;
+  host = Uri.of_string "http://example.com" ;
+  default_acl = [ (`All, `Grant [ `All ]) ]
+}
+
 let appendix_b_data =
   let open Lwt.Infix in
   Lwt_main.run (
     let now = Ptime.v (1, 0L) in
     Mirage_fs_mem.connect "/tmp/caldavtest" >>= fun res_fs ->
-    let props name = Properties.create_dir now name in
+    let props name = Properties.create_dir config.default_acl now name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
     Lwt_list.iter_s (fun (fn, etag, data) ->
-        let props = Properties.create ~content_type:"text/calendar" ~etag 
-            now (String.length data) ("bernard/work/" ^ fn)
+        let props = Properties.create ~content_type:"text/calendar" ~etag
+            config.default_acl now (String.length data) ("bernard/work/" ^ fn)
         in
         Fs.write res_fs (`File [ "bernard" ; "work" ; fn ])
           (Cstruct.of_string data) props >|= fun _ ->
@@ -554,13 +562,13 @@ let appendix_b_1_data =
   Lwt_main.run (
     let now = Ptime.v (1, 0L) in
     Mirage_fs_mem.connect "" >>= fun res_fs ->
-    let props name = Properties.create_dir now name in
+    let props name = Properties.create_dir config.default_acl now name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
     (match Appendix_b.all with
     | (fn, etag, data) :: _ ->
-        let props = Properties.create ~content_type:"text/calendar" ~etag 
-            now (String.length data) ("bernard/work/" ^ fn)
+        let props = Properties.create ~content_type:"text/calendar" ~etag
+            config.default_acl now (String.length data) ("bernard/work/" ^ fn)
         in
         Fs.write res_fs (`File [ "bernard" ; "work" ; fn ])
           (Cstruct.of_string data) props >|= fun _ ->
@@ -1047,7 +1055,7 @@ END:VCALENDAR
               (Ok (tree expected))
               (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
 
-let report_7_8_2_range = 
+let report_7_8_2_range =
   header ^ {|<C:calendar-query xmlns:D="DAV:"
                      xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:prop>
@@ -1122,7 +1130,7 @@ let report_tests = [
 
 let propupdate =
   let module M = struct
-    type t = Xml.propupdate 
+    type t = Xml.propupdate
     let pp = Xml.pp_propupdate
     let equal a b = compare a b = 0
   end in
@@ -1207,13 +1215,13 @@ let mkcol_success () =
       Mirage_fs_mem.connect "" >>= fun res_fs ->
       let props =
         let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
-        Properties.create_dir ~resourcetype now "Special Resource"
+        Properties.create_dir ~resourcetype config.default_acl now "Special Resource"
       in
       Mirage_fs_mem.mkdir res_fs "home" >>= fun _ ->
       Fs.mkdir res_fs (`Dir [ "home" ; "special" ]) props >>= fun _ ->
       Mirage_fs_mem.connect "" >>= fun fs ->
       Mirage_fs_mem.mkdir fs "home" >>= fun _ ->
-      Dav.mkcol ~now fs (Fs.dir_from_string "home/special/") (Some (tree body)) >|= fun r ->
+      Dav.mkcol fs (Fs.dir_from_string "home/special/") config.default_acl now (Some (tree body)) >|= fun r ->
       (res_fs, r))
   in
   Alcotest.(check (result state_testable err_testable) __LOC__
@@ -1239,7 +1247,7 @@ let delete_test () =
       in
       Mirage_fs_mem.write fs ".prop.xml" 0
         (Cstruct.of_string content') >>= fun _ ->
-      Dav.delete ~now res_fs ~path:(`Dir [ "home" ]) >|= fun r ->
+      Dav.delete res_fs ~path:(`Dir [ "home" ]) now >|= fun r ->
       (fs, r))
   in
   Alcotest.(check state_testable __LOC__ res_fs r)
@@ -1249,16 +1257,13 @@ let webdav_api_tests = [
   "delete", `Quick, delete_test
 ]
 
-let config = { principals = "principals" ; calendars = "calendars" ; user_password = [] ; host = Uri.of_string "http://example.com" }
-
 let principal_url principal = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; principal ]))
 
 let test_fs_with_acl path acl = Lwt_main.run (
   let open Lwt.Infix in
   Mirage_fs_mem.connect "" >>= fun fs ->
-  let props = Properties.create_dir (Ptime_clock.now ()) path in
-  let props' = Properties.add (Xml.dav_ns, "acl") acl props in
-  Fs.mkdir fs (`Dir [path]) props' >|= fun _ -> fs)
+  let props = Properties.create_dir acl (Ptime_clock.now ()) path in
+  Fs.mkdir fs (`Dir [path]) props >|= fun _ -> fs)
 
 let deny_all = "deny all", [ (`All, `Deny [ `All ]) ]
 let grant_all ="grant all",  [ (`All, `Grant [ `All ]) ]
@@ -1392,7 +1397,7 @@ let test_cases_for_delete = [
   (grant_write_properties, user "write-props", false); (grant_write_properties, user "invader", false);
   (grant_write_content, user "write-content", false); (grant_write_content, user "invader", false);
   (grant_write_acl, user "write-acl", false); (grant_write_acl, user "invader", false);
-] 
+]
 
 let test_cases_for_mkcol = [
   (grant_all, user "any", true);
@@ -1406,7 +1411,7 @@ let test_cases_for_mkcol = [
   (grant_write_properties, user "write-props", false); (grant_write_properties, user "invader", false);
   (grant_write_content, user "write-content", false); (grant_write_content, user "invader", false);
   (grant_write_acl, user "write-acl", false); (grant_write_acl, user "invader", false);
-] 
+]
 
 (* HTTP verb * requested_path * (access control lists * authenticated user * expected result) list *)
 let acl_test_cases = [
@@ -1426,8 +1431,7 @@ let acl_test_cases = [
 
 let request_calendars_for_acl http_verb request_path aces user_props res () =
   let path = "calendars" in
-  let acl = ([], List.map Xml.ace_to_xml aces ) in
-  let fs = test_fs_with_acl path acl in
+  let fs = test_fs_with_acl path aces in
   Alcotest.(check bool __LOC__ res (Lwt_main.run @@ Dav.access_granted_for_acl fs request_path http_verb user_props))
 
 let webdav_acl_tests (http_verb, request_path, acls_results) =
@@ -1456,7 +1460,7 @@ let find_many_acl_props_empty_forbidden () =
 
 let find_many_acl aces () =
   let userprops = snd @@ user "read-acl"
-  and fqname = (Xml.dav_ns, "acl") 
+  and fqname = (Xml.dav_ns, "acl")
   and aces_xml = List.map Xml.ace_to_xml (snd aces) in
   let properties = Properties.add fqname ([], aces_xml) Properties.empty in
   let expected = [ (`OK, [ Xml.dav_node "acl" aces_xml ]) ] in
@@ -1464,7 +1468,7 @@ let find_many_acl aces () =
 
 let find_many_acl_forbidden principal aces () =
   let userprops = snd @@ user principal
-  and fqname = (Xml.dav_ns, "acl") 
+  and fqname = (Xml.dav_ns, "acl")
   and aces_xml = List.map Xml.ace_to_xml (snd aces) in
   let properties = Properties.add fqname ([], aces_xml) Properties.empty in
   let expected = [ (`Forbidden, [ Xml.dav_node "acl" [] ]) ] in
@@ -1486,8 +1490,8 @@ let find_many_current_user_privset_forbidden principal aces () =
   Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops fqname properties))
 
 let find_many_current_user_privset principal aces privilege () =
-  let userprops = snd @@ user principal 
-  and fqname = (Xml.dav_ns, "current-user-privilege-set") 
+  let userprops = snd @@ user principal
+  and fqname = (Xml.dav_ns, "current-user-privilege-set")
   and aces_xml = List.map Xml.ace_to_xml (snd aces) in
   let properties = Properties.add (Xml.dav_ns, "acl") ([], aces_xml) Properties.empty in
   let privilege_set = [ Xml.dav_node "privilege" [ Xml.priv_to_xml privilege ]] in
@@ -1495,15 +1499,15 @@ let find_many_current_user_privset principal aces privilege () =
   Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops [fqname] properties))
 
 
-let properties_find_many_tests = [ 
+let properties_find_many_tests = [
   "Find many for acl, forbidden", `Quick, find_many_acl_props_empty_forbidden ;
   "Find many for acl", `Quick, find_many_acl grant_read_acl ;
   "Find many for acl, invader can do nothing, read-acl can read_acl", `Quick, find_many_acl_forbidden "invader" grant_read_acl;
   "Find many for acl, invader can only do current-user-privilege-set, but reads acl", `Quick, find_many_acl_forbidden "read-current-user-privilege-set" grant_read_current_user_privilege_set;
   "Find many for acl, read can read - wants to read acl", `Quick, find_many_acl_forbidden "read" grant_read ;
   "Find many for acl, grant_all", `Quick, find_many_acl grant_all ;
-  "Find many for current-user-privilege-set, read can read - wants to read current user privset", `Quick, find_many_current_user_privset_forbidden "read" grant_read ; 
-  "Find many for current-user-privilege-set, read can read, invader can do nothing - wants to read current user privset", `Quick, find_many_current_user_privset_forbidden "invader" grant_read ; 
+  "Find many for current-user-privilege-set, read can read - wants to read current user privset", `Quick, find_many_current_user_privset_forbidden "read" grant_read ;
+  "Find many for current-user-privilege-set, read can read, invader can do nothing - wants to read current user privset", `Quick, find_many_current_user_privset_forbidden "invader" grant_read ;
   "Find many for current-user-privilege-set, forbidden", `Quick, find_many_current_user_privset_empty_forbidden ;
   "Find many for current-user-privilege-set", `Quick, find_many_current_user_privset "read-current-user-privilege-set" grant_read_current_user_privilege_set `Read_current_user_privilege_set ;
   "Find many for current-user-privilege-set, user: read-acl", `Quick, find_many_current_user_privset "read-acl" grant_read_acl `Read_acl;
