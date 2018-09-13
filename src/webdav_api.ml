@@ -111,8 +111,8 @@ module Make(Fs: Webdav_fs.S) = struct
       Fs.get_property_map fs user >|= fun userprops ->
       (* results for props, grouped by code *)
       let propstats = match propfind_request with
-        | `Propname -> [`OK, Properties.propname map]
-        | `All_prop includes -> [`OK, Properties.allprop map] (* TODO: finish this *)
+        | `Propname -> [`OK, Properties.names map]
+        | `All_prop includes -> [`OK, Properties.all map] (* TODO: finish this *)
         | `Props ps -> Properties.find_many ~userprops ps map
       in
       let ps = List.map propstat_node propstats in
@@ -164,56 +164,21 @@ module Make(Fs: Webdav_fs.S) = struct
         | Ok body -> Ok body
         | Error e -> Error e
 
-  let apply_updates ?(validate_key = fun _ -> true) m updates =
-    let set_prop k v m =
-      if validate_key k
-      then
-        (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
-        let map = Properties.add k v m in
-        Some map, (`OK, k)
-      else
-        None, (`Forbidden, k)
-    in
-    (* if an update did not apply, m will be None! *)
-    let apply (m, propstats) update = match m, update with
-      | None, `Set (_, k, _) -> None, (`Failed_dependency, k) :: propstats
-      | None, `Remove k   -> None, (`Failed_dependency, k) :: propstats
-      | Some m, `Set (a, k, v) ->
-        let (m, p) = set_prop k (a, v) m in
-        (m, p :: propstats)
-      | Some m, `Remove k ->
-        let map = Properties.remove k m in
-        Some map, (`OK, k) :: propstats
-    in
-    match List.fold_left apply (Some m, []) updates with
-    | Some m, xs -> Some m, xs
-    | None, xs ->
-      (* some update did not apply -> tree: None *)
-      let ok_to_failed (s, k) =
-        ((match s with
-          | `OK -> `Failed_dependency
-          | x -> x), k)
-      in
-      None, List.map ok_to_failed xs
-
-  let update_properties ?validate_key fs f_or_d updates =
+  let update_properties fs f_or_d updates =
     Fs.get_property_map fs f_or_d >>= fun map ->
-    let map', xs = apply_updates ?validate_key map updates in
-    let propstats =
-      List.map (fun (s, (ns, n)) -> propstat_node (s, [ Xml.node ~ns n [] ])) xs
-    in
+    let map', xs = Properties.patch map updates in
+    let propstats = List.map propstat_node xs in
     (match map' with
-    | None -> Lwt.return (Ok ())
-    | Some m -> Fs.write_property_map fs f_or_d m ) >|= function
-      | Error e -> Error e
-      | Ok () -> Ok propstats
+     | None -> Lwt.return (Ok ())
+     | Some m -> Fs.write_property_map fs f_or_d m) >|= function
+    | Error e -> Error e
+    | Ok () -> Ok propstats
 
   let proppatch state ~host ~path body ~user =
     match Xml.parse_propupdate_xml body with
     | Error _ -> Lwt.return (Error `Bad_request)
     | Ok updates ->
-      let validate_key fqname = List.mem fqname Properties.protected in
-      update_properties ~validate_key state path updates >|= function
+      update_properties state path updates >|= function
       | Error _      -> Error `Bad_request
       | Ok propstats ->
         let nodes =
@@ -239,11 +204,9 @@ module Make(Fs: Webdav_fs.S) = struct
       | Error e -> Lwt.return (Error e)
       | Ok set_props ->
         let col_props = Properties.create_dir acl now (Fs.to_string dir) in
-        match apply_updates col_props set_props with
+        match Properties.patch ~is_mkcol:true col_props set_props with
         | None, errs ->
-          let propstats =
-            List.map (fun (s, (ns, n)) -> propstat_node (s, [ Xml.node ~ns n [] ])) errs
-          in
+          let propstats = List.map propstat_node errs in
           let xml = Xml.dav_node "mkcol-response" propstats in
           Printf.printf "forbidden from body_to_props!\n" ;
           Lwt.return @@ Error (`Forbidden xml)
@@ -657,8 +620,8 @@ module Make(Fs: Webdav_fs.S) = struct
 
   let apply_transformation (t : Xml.report_prop option) d map ~userprops = match t with
     | None -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics ~cr:false d)]]]
-    | Some `All_props -> [`OK, Properties.allprop map]
-    | Some `Propname -> [`OK, Properties.propname map]
+    | Some `All_props -> [`OK, Properties.all map]
+    | Some `Propname -> [`OK, Properties.names map]
     | Some `Proplist ps ->
       let props, calendar_data_transform = List.partition (function `Prop _ -> true | _ -> false) ps in
       let calendar_data_transform' = match calendar_data_transform with

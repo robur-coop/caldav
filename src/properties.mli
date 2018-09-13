@@ -24,10 +24,12 @@ val privileges : userprops:t -> t -> Xml.privilege list
 
 val privilege_met : requirement:Xml.privilege -> Xml.privilege list -> bool
 
-val find_many : userprops:t -> Xml.fqname list -> t -> (Cohttp.Code.status_code * Xml.tree list) list
+val find_many : userprops:t -> Xml.fqname list -> t ->
+  (Cohttp.Code.status_code * Xml.tree list) list
 
-val allprop : t -> Xml.tree list
+val all : t -> Xml.tree list
 
-val propname : t -> Xml.tree list
+val names : t -> Xml.tree list
 
-val protected : Xml.fqname list
+val patch : ?is_mkcol:bool -> t -> Xml.propupdate list ->
+  t option * (Cohttp.Code.status_code * Xml.tree list) list

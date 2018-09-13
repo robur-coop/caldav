@@ -27,6 +27,9 @@ DONE:
 
 - a private calendar which should turn into a public one: how to adjust all the event ACLs? maybe DAV:inherited ACL?
 
+- curl commands to add a user, delete a user, make calendar public/private/read-only/protected (freebusy only)
+- curl command to add group, add group members, delete group members, delete group
+- access control XML content when forbidden
 - client interoperability: android! create new todo lists and new calendars, use different users
 - user management (config file: users, hostname, routing, etc.)
 - research scope of implementing calendar sharing

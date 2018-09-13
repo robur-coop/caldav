@@ -513,6 +513,7 @@ let make_user ?(props = []) fs config name =
     props
   in
   let acl = [ (`Href principal_url, `Grant [ `All ]) ; (`All, `Grant [ `Read ]) ] in
+  (* TODO should root have access to principals/user? *)
   make_dir_if_not_present fs acl ~resourcetype ~props:props' principal_dir >>= fun _ ->
   make_dir_if_not_present fs acl home_set_dir >>= fun _ ->
   create_calendar fs acl (`Dir [config.calendars ; name ; "calendar"]) >>= fun _ ->

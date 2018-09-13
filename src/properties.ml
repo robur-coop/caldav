@@ -41,19 +41,53 @@ let not_returned_by_allprop = [
   (Xml.caldav_ns, "supported-collation-set");
 ]
 
-let protected = [
+let write_protected = [
+  (Xml.dav_ns, "principal-URL");
+  (Xml.dav_ns, "group-membership");
   (Xml.dav_ns, "resourcetype");
   (Xml.dav_ns, "current-user-principal");
   (Xml.dav_ns, "current-user-privilege-set");
 ]
 
+let patch ?(is_mkcol = false) m updates =
+  let set_prop k v m =
+    if List.mem k write_protected && not (is_mkcol && k = (Xml.dav_ns, "resourcetype"))
+    then None, `Forbidden
+    else
+      (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
+      let map = add k v m in
+      Some map, `OK
+  in
+  (* if an update did not apply, m will be None! *)
+  let xml (ns, n) = [ Xml.node ~ns n [] ] in
+  let apply (m, propstats) update = match m, update with
+    | None, `Set (_, k, _) -> None, (`Failed_dependency, xml k) :: propstats
+    | None, `Remove k   -> None, (`Failed_dependency, xml k) :: propstats
+    | Some m, `Set (a, k, v) ->
+      let m, p = set_prop k (a, v) m in
+      (m, (p, xml k) :: propstats)
+    | Some m, `Remove k ->
+      let map = remove k m in
+      Some map, (`OK, xml k) :: propstats
+  in
+  match List.fold_left apply (Some m, []) updates with
+  | Some m, xs -> Some m, xs
+  | None, xs ->
+    (* some update did not apply -> tree: None *)
+    let ok_to_failed (s, k) =
+      ((match s with
+          | `OK -> `Failed_dependency
+          | x -> x), k)
+    in
+    None, List.map ok_to_failed xs
+
 let to_trees m =
   PairMap.fold (fun (ns, k) (a, v) acc ->
     Xml.node ~ns ~a k v :: acc) m []
 
-let allprop m = to_trees (List.fold_right remove not_returned_by_allprop m)
+let all m = to_trees (List.fold_right remove not_returned_by_allprop m)
 
-let propname m =
+let names m =
   List.map (fun (ns, k) -> Xml.node ~ns k []) @@
   (Xml.dav_ns, "current-user-privilege-set") :: keys m
 
