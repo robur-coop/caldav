@@ -539,17 +539,17 @@ let config = {
   default_acl = [ (`All, `Grant [ `All ]) ]
 }
 
-let appendix_b_data =
+let appendix_b_data acl =
   let open Lwt.Infix in
   Lwt_main.run (
     let now = Ptime.v (1, 0L) in
     Mirage_fs_mem.connect "/tmp/caldavtest" >>= fun res_fs ->
-    let props name = Properties.create_dir config.default_acl now name in
+    let props name = Properties.create_dir acl now name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
     Lwt_list.iter_s (fun (fn, etag, data) ->
         let props = Properties.create ~content_type:"text/calendar" ~etag
-            config.default_acl now (String.length data) ("bernard/work/" ^ fn)
+            acl now (String.length data) ("bernard/work/" ^ fn)
         in
         Fs.write res_fs (`File [ "bernard" ; "work" ; fn ])
           (Cstruct.of_string data) props >|= fun _ ->
@@ -557,18 +557,18 @@ let appendix_b_data =
       Appendix_b.all >|= fun () ->
     res_fs)
 
-let appendix_b_1_data =
+let appendix_b_1_data acl =
   let open Lwt.Infix in
   Lwt_main.run (
     let now = Ptime.v (1, 0L) in
     Mirage_fs_mem.connect "" >>= fun res_fs ->
-    let props name = Properties.create_dir config.default_acl now name in
+    let props name = Properties.create_dir acl now name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
     (match Appendix_b.all with
     | (fn, etag, data) :: _ ->
         let props = Properties.create ~content_type:"text/calendar" ~etag
-            config.default_acl now (String.length data) ("bernard/work/" ^ fn)
+            acl now (String.length data) ("bernard/work/" ^ fn)
         in
         Fs.write res_fs (`File [ "bernard" ; "work" ; fn ])
           (Cstruct.of_string data) props >|= fun _ ->
@@ -599,7 +599,8 @@ let test_report_1 () =
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml) appendix_b_1_data))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+                 (appendix_b_1_data config.default_acl)))
 
 let test_report_7_8_1 () =
   let xml = report_7_8_1
@@ -700,7 +701,8 @@ END:VCALENDAR
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+                 (appendix_b_data config.default_acl)))
 
 
 let test_report_7_8_2 () =
@@ -807,7 +809,8 @@ END:VCALENDAR
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+                 (appendix_b_data config.default_acl)))
 
 let test_report_7_8_3 () =
   let xml = report_7_8_3
@@ -877,7 +880,8 @@ END:VCALENDAR
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+                 (appendix_b_data config.default_acl)))
 
 let test_report_7_8_4 () =
   let xml = report_7_8_4
@@ -911,7 +915,8 @@ END:VCALENDAR
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+                 (appendix_b_data config.default_acl)))
 
 let test_report_7_8_5 () =
   let xml = report_7_8_5
@@ -968,7 +973,8 @@ END:VCALENDAR
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+                 (appendix_b_data config.default_acl)))
 
 let multiget_7_9_1 = header ^ {|
    <C:calendar-multiget xmlns:D="DAV:"
@@ -1053,7 +1059,8 @@ END:VCALENDAR
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+                 (appendix_b_data config.default_acl)))
 
 let report_7_8_2_range =
   header ^ {|<C:calendar-query xmlns:D="DAV:"
@@ -1108,7 +1115,8 @@ let test_report_7_8_2_range () =
      ))  in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok expected)
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml) (appendix_b_data)))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+                 (appendix_b_data config.default_acl)))
 
 
 let report_tests = [
@@ -1514,6 +1522,135 @@ let properties_find_many_tests = [
   "Find many for current-user-privilege-set, user: somebody", `Quick, find_many_current_user_privset "somebody" grant_all `All ;
 ]
 
+let test_report_1_deny () =
+  let xml = report_7_8_1
+  and expected =
+    Xml.dav_node "multistatus" ~a:[(("http://www.w3.org/2000/xmlns/", "D"), "DAV:")]
+      [ Xml.dav_node "response"
+          [ Xml.dav_node "href" [ Xml.Pcdata "http://cal.example.com/bernard/work/abcd1.ics" ] ;
+            Xml.dav_node "status" [ Xml.Pcdata "HTTP/1.1 403 Forbidden" ] ]]
+  in
+  Alcotest.(check (result t_tree string) __LOC__
+              (Ok expected)
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+                 (appendix_b_1_data @@ snd deny_all)))
+
+let test_report_7_8_1_deny () =
+  let xml = report_7_8_1
+  and expected = header ^ {|
+<D:multistatus xmlns:D="DAV:">
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd1.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd2.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd3.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd4.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd5.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd6.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd7.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd8.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+   </D:multistatus>
+|}
+  in
+  Alcotest.(check (result t_tree string) __LOC__
+              (Ok (tree expected))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+                 (appendix_b_data @@ snd deny_all)))
+
+let test_report_7_8_2_deny () =
+  let xml = report_7_8_2
+  and expected = header ^ {|
+<D:multistatus xmlns:D="DAV:">
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd1.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd2.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd3.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd4.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd5.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd6.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd7.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd8.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+   </D:multistatus>
+|}
+  in
+  Alcotest.(check (result t_tree string) __LOC__
+              (Ok (tree expected))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+                 (appendix_b_data @@ snd deny_all)))
+
+let test_multiget_7_9_1_deny () =
+  let xml = multiget_7_9_1
+  and expected = header ^ {|
+   <D:multistatus xmlns:D="DAV:">
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/abcd1.ics</D:href>
+       <D:status>HTTP/1.1 403 Forbidden</D:status>
+     </D:response>
+     <D:response>
+       <D:href>http://cal.example.com/bernard/work/mtg1.ics</D:href>
+       <D:status>HTTP/1.1 404 Not Found</D:status>
+     </D:response>
+   </D:multistatus>|}
+  in
+  Alcotest.(check (result t_tree string) __LOC__
+              (Ok (tree expected))
+              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+                 (appendix_b_data @@ snd deny_all)))
+
+
+let report_with_acl_tests = [
+  "Report 1, denied", `Quick, test_report_1_deny ;
+  "Report 7_8_1, denied", `Quick, test_report_7_8_1_deny ;
+  "Report 7_8_2, denied", `Quick, test_report_7_8_2_deny ;
+  (* remaining reports behave the same way for acl = deny all *)
+  "Report 7_9_1, denied", `Quick, test_multiget_7_9_1_deny ;
+]
+
 let tests = [
   "Read propfind", parse_propfind_xml_tests ;
   "Read propertyupdate", parse_propupdate_xml_tests ;
@@ -1522,6 +1659,7 @@ let tests = [
   "Webdav API", webdav_api_tests ;
   "ACL tests", List.flatten @@ List.map webdav_acl_tests acl_test_cases ;
   "Properties.find_many tests", properties_find_many_tests ;
+  "Report with ACL tests", report_with_acl_tests ;
 ]
 
 let () =
