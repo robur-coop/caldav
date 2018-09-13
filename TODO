@@ -17,24 +17,26 @@ DONE:
 - timezone and date normalisation
 - finish tests for access control for all verbs
 - implement access control for report, and covered by test suite
+- access control (WebDAV)
+- user management (config file: users, hostname, routing, etc.)
+- how to add user and set acl
+
+- readonly xml props (sind live properties) - there may still be more (in caldav/acl)
 
 -- 31st August 2018:
 
 - automatic discovery of calendar url
 - test access control with apple and thunderbird
-- readonly xml props (sind live properties)
-- how to add user and set acl
 
 - a private calendar which should turn into a public one: how to adjust all the event ACLs? maybe DAV:inherited ACL?
 
 - curl commands to add a user, delete a user, make calendar public/private/read-only/protected (freebusy only)
 - curl command to add group, add group members, delete group members, delete group
+  - add group calendar, remove group calendar
 - access control XML content when forbidden
 - client interoperability: android! create new todo lists and new calendars, use different users
-- user management (config file: users, hostname, routing, etc.)
 - research scope of implementing calendar sharing
 - internationalisation (unicode)
-- access control (WebDAV)
 - report text-match
 - icalendar CLASS property: public / private / ...
 - sync-collection (WebDAV) ctag
@@ -46,6 +48,7 @@ DONE:
   - inboxes
 - more tests from apple's test suite
 - component_in_timerange implementations (todo/freebusy)
+- preserve creation-date on write_component if it was already there
 - report CalDAV 7.8.6 - 7.8.10
 - attachments
 - recurrence < daily

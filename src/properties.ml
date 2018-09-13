@@ -47,6 +47,8 @@ let write_protected = [
   (Xml.dav_ns, "resourcetype");
   (Xml.dav_ns, "current-user-principal");
   (Xml.dav_ns, "current-user-privilege-set");
+  (Xml.dav_ns, "content-length");
+  (Xml.dav_ns, "etag");
 ]
 
 let patch ?(is_mkcol = false) m updates =
