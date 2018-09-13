@@ -393,19 +393,19 @@ end
 let server_ns = "http://calendarserver.org/ns/"
 let carddav_ns = "urn:ietf:params:xml:ns:carddav"
 
-let make_dir fs config ?(resourcetype = []) ?(props=[]) dir =
+let make_dir fs acl ?(resourcetype = []) ?(props=[]) dir =
   let propmap =
-    Properties.create_dir ~resourcetype config.default_acl (Ptime_clock.now ()) (Fs.basename (dir :> file_or_dir))
+    Properties.create_dir ~resourcetype acl (Ptime_clock.now ()) (Fs.basename (dir :> file_or_dir))
   in
   let propmap' = List.fold_left (fun p (k, v) -> Properties.add k v p) propmap props in
   Fs.mkdir fs dir propmap'
 
-let make_dir_if_not_present fs config ?resourcetype ?props dir =
+let make_dir_if_not_present fs acl ?resourcetype ?props dir =
   Fs.dir_exists fs dir >>= fun exists ->
-  (*  if not exists then *)
-    make_dir fs config ?resourcetype ?props dir >|= fun _ -> ()
-(*  else
-    Lwt.return_unit *)
+  if not exists then
+    make_dir fs acl ?resourcetype ?props dir >|= fun _ -> ()
+  else
+    Lwt.return_unit
 
 let grant_test config =
   let url = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; "test" ])) in
@@ -414,69 +414,97 @@ let grant_test config =
 let deny_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Deny [ `All ]) ])
 let grant_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Grant [ `All ]) ])
 
-let initialise_fs fs config =
-  let create_calendar fs config name =
-    let props =
-      let reports = [
-        Xml.caldav_ns, "calendar-query" ;
-        Xml.caldav_ns, "calendar-multiget" ;
-(*        Xml.dav_ns, "acl-principal-prop-set" ;
-        Xml.dav_ns, "principal-match" ;
-        Xml.dav_ns, "principal-property-search" ;
-        Xml.dav_ns, "expand-property" ;
-        server_ns, "calendarserver-principal-search" ;
-        Xml.caldav_ns, "free-busy-query" ;
-        carddav_ns, "addressbook-query" ;
-          carddav_ns, "addressbook-multiget" *)
-        (* Xml.dav_ns, "sync-collection" *)
-      ] in
-      let report_nodes =
-        List.map (fun (ns, s) ->
-            Xml.node ~ns:Xml.dav_ns "supported-report"
-              [ Xml.node ~ns:Xml.dav_ns "report"
-                  [ Xml.node ~ns s [] ] ])
-          reports
-      in
-      let comps =
-        List.map (fun s ->
-            Xml.node ~ns:Xml.caldav_ns "comp" ~a:[(("", "name"), s)] [])
-          [ "VEVENT" ; "VTODO" ; "VTIMEZONE" ; "VFREEBUSY" ]
-      in
-      [
+let create_calendar fs acl name =
+  let props =
+    let reports = [
+      Xml.caldav_ns, "calendar-query" ;
+      Xml.caldav_ns, "calendar-multiget" ;
+   (* Xml.dav_ns, "acl-principal-prop-set" ;
+      Xml.dav_ns, "principal-match" ;
+      Xml.dav_ns, "principal-property-search" ;
+      Xml.dav_ns, "expand-property" ;
+      server_ns, "calendarserver-principal-search" ;
+      Xml.caldav_ns, "free-busy-query" ;
+      carddav_ns, "addressbook-query" ;
+      carddav_ns, "addressbook-multiget" *)
+   (* Xml.dav_ns, "sync-collection" *)
+    ] in
+    let report_nodes =
+      List.map (fun (ns, s) ->
+          Xml.dav_node "supported-report"
+            [ Xml.dav_node "report" [ Xml.node ~ns s [] ] ])
+        reports
+    in
+    let comps =
+      List.map (fun s ->
+          Xml.node ~ns:Xml.caldav_ns "comp" ~a:[(("", "name"), s)] [])
+        [ "VEVENT" ; "VTODO" ; "VTIMEZONE" ; "VFREEBUSY" ]
+    in
+    [
       (Xml.dav_ns, "supported-report-set"), ([], report_nodes) ;
       (Xml.caldav_ns, "supported-calendar-component-set"), ([], comps) ;
       (* (server_ns, "getctag"), ([], [ Xml.pcdata "hallo" ]) *)
       (* (Xml.dav_ns, "owner"), ([], [ Xml.pcdata "/principals/__uids__/10000000-0000-0000-0000-000000000001" ]) ; *)
-      (* (Xml.dav_ns, "current-user-principal"), ([], [ Xml.pcdata "/principals/__uids__/10000000-0000-0000-0000-000000000001" ]) ; *)
     ] in
-    let resourcetype = [ Xml.node ~ns:Xml.caldav_ns "calendar" [] ] in
-    make_dir_if_not_present fs config ~resourcetype ~props:(grant_test config :: props) name
-  in
+  let resourcetype = [ Xml.node ~ns:Xml.caldav_ns "calendar" [] ] in
+  make_dir_if_not_present fs acl ~resourcetype ~props name
+
+let initialise_fs_for_apple_testsuite fs config =
   let calendars_properties =
-    let url = Uri.with_path config.host (config.calendars ^ "/__uids__/10000000-0000-0000-0000-000000000001/calendar") in
+    let url =
+      Uri.with_path config.host
+        (config.calendars ^ "/__uids__/10000000-0000-0000-0000-000000000001/calendar")
+    in
     [
     (Xml.caldav_ns, "calendar-home-set"),
     ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata (Uri.to_string url) ]])
   ] in
-  make_dir_if_not_present fs config ~props:calendars_properties (`Dir [config.calendars]) >>= fun _ ->
-  make_dir_if_not_present fs config (`Dir [config.calendars ; "users"]) >>= fun _ ->
-  make_dir_if_not_present fs config (`Dir [config.calendars ; "__uids__"]) >>= fun _ ->
-  make_dir_if_not_present fs config (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001"]) >>= fun _ ->
-  create_calendar fs config (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "calendar" ]) >>= fun _ ->
-  make_dir_if_not_present fs config (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "tasks"]) >>= fun _ ->
+  let acl = config.default_acl in
+  make_dir_if_not_present fs acl ~props:calendars_properties (`Dir [config.calendars]) >>= fun _ ->
+  make_dir_if_not_present fs acl (`Dir [config.calendars ; "users"]) >>= fun _ ->
+  make_dir_if_not_present fs acl (`Dir [config.calendars ; "__uids__"]) >>= fun _ ->
+  make_dir_if_not_present fs acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001"]) >>= fun _ ->
+  create_calendar fs acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "calendar" ]) >>= fun _ ->
+  make_dir_if_not_present fs acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "tasks"]) >>= fun _ ->
   Lwt.return_unit
 
+let initialise_fs fs config =
+  make_dir_if_not_present fs config.default_acl (`Dir [config.principals]) >>= fun _ ->
+  make_dir_if_not_present fs config.default_acl (`Dir [config.calendars]) >>= fun _ ->
+  Lwt.return_unit
+
+(* use config.user_password for initial structure
+  /principals/ -- config.principals WebDAV
+  /principals/user/ -- WebDAV -- principal-URL for user user, prop.xml <- contains calendar-home-set
+  /calendars/  -- config.calendars WebDAV
+  /calendars/user/ -- WebDAV
+  /calendars/user/calendar/ -- CalDAV - default calendar
+  /calendars/user/my_other_calendar/ -- CalDAV
+
+PROPFIND /calendars -- eingeloggt als user -- <principal-URL>
+--> <principal-URL>http://.../principals/user/
+
+PROPFIND /principals/user -- <calendar-home-set>
+--> <calendar-home-set><href>http://.../calendars/user/</calendar-home-set>
+ *)
+
 let make_user ?(props = []) fs config name =
-  make_dir_if_not_present fs config (`Dir [ config.principals ]) >>= fun _ ->
   let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
-  let user_home = `Dir [ config.principals ; name ] in
-  let url = Uri.with_path config.host (Fs.to_string (user_home :> file_or_dir)) in
+  let get_url dir = Uri.to_string @@ Uri.with_path config.host (Fs.to_string (dir :> file_or_dir)) in
+  let principal_dir = `Dir [ config.principals ; name ] in
+  let principal_url = get_url principal_dir in
+  let home_set_dir = `Dir [ config.calendars ; name ] in
+  let home_set_url = get_url home_set_dir in
   let props' =
     ((Xml.dav_ns, "principal-URL"),
-     ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata (Uri.to_string url) ] ]))
-    :: props
+     ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata principal_url ] ]))
+    :: ((Xml.caldav_ns, "calendar-home-set"),
+        ([], [Xml.dav_node "href" [Xml.pcdata home_set_url ]])) ::
+    props
   in
-  make_dir_if_not_present fs config ~resourcetype ~props:props' user_home >>= fun _ ->
+  make_dir_if_not_present fs config.default_acl ~resourcetype ~props:props' principal_dir >>= fun _ ->
+  make_dir_if_not_present fs config.default_acl home_set_dir >>= fun _ ->
+  create_calendar fs config.default_acl (`Dir [config.calendars ; name ; "calendar"]) >>= fun _ ->
   Lwt.return_unit
 
 let make_group fs config name members =
@@ -509,10 +537,11 @@ let make_group fs config name members =
     new_member_paths
 
 let init_users fs config =
-  make_user fs config "root" >>= fun () ->
+  Lwt_list.iter_p (make_user fs config) (List.map fst config.user_password)
+(*  make_user fs config "root" >>= fun () ->
   make_user fs config "nobody" >>= fun () ->
   make_user fs config "test" >>= fun () ->
-  make_group fs config "group" ["root" ; "test"]
+    make_group fs config "group" ["root" ; "test"] *)
 
 let main () =
   (* listen on port 8080 *)
@@ -529,11 +558,12 @@ let main () =
       ("test", hash_password "password") ;
       ("root", hash_password "toor") ;
       ("nobody", hash_password "1") ] ;
-    default_acl = [ (`All, `Deny [ `All ]) ]
+    default_acl = [ (`All, `Grant [ `All ]) ]
   } in
   (* create the file system *)
   FS_unix.connect "/tmp/calendar" >>= fun fs ->
   (* only for apple test suite *)
+  (* initialise_fs_for_apple_testsuite fs config >>= fun () -> *)
   initialise_fs fs config >>= fun () ->
   init_users fs config >>= fun () ->
   (* the route table *)

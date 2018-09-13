@@ -16,10 +16,10 @@ DONE:
 - slash normalisation with prefix
 - timezone and date normalisation
 - finish tests for access control for all verbs
+- implement access control for report, and covered by test suite
 
 -- 31st August 2018:
 
-- implement access control for report
 - automatic discovery of calendar url
 - test access control with apple and thunderbird
 - readonly xml props (sind live properties)

@@ -43,6 +43,8 @@ let not_returned_by_allprop = [
 
 let protected = [
   (Xml.dav_ns, "resourcetype");
+  (Xml.dav_ns, "current-user-principal");
+  (Xml.dav_ns, "current-user-privilege-set");
 ]
 
 let to_trees m =
@@ -141,33 +143,39 @@ let privilege_met ~requirement privileges =
   | `Unbind, `Unbind -> true
   | _ -> false ) privileges
 
-let can_read_prop fqname privileges = 
+let can_read_prop fqname privileges =
   let requirement = match fqname with
     | ns, "current-user-privilege-set" when ns = Xml.dav_ns -> Some `Read_current_user_privilege_set
     | ns, "acl" when ns = Xml.dav_ns -> Some `Read_acl
     | _ -> None
   in
-  match requirement with 
-  | Some requirement -> privilege_met ~requirement privileges 
+  match requirement with
+  | Some requirement -> privilege_met ~requirement privileges
   | None -> true
 
-let get_prop userprops m = function 
-| ns, "current-user-privilege-set" when ns = Xml.dav_ns -> current_user_privilege_set ~userprops m 
-| fqname -> find fqname m
+let current_user_principal props =
+  match find (Xml.dav_ns, "principal-URL") props with
+  | None -> Some ([], [ Xml.dav_node "unauthenticated" [] ])
+  | Some url -> Some url
+
+let get_prop userprops m = function
+  | ns, "current-user-privilege-set" when ns = Xml.dav_ns -> current_user_privilege_set ~userprops m
+  | ns, "current-user-principal" when ns = Xml.dav_ns -> current_user_principal userprops
+  | fqname -> find fqname m
 
 let find_many ~userprops property_names m =
   let privileges = privileges ~userprops m in
   let props = List.map (fun fqname ->
     if can_read_prop fqname privileges
-    then match get_prop userprops m fqname with 
+    then match get_prop userprops m fqname with
       | None -> `Not_found
       | Some v -> `Found v
     else `Forbidden
   ) property_names in
   let results = List.map2 (fun (ns, name) p -> p, match p with
-  | `Found (a, c) -> Xml.node ~ns ~a name c
-  | `Forbidden  
-  | `Not_found    -> Xml.node ~ns name []) property_names props
+    | `Found (a, c) -> Xml.node ~ns ~a name c
+    | `Forbidden
+    | `Not_found    -> Xml.node ~ns name []) property_names props
   in
   (* group by return code *)
   let found, rest = List.partition (function | `Found _, _ -> true | _ -> false) results in
