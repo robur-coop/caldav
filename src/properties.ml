@@ -59,11 +59,14 @@ let to_string m =
   let c = to_trees m in
   Xml.tree_to_string (Xml.dav_node "prop" c)
 
+let default_policy = (`All, `Grant [ `All ])
+
 let create ?(content_type = "text/html") ?(language = "en") ?etag ?(resourcetype = []) timestamp length filename =
   let filename = if filename = "" then "hinz und kunz" else filename in
   let etag' m = match etag with None -> m | Some e -> PairMap.add (Xml.dav_ns, "getetag") ([], [ Xml.Pcdata e ]) m in
   let timestamp' = Ptime.to_rfc3339 timestamp in
   etag' @@
+  PairMap.add (Xml.dav_ns, "acl") ([], [ Xml.ace_to_xml default_policy ]) @@
   PairMap.add (Xml.dav_ns, "creationdate") ([], [ Xml.Pcdata timestamp' ]) @@
   PairMap.add (Xml.dav_ns, "displayname") ([], [ Xml.Pcdata filename ]) @@
   PairMap.add (Xml.dav_ns, "getcontentlanguage") ([], [ Xml.Pcdata language ]) @@

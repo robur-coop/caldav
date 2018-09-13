@@ -105,7 +105,7 @@ module Make(Fs: Webdav_fs.S) = struct
 
   let property_selector fs host propfind_request user f_or_d =
     Fs.get_property_map fs f_or_d >>= fun map ->
-    if map = Properties.empty 
+    if map = Properties.empty
     then Lwt.return `Not_found
     else
       Fs.get_property_map fs user >|= fun userprops ->
@@ -165,8 +165,8 @@ module Make(Fs: Webdav_fs.S) = struct
         | Error e -> Error e
 
   let apply_updates ?(validate_key = fun _ -> true) m updates =
-    let set_prop k v m = 
-      if validate_key k 
+    let set_prop k v m =
+      if validate_key k
       then
         (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
         let map = Properties.add k v m in
@@ -223,13 +223,11 @@ module Make(Fs: Webdav_fs.S) = struct
         let status = multistatus [ nodes ] in
         Ok (state, status)
 
-  let body_to_proppatch body =
-    match body with
+  let body_to_proppatch = function
     | None -> Ok []
-    | Some body' ->
-    match Xml.parse_mkcol_xml body' with
-    | Error _ -> Error `Bad_request
-    | Ok set_props -> Ok set_props
+    | Some body' -> match Xml.parse_mkcol_xml body' with
+      | Error _ -> Error `Bad_request
+      | Ok set_props -> Ok set_props
 
   (* assumption: path is a relative path! *)
   let mkcol ?(now = Ptime_clock.now ()) state (`Dir d as dir) body =
@@ -239,7 +237,7 @@ module Make(Fs: Webdav_fs.S) = struct
     | false -> Lwt.return (Error `Conflict)
     | true -> match body_to_proppatch body with
       | Error e -> Lwt.return (Error e)
-      | Ok set_props -> 
+      | Ok set_props ->
         let col_props = Properties.create_dir now (Fs.to_string dir) in
         match apply_updates col_props set_props with
         | None, errs ->
@@ -249,7 +247,7 @@ module Make(Fs: Webdav_fs.S) = struct
           let xml = Xml.dav_node "mkcol-response" propstats in
           Printf.printf "forbidden from body_to_props!\n" ;
           Lwt.return @@ Error (`Forbidden xml)
-        | Some map, _ -> 
+        | Some map, _ ->
           Fs.mkdir state dir map >|= function
           | Error _ -> Error `Conflict
           | Ok () -> Ok state
@@ -737,30 +735,29 @@ module Make(Fs: Webdav_fs.S) = struct
     let report_one (filename : string) =
       Printf.printf "calendar_multiget: filename %s\n%!" filename ;
       let file = Fs.file_from_string filename in
-      Fs.get_property_map state (file :> Webdav_fs.file_or_dir) >>= fun props ->
-      let privileges = Properties.privileges ~userprops props in
-      if not (Properties.privilege_met ~requirement:`Read privileges) then
-        let node = Xml.dav_node "response"
+      Fs.read state file >|= function
+      | Error _ ->
+        let node =
+          Xml.dav_node "response"
             [ Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Webdav_fs.file_or_dir)) ] ;
-              Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
+              Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Not_found) ] ]
         in
-        Lwt.return @@ Ok node
-      else
-        Fs.read state file >|= function
-        | Error _ ->
-          let node =
-            Xml.dav_node "response"
+        Ok node
+      | Ok (data, props) ->
+        let privileges = Properties.privileges ~userprops props in
+        if not (Properties.privilege_met ~requirement:`Read privileges) then
+          let node = Xml.dav_node "response"
               [ Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Webdav_fs.file_or_dir)) ] ;
-                Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Not_found) ] ]
+                Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
           in
           Ok node
-        | Ok (data, map) ->
+        else
           match Icalendar.parse (Cstruct.to_string data) with
           | Error e ->
             Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
             Error `Bad_request
           | Ok ics ->
-            let xs = apply_transformation transformation ics map ~userprops in
+            let xs = apply_transformation transformation ics props ~userprops in
             let node =
               Xml.dav_node "response"
                 (Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Webdav_fs.file_or_dir)) ]
@@ -825,7 +822,7 @@ module Make(Fs: Webdav_fs.S) = struct
      | `Target -> Fs.from_string fs path
      | `Parent -> Lwt.return @@ Ok (Fs.parent @@ (Fs.file_from_string path :> Webdav_fs.file_or_dir) :> Webdav_fs.file_or_dir)) >>= function
     | Error _ -> Lwt.return Properties.empty
-    | Ok f_or_d -> Fs.get_property_map fs f_or_d 
+    | Ok f_or_d -> Fs.get_property_map fs f_or_d
 
   let access_granted_for_acl fs path http_verb userprops =
     Fs.exists fs path >>= fun target_exists ->

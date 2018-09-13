@@ -1205,13 +1205,12 @@ let mkcol_success () =
     Lwt_main.run (
       let now = Ptime.v (1, 0L) in
       Mirage_fs_mem.connect "" >>= fun res_fs ->
-      let content = {_|<?xml version="1.0" encoding="utf-8" ?>
-<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-02T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
+      let props =
+        let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
+        Properties.create_dir ~resourcetype now "Special Resource"
       in
       Mirage_fs_mem.mkdir res_fs "home" >>= fun _ ->
-      Mirage_fs_mem.mkdir res_fs "home/special" >>= fun _ ->
-      Mirage_fs_mem.write res_fs "home/special/.prop.xml" 0
-        (Cstruct.of_string content) >>= fun _ ->
+      Fs.mkdir res_fs (`Dir [ "home" ; "special" ]) props >>= fun _ ->
       Mirage_fs_mem.connect "" >>= fun fs ->
       Mirage_fs_mem.mkdir fs "home" >>= fun _ ->
       Dav.mkcol ~now fs (Fs.dir_from_string "home/special/") (Some (tree body)) >|= fun r ->
