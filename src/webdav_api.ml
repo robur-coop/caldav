@@ -691,24 +691,30 @@ module Make(Fs: Webdav_fs.S) = struct
     let report_one query = function
       | `Dir _ -> Lwt.return (Error `Bad_request)
       | `File f ->
-        (* TODO check if we're allowed to read the file file *)
         Fs.read state (`File f) >|= function
         | Error _ -> Error `Bad_request
-        | Ok (data, map) ->
-          match Icalendar.parse (Cstruct.to_string data) with
-          | Error e ->
-            Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
-            Error `Bad_request
-          | Ok ics ->
-            match apply_to_vcalendar query ics map ~userprops with
-            | [] -> Ok None
-            | xs ->
-              let node =
-                Xml.dav_node "response"
-                  (Xml.dav_node "href" [ Xml.pcdata (uri_string host (`File f)) ]
-                   :: List.map propstat_node xs)
-              in
-              Ok (Some node)
+        | Ok (data, props) ->
+          let privileges = Properties.privileges ~userprops props in
+          if not (Properties.privilege_met ~requirement:`Read privileges) then
+            let node = Xml.dav_node "response"
+                [ Xml.dav_node "href" [ Xml.pcdata (uri_string host (`File f)) ] ;
+                  Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
+            in
+            Ok (Some node)
+          else match Icalendar.parse (Cstruct.to_string data) with
+            | Error e ->
+              Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
+              Error `Bad_request
+            | Ok ics ->
+              match apply_to_vcalendar query ics props ~userprops with
+              | [] -> Ok None
+              | xs ->
+                let node =
+                  Xml.dav_node "response"
+                    (Xml.dav_node "href" [ Xml.pcdata (uri_string host (`File f)) ]
+                     :: List.map propstat_node xs)
+                in
+                Ok (Some node)
     in
     match path with
     | `File f ->
