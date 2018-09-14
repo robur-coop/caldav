@@ -140,7 +140,9 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
   let write_property_map fs f_or_d map =
     let map' = match f_or_d with
       | `File _ -> map
-      | `Dir _ -> Properties.remove (Xml.dav_ns, "getetag") map
+      | `Dir _ -> 
+        let map' = Properties.remove (Xml.dav_ns, "getetag") map in
+        Properties.remove (Xml.dav_ns, "getlastmodified") map'
     in
     let data = Properties.to_string map' in
     let filename = to_string (propfilename f_or_d) in
@@ -263,7 +265,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
           | Some (_, [ Xml.Pcdata rfc3339 ]) ->
             begin match Ptime.of_rfc3339 rfc3339 with
               | Error _ ->
-                Printf.printf "invalid data!\n" ;
+                Printf.printf "invalid data on get property map!\n" ;
                 assert false
               | Ok (ts, _, _) ->
                 let http_date = Xml.ptime_to_http_date ts in

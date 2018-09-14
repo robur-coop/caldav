@@ -107,7 +107,7 @@ let verify_auth_header user_password v =
 let calendar_to_collection data =
   if data = "" then Ok "" else
   match Xml.string_to_tree data with
-  | Some (Xml.Node (ns, "mkcalendar", a, c)) when ns = Xml.dav_ns -> Ok (Xml.tyxml_to_body (Xml.tree_to_tyxml (Xml.node ~ns:Xml.dav_ns ~a "mkcol" c)))
+  | Some (Xml.Node (ns, "mkcalendar", a, c)) when ns = Xml.caldav_ns -> Ok (Xml.tyxml_to_body (Xml.tree_to_tyxml (Xml.node ~ns:Xml.dav_ns ~a "mkcol" c)))
   | _ -> Error `Bad_request
 
 let parent_acl fs file =
