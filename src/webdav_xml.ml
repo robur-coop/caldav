@@ -139,31 +139,37 @@ let rec tree_fold_left f s forest = match forest with
 
 let new_identifier map ns =
   let taken s = M.exists (fun _ v -> String.equal v s) map in
-  let rec gen i =
-    let id = String.make 1 (char_of_int i) in
-    if taken id then gen (succ i) else id in
+  let alphabet_start = int_of_char 'A' in
+  let gen_char i =  
+    let alphabet_len = 26 in
+    i / alphabet_len, String.make 1 (char_of_int @@ alphabet_start + (i mod alphabet_len)) in
+  let rec gen_id i =
+    let remaining, identifier = gen_char i in
+    if remaining = 0 then identifier else gen_id remaining ^ identifier in
+  let rec generate i =
+    let id = gen_id i in
+    if taken id then generate (succ i) else id in
   let start =
-    (* TODO this is brittle - need to check whether D and C is already used *)
+    (* D and C can be stolen if three other namespaces come first *)
     if ns = dav_ns then 'D'
     else if ns = caldav_ns then 'C'
     else 'A'
   in
-  gen (int_of_char start)
+  generate (int_of_char start - alphabet_start)
 
 (* apply_variables <map> <Tyxml> -> <list of trees> *)
 let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
   | Node (ns, n, a, c) ->
     let ns_map', a' = List.fold_left (fun (m, a) ((ns, key), value as attr) ->
-        (* TODO do we reuse the same short letter (A, B, C ..)? *)
         if ns = Xmlm.ns_xmlns then
           match M.find_opt value m with
           | Some binding -> m, a 
           | None ->
             if key = "xmlns" then
-              M.add value "" m, attr :: a
+              M.add value "" m, a
             else
               let key' = if M.exists (fun _ v -> String.equal v key) m then new_identifier m value else key in
-              M.add value key' m, (*((ns, key'), value) ::*) a
+              M.add value key' m, a
         else
           m, attr :: a) (ns_map, []) a
     in
