@@ -162,7 +162,8 @@ let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
             if key = "xmlns" then
               M.add value "" m, attr :: a
             else
-              M.add value key m, attr :: a
+              let key' = if M.exists (fun _ v -> String.equal v key) m then new_identifier m value else key in
+              M.add value key' m, (*((ns, key'), value) ::*) a
         else
           m, attr :: a) (ns_map, []) a
     in

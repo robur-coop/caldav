@@ -19,6 +19,8 @@ let empty = PairMap.empty
 
 let keys m = List.map fst (PairMap.bindings m)
 
+let count = PairMap.cardinal
+
 let not_returned_by_allprop = [
   (Xml.dav_ns, "owner");
   (Xml.dav_ns, "group");
@@ -96,6 +98,16 @@ let names m =
 let to_string m =
   let c = to_trees m in
   Xml.tree_to_string (Xml.dav_node "prop" c)
+
+let pp ppf t = Fmt.string ppf @@ to_string t
+
+let equal a b = 
+  String.equal (to_string a) (to_string b)
+  (*let compare (attrs, trees) (attrs', trees') = 
+    List.length attrs = List.length attrs' && 
+    List.length trees = List.length trees' && 
+    List.for_all2 Xml.equal_attribute attrs attrs' && List.for_all2 Xml.equal_tree trees trees' in
+  PairMap.equal compare a b*)
 
 let create ?(content_type = "text/html") ?(language = "en") ?etag ?(resourcetype = []) acl timestamp length filename =
   let filename = if filename = "" then "hinz und kunz" else filename in

@@ -252,6 +252,7 @@ class handler config fs = object(self)
       Fs.get_property_map fs user_path
     in
     get_property_map_for_user user >>= fun auth_user_props ->
+    Printf.printf "User %s auth user props %d \n" user (Properties.count auth_user_props); 
     Dav.access_granted_for_acl fs path rd.Wm.Rd.meth auth_user_props >>= fun granted ->
     Wm.continue (not granted) rd
 
@@ -398,6 +399,25 @@ class handler config fs = object(self)
       String.sub p 1 (String.length p - 1)
     else
       p *)
+end
+
+class redirect config = object(self)
+  inherit [Cohttp_lwt.Body.t] Wm.resource
+
+  method allowed_methods rd =
+    Wm.continue [`GET ; `Other "PROPFIND"] rd
+
+  method content_types_provided rd =
+    Wm.continue [
+      ("*/*"       , self#redirect);
+    ] rd
+
+  method content_types_accepted rd =
+    Wm.continue [] rd
+
+  method private redirect rd =
+    let rd' = Wm.Rd.redirect (Uri.to_string @@ Uri.with_path config.host config.calendars) rd in
+    Wm.respond 301 rd'
 end
 
 let server_ns = "http://calendarserver.org/ns/"
@@ -572,7 +592,7 @@ let main () =
       ("root", hash_password "toor") ;
       ("nobody", hash_password "1") ] ;
     default_acl = [ (`Href (Uri.with_path host @@ "/" ^ principals ^ "/root/"),
-                     `Grant [ `All ]) ]
+                     `Grant [ `All ]) ; (`All, `Grant [`Read]) ]
   } in
   (* create the file system *)
   FS_unix.connect "/tmp/calendar" >>= fun fs ->
@@ -582,6 +602,7 @@ let main () =
   init_users fs config >>= fun () ->
   (* the route table *)
   let routes = [
+    ("/.well-known/caldav", fun () -> new redirect config) ;
     ("/" ^ config.principals, fun () -> new handler config fs) ;
     ("/" ^ config.principals ^ "/*", fun () -> new handler config fs) ;
     ("/" ^ config.calendars, fun () -> new handler config fs) ;

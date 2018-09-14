@@ -1651,6 +1651,82 @@ let report_with_acl_tests = [
   "Report 7_9_1, denied", `Quick, test_multiget_7_9_1_deny ;
 ]
 
+(*
+Userprops: <?xml version="1.0" encoding="utf-8" ?>
+<D:acl xmlns:D="DAV:"><D:ace><D:principal><D:href>http://127.0.0.1:8080/principals/test/</D:href></D:principal><D:grant><D:privilege><D:all></D:all></D:privilege></D:grant></D:ace><D:ace><D:principal><D:all></D:all></D:principal><D:grant><D:privilege><D:read></D:read></D:privilege></D:grant></D:ace></D:acl><?xml version="1.0" encoding="utf-8" ?>
+<D:creationdate xmlns:D="DAV:">2018-09-14T09:50:19-00:00</D:creationdate><?xml version="1.0" encoding="utf-8" ?>
+<D:displayname xmlns:D="DAV:">test</D:displayname><?xml version="1.0" encoding="utf-8" ?>
+<D:getcontentlanguage xmlns:D="DAV:">en</D:getcontentlanguage><?xml version="1.0" encoding="utf-8" ?>
+<D:getcontentlength xmlns:D="DAV:">0</D:getcontentlength><?xml version="1.0" encoding="utf-8" ?>
+<D:getcontenttype xmlns:D="DAV:">text/directory</D:getcontenttype><?xml version="1.0" encoding="utf-8" ?>
+<D:getetag xmlns:D="DAV:">d41d8cd98f00b204e9800998ecf8427e</D:getetag><?xml version="1.0" encoding="utf-8" ?>
+<D:getlastmodified xmlns:D="DAV:">Fri, 14 Sep 2018 09:50:19 GMT</D:getlastmodified><?xml version="1.0" encoding="utf-8" ?>
+<D:principal-URL xmlns:D="DAV:"><D:href>http://127.0.0.1:8080/principals/test/</D:href></D:principal-URL><?xml version="1.0" encoding="utf-8" ?>
+<D:resourcetype xmlns:D="DAV:"><D:collection></D:collection><D:principal></D:principal></D:resourcetype><?xml version="1.0" encoding="utf-8" ?>
+<C:calendar-home-set xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><D:href>http://127.0.0.1:8080/calendars/test/</D:href></C:calendar-home-set>
+
+Propmap: <?xml version="1.0" encoding="utf-8" ?>
+<D:acl xmlns:D="DAV:"><D:ace><D:principal><D:href>http://127.0.0.1:8080/principals/test/</D:href></D:principal><D:grant><D:privilege><D:all></D:all></D:privilege></D:grant></D:ace><D:ace><D:principal><D:all></D:all></D:principal><D:grant><D:privilege><D:read></D:read></D:privilege></D:grant></D:ace></D:acl><?xml version="1.0" encoding="utf-8" ?>
+<D:creationdate xmlns:D="DAV:">2018-09-14T09:50:19-00:00</D:creationdate><?xml version="1.0" encoding="utf-8" ?>
+<D:displayname xmlns:D="DAV:">calendar</D:displayname><?xml version="1.0" encoding="utf-8" ?>
+<D:getcontentlanguage xmlns:D="DAV:">en</D:getcontentlanguage><?xml version="1.0" encoding="utf-8" ?>
+<D:getcontentlength xmlns:D="DAV:">0</D:getcontentlength><?xml version="1.0" encoding="utf-8" ?>
+<D:getcontenttype xmlns:D="DAV:">text/directory</D:getcontenttype><?xml version="1.0" encoding="utf-8" ?>
+<D:getetag xmlns:D="DAV:">d41d8cd98f00b204e9800998ecf8427e</D:getetag><?xml version="1.0" encoding="utf-8" ?>
+<D:getlastmodified xmlns:D="DAV:">Fri, 14 Sep 2018 09:50:19 GMT</D:getlastmodified><?xml version="1.0" encoding="utf-8" ?>
+<D:resourcetype xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><D:collection></D:collection><C:calendar></C:calendar></D:resourcetype><?xml version="1.0" encoding="utf-8" ?>
+<D:supported-report-set xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><D:supported-report><D:report><C:calendar-query></C:calendar-query></D:report></D:supported-report><D:supported-report><D:report><C:calendar-multiget></C:calendar-multiget></D:report></D:supported-report></D:supported-report-set><?xml version="1.0" encoding="utf-8" ?>
+<C:supported-calendar-component-set xmlns:C="urn:ietf:params:xml:ns:caldav"><C:comp name="VEVENT"></C:comp><C:comp name="VTODO"></C:comp><C:comp name="VTIMEZONE"></C:comp><C:comp name="VFREEBUSY"></C:comp></C:supported-calendar-component-set>
+
+privileges are `Read; `All
+
+PROPPATCH: <?xml version="1.0" encoding="UTF-8"?>
+<A:propertyupdate xmlns:A="DAV:"><A:set><A:prop><D:calendar-order xmlns:D="http://apple.com/ns/ical/">1</D:calendar-order></A:prop></A:set></A:propertyupdate>
+
+writing property map calendars/test/calendar/.prop.xml: <?xml version="1.0" encoding="utf-8" ?>
+<D:prop xmlns:D="DAV:" xmlns:D="http://apple.com/ns/ical/" xmlns:C="urn:ietf:params:xml:ns:caldav"><C:supported-calendar-component-set><C:comp name="VEVENT"></C:comp><C:comp name="VTODO"></C:comp><C:comp name="VTIMEZONE"></C:comp><C:comp name="VFREEBUSY"></C:comp></C:supported-calendar-component-set><D:calendar-order xmlns:D="http://apple.com/ns/ical/">1</D:calendar-order><D:supported-report-set><D:supported-report><D:report><C:calendar-query></C:calendar-query></D:report></D:supported-report><D:supported-report><D:report><C:calendar-multiget></C:calendar-multiget></D:report></D:supported-report></D:supported-report-set><D:resourcetype><D:collection></D:collection><C:calendar></C:calendar></D:resourcetype><D:getlastmodified>Fri, 14 Sep 2018 09:50:19 GMT</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>calendar</D:displayname><D:creationdate>2018-09-14T09:50:19-00:00</D:creationdate><D:acl><D:ace><D:principal><D:href>http://127.0.0.1:8080/principals/test/</D:href></D:principal><D:grant><D:privilege><D:all></D:all></D:privilege></D:grant></D:ace><D:ace><D:principal><D:all></D:all></D:principal><D:grant><D:privilege><D:read></D:read></D:privilege></D:grant></D:ace></D:acl></D:prop>
+*)
+
+let property_check = 
+  let module M = struct
+    type t = Properties.t
+    let pp = Properties.pp
+    let equal = Properties.equal
+  end in
+  (module M : Alcotest.TESTABLE with type t = M.t)
+
+
+let property_update_conflicting_ns () =
+  let propmap = {|<?xml version="1.0" encoding="utf-8" ?>
+<prop>
+<D:acl xmlns:D="DAV:"><D:ace><D:principal><D:href>http://127.0.0.1:8080/principals/test/</D:href></D:principal><D:grant><D:privilege><D:all></D:all></D:privilege></D:grant></D:ace><D:ace><D:principal><D:all></D:all></D:principal><D:grant><D:privilege><D:read></D:read></D:privilege></D:grant></D:ace></D:acl>
+<D:creationdate xmlns:D="DAV:">2018-09-14T09:50:19-00:00</D:creationdate>
+<D:displayname xmlns:D="DAV:">calendar</D:displayname>
+<D:getcontentlanguage xmlns:D="DAV:">en</D:getcontentlanguage>
+<D:getcontentlength xmlns:D="DAV:">0</D:getcontentlength>
+<D:getcontenttype xmlns:D="DAV:">text/directory</D:getcontenttype>
+<D:getetag xmlns:D="DAV:">d41d8cd98f00b204e9800998ecf8427e</D:getetag>
+<D:getlastmodified xmlns:D="DAV:">Fri, 14 Sep 2018 09:50:19 GMT</D:getlastmodified>
+<D:resourcetype xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><D:collection></D:collection><C:calendar></C:calendar></D:resourcetype>
+<D:supported-report-set xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><D:supported-report><D:report><C:calendar-query></C:calendar-query></D:report></D:supported-report><D:supported-report><D:report><C:calendar-multiget></C:calendar-multiget></D:report></D:supported-report></D:supported-report-set>
+<C:supported-calendar-component-set xmlns:C="urn:ietf:params:xml:ns:caldav"><C:comp name="VEVENT"></C:comp><C:comp name="VTODO"></C:comp><C:comp name="VTIMEZONE"></C:comp><C:comp name="VFREEBUSY"></C:comp></C:supported-calendar-component-set>
+</prop>
+|}
+
+  and proppatch = {|<?xml version="1.0" encoding="UTF-8"?>
+<A:propertyupdate xmlns:A="DAV:"><A:set><A:prop><D:calendar-order xmlns:D="http://apple.com/ns/ical/">1</D:calendar-order></A:prop></A:set></A:propertyupdate>
+|}
+  and on_disk = {|<?xml version="1.0" encoding="utf-8" ?>
+<D:prop xmlns:D="DAV:" xmlns:A="http://apple.com/ns/ical/" xmlns:C="urn:ietf:params:xml:ns:caldav"><C:supported-calendar-component-set><C:comp name="VEVENT"></C:comp><C:comp name="VTODO"></C:comp><C:comp name="VTIMEZONE"></C:comp><C:comp name="VFREEBUSY"></C:comp></C:supported-calendar-component-set><A:calendar-order>1</A:calendar-order><D:supported-report-set><D:supported-report><D:report><C:calendar-query></C:calendar-query></D:report></D:supported-report><D:supported-report><D:report><C:calendar-multiget></C:calendar-multiget></D:report></D:supported-report></D:supported-report-set><D:resourcetype><D:collection></D:collection><C:calendar></C:calendar></D:resourcetype><D:getlastmodified>Fri, 14 Sep 2018 09:50:19 GMT</D:getlastmodified><D:getetag>d41d8cd98f00b204e9800998ecf8427e</D:getetag><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>calendar</D:displayname><D:creationdate>2018-09-14T09:50:19-00:00</D:creationdate><D:acl><D:ace><D:principal><D:href>http://127.0.0.1:8080/principals/test/</D:href></D:principal><D:grant><D:privilege><D:all></D:all></D:privilege></D:grant></D:ace><D:ace><D:principal><D:all></D:all></D:principal><D:grant><D:privilege><D:read></D:read></D:privilege></D:grant></D:ace></D:acl></D:prop>|} in
+  let expected_props = Properties.from_tree @@ match Xml.string_to_tree on_disk with None -> assert false | Some t -> t in
+  let props = Properties.from_tree @@ match Xml.string_to_tree propmap with None -> assert false | Some t -> t in
+  let updates = match Xml.parse_propupdate_xml @@ match Xml.string_to_tree proppatch with None -> assert false | Some t -> t with Error _ -> assert false | Ok r -> r in
+  Alcotest.(check (option property_check) __LOC__ (Some expected_props) (fst @@ Properties.patch props updates))
+
+let property_update_tests = [
+  "Propertyupdate conflicting namespace", `Quick, property_update_conflicting_ns ;
+]
+
 let tests = [
   "Read propfind", parse_propfind_xml_tests ;
   "Read propertyupdate", parse_propupdate_xml_tests ;
@@ -1660,6 +1736,7 @@ let tests = [
   "ACL tests", List.flatten @@ List.map webdav_acl_tests acl_test_cases ;
   "Properties.find_many tests", properties_find_many_tests ;
   "Report with ACL tests", report_with_acl_tests ;
+  "Propertyupdate tests", property_update_tests ;
 ]
 
 let () =

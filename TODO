@@ -25,7 +25,6 @@ DONE:
 
 -- 31st August 2018:
 
-- automatic discovery of calendar url
 - test access control with apple and thunderbird
 
 - a private calendar which should turn into a public one: how to adjust all the event ACLs? maybe DAV:inherited ACL?
@@ -53,5 +52,6 @@ DONE:
 - attachments
 - recurrence < daily
 - freebusy in timerange / todo in timerange
+- automatic discovery of calendar url
 
 - persistent storage (irmin/git?) (mirage-fs-unix works for us!)

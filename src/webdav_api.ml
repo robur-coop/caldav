@@ -797,6 +797,8 @@ module Make(Fs: Webdav_fs.S) = struct
     Fs.exists fs path >>= fun target_exists ->
     let requirement, target_or_parent = required_privilege http_verb target_exists in
     read_target_or_parent_properties fs path target_or_parent >|= fun propmap ->
+    Format.printf "Userprops: %a\n" Properties.pp userprops ;
+    Format.printf "Propmap: %a\n" Properties.pp propmap ;
     let privileges = Properties.privileges ~userprops propmap in
     Format.printf "privileges are %a\n%!" Fmt.(list ~sep:(unit "; ") Xml.pp_privilege) privileges ;
     Properties.privilege_met ~requirement privileges

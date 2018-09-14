@@ -2,6 +2,10 @@ module Xml = Webdav_xml
 
 type t
 
+val pp : t Fmt.t
+
+val equal : t -> t -> bool
+
 val empty : t
 
 val create : ?content_type:string -> ?language:string -> ?etag:string ->
@@ -15,6 +19,8 @@ val add : Xml.fqname -> (Xml.attribute list * Xml.tree list) -> t -> t
 val remove : Xml.fqname -> t -> t
 
 val find : Xml.fqname -> t -> (Xml.attribute list * Xml.tree list) option
+
+val count : t -> int
 
 val to_string : t -> string
 
