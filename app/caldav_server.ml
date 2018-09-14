@@ -118,6 +118,16 @@ let parent_acl fs file =
     let aces' = List.map Xml.xml_to_ace aces in
     List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces'
 
+let parent_is_calendar fs file =
+  Fs.get_property_map fs (Fs.parent (file :> file_or_dir) :> file_or_dir) >|= fun map ->
+  match Properties.find (Xml.dav_ns, "resourcetype") map with
+  | None -> false
+  | Some (_, trees) -> 
+     let calendar_node = function 
+     | Xml.Node (ns, "calendar", _, _) when ns = Xml.caldav_ns -> true
+     | _ -> false in
+     List.exists calendar_node trees
+
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
 class handler config fs = object(self)
@@ -323,7 +333,7 @@ class handler config fs = object(self)
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "MKCOL/MKCALENDAR: %s\n%!" body;
     let is_calendar, body' = match rd.Wm.Rd.meth with
-    | `Other "MKCALENDAR" -> true, calendar_to_collection body (* TODO add calendar resource type property *)
+    | `Other "MKCALENDAR" -> true, calendar_to_collection body
     | `Other "MKCOL" -> false, Ok body
     | _ -> assert false in
     match body' with
@@ -333,12 +343,16 @@ class handler config fs = object(self)
       | None when body'' <> "" -> Wm.continue `Conflict rd
       | tree ->
         let path = Fs.dir_from_string (self#path rd) in
-        parent_acl fs path >>= fun acl ->
-        Dav.mkcol fs ~path acl (Ptime_clock.now ()) ~is_calendar tree >>= function
-        | Ok _ -> Wm.continue `Created rd
-        | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string t) }
-        | Error `Conflict -> Wm.continue `Conflict rd
-        | Error `Bad_request -> Wm.continue `Conflict rd
+        parent_is_calendar fs path >>= fun parent_is_calendar ->
+        if is_calendar && parent_is_calendar 
+        then Wm.continue `Conflict rd
+        else
+          parent_acl fs path >>= fun acl ->
+          Dav.mkcol fs ~path acl (Ptime_clock.now ()) ~is_calendar tree >>= function
+          | Ok _ -> Wm.continue `Created rd
+          | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string t) }
+          | Error `Conflict -> Wm.continue `Conflict rd
+          | Error `Bad_request -> Wm.continue `Conflict rd
 
   method delete_resource rd =
     Fs.from_string fs (self#path rd) >>= function
