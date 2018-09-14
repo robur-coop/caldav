@@ -3,7 +3,7 @@ sig
   type state
   type tree = Webdav_xml.tree
 
-  val mkcol : state -> path:Webdav_fs.dir -> Webdav_xml.ace list -> Ptime.t -> tree option ->
+  val mkcol : state -> path:Webdav_fs.dir -> Webdav_xml.ace list -> Ptime.t -> is_calendar: bool -> tree option ->
     (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
       result Lwt.t
 
@@ -195,7 +195,7 @@ module Make(Fs: Webdav_fs.S) = struct
       | Ok set_props -> Ok set_props
 
   (* assumption: path is a relative path! *)
-  let mkcol state ~path:(`Dir d as dir) acl now body =
+  let mkcol state ~path:(`Dir d as dir) acl now ~is_calendar body =
     (* TODO: move to caller *)
     let parent = Fs.parent dir in
     Fs.dir_exists state parent >>= function
@@ -203,7 +203,8 @@ module Make(Fs: Webdav_fs.S) = struct
     | true -> match body_to_proppatch body with
       | Error e -> Lwt.return (Error e)
       | Ok set_props ->
-        let col_props = Properties.create_dir acl now (Fs.to_string dir) in
+        let resourcetype = if is_calendar then [Xml.node ~ns:Xml.caldav_ns "calendar" []] else [] in
+        let col_props = Properties.create_dir ~resourcetype acl now (Fs.to_string dir) in
         match Properties.patch ~is_mkcol:true col_props set_props with
         | None, errs ->
           let propstats = List.map propstat_node errs in
@@ -797,8 +798,6 @@ module Make(Fs: Webdav_fs.S) = struct
     Fs.exists fs path >>= fun target_exists ->
     let requirement, target_or_parent = required_privilege http_verb target_exists in
     read_target_or_parent_properties fs path target_or_parent >|= fun propmap ->
-    Format.printf "Userprops: %a\n" Properties.pp userprops ;
-    Format.printf "Propmap: %a\n" Properties.pp propmap ;
     let privileges = Properties.privileges ~userprops propmap in
     Format.printf "privileges are %a\n%!" Fmt.(list ~sep:(unit "; ") Xml.pp_privilege) privileges ;
     Properties.privilege_met ~requirement privileges

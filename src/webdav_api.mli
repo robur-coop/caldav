@@ -3,7 +3,7 @@ sig
   type state
   type tree = Webdav_xml.tree
 
-  val mkcol : state -> path:Webdav_fs.dir -> Webdav_xml.ace list -> Ptime.t -> tree option ->
+  val mkcol : state -> path:Webdav_fs.dir -> Webdav_xml.ace list -> Ptime.t -> is_calendar: bool -> tree option ->
     (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
       result Lwt.t
 

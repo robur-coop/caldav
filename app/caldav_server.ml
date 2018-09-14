@@ -322,9 +322,9 @@ class handler config fs = object(self)
   method create_collection rd =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "MKCOL/MKCALENDAR: %s\n%!" body;
-    let body' = match rd.Wm.Rd.meth with
-    | `Other "MKCALENDAR" -> calendar_to_collection body (* TODO add calendar resource type property *)
-    | `Other "MKCOL" -> Ok body
+    let is_calendar, body' = match rd.Wm.Rd.meth with
+    | `Other "MKCALENDAR" -> true, calendar_to_collection body (* TODO add calendar resource type property *)
+    | `Other "MKCOL" -> false, Ok body
     | _ -> assert false in
     match body' with
     | Error _ -> Wm.continue `Conflict rd
@@ -334,7 +334,7 @@ class handler config fs = object(self)
       | tree ->
         let path = Fs.dir_from_string (self#path rd) in
         parent_acl fs path >>= fun acl ->
-        Dav.mkcol fs ~path acl (Ptime_clock.now ()) tree >>= function
+        Dav.mkcol fs ~path acl (Ptime_clock.now ()) ~is_calendar tree >>= function
         | Ok _ -> Wm.continue `Created rd
         | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string t) }
         | Error `Conflict -> Wm.continue `Conflict rd

@@ -1229,7 +1229,7 @@ let mkcol_success () =
       Fs.mkdir res_fs (`Dir [ "home" ; "special" ]) props >>= fun _ ->
       Mirage_fs_mem.connect "" >>= fun fs ->
       Mirage_fs_mem.mkdir fs "home" >>= fun _ ->
-      Dav.mkcol fs (Fs.dir_from_string "home/special/") config.default_acl now (Some (tree body)) >|= fun r ->
+      Dav.mkcol fs ~path:(Fs.dir_from_string "home/special/") config.default_acl now ~is_calendar:false (Some (tree body)) >|= fun r ->
       (res_fs, r))
   in
   Alcotest.(check (result state_testable err_testable) __LOC__
@@ -1241,7 +1241,7 @@ let delete_test () =
       let open Lwt.Infix in
       Mirage_fs_mem.connect "" >>= fun res_fs ->
       let content = {_|<?xml version="1.0" encoding="utf-8" ?>
-<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-02T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
+<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
       in
       Mirage_fs_mem.write res_fs ".prop.xml" 0
         (Cstruct.of_string content) >>= fun _ ->
@@ -1251,7 +1251,7 @@ let delete_test () =
       Mirage_fs_mem.connect "" >>= fun fs ->
       let now = Ptime.v (10, 0L) in
       let content' = {_|<?xml version="1.0" encoding="utf-8" ?>
-<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-11T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
+<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
       in
       Mirage_fs_mem.write fs ".prop.xml" 0
         (Cstruct.of_string content') >>= fun _ ->
