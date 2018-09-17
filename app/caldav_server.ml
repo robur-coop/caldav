@@ -18,6 +18,45 @@ module Wm = struct
   include Webmachine.Make(Cohttp_lwt_unix__Io)
 end
 
+module Headers = struct
+  let get_content_type headers =
+    match Cohttp.Header.get headers "Content-Type" with
+    | None -> "text/calendar"
+    | Some x -> x
+
+  let get_authorization headers = Cohttp.Header.get headers "Authorization"
+
+  let get_user headers = match get_authorization headers with
+    | None -> assert false
+    | Some v -> v
+
+  let get_depth headers = Cohttp.Header.get headers "Depth"
+
+  let is_user_agent_mozilla headers =
+    match Cohttp.Header.get headers "User-Agent" with
+    | None -> false
+    | Some x ->
+      (* Apple seems to use the regular expression 'Mozilla/.*Gecko.*' *)
+      Astring.String.is_prefix ~affix:"Mozilla/" x &&
+      Astring.String.is_infix ~affix:"Gecko" x
+
+  let replace_etag_add_location etag location headers =
+    let headers' = Cohttp.Header.replace headers "Etag" etag in
+    Cohttp.Header.replace headers' "Location" (Uri.to_string @@ location)
+
+  let replace_content_type content_type headers =
+    Cohttp.Header.replace headers "Content-Type" content_type
+
+  let replace_authorization auth headers =
+    Cohttp.Header.replace headers "Authorization" auth
+
+  let replace_last_modified last_modified headers =
+    Cohttp.Header.replace headers "Last-Modified" last_modified
+
+  let replace_dav dav headers =
+    Cohttp.Header.replace headers "DAV" dav
+end
+
 let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 
 (** A resource for querying an individual item in the database by id via GET,
@@ -29,11 +68,7 @@ class handler config fs = object(self)
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "write_component: %s\n%!" body ;
     let path = self#path rd in
-    let content_type =
-      match Cohttp.Header.get rd.Wm.Rd.req_headers "Content-Type" with
-      | None -> "text/calendar"
-      | Some x -> x
-    in
+    let content_type = Headers.get_content_type rd.Wm.Rd.req_headers in
     match Icalendar.parse body with
     | Error e ->
       Printf.printf "error %s while parsing calendar\n" e ;
@@ -42,32 +77,19 @@ class handler config fs = object(self)
       let ics = Icalendar.to_ics cal in
       let etag = Dav.compute_etag ics in
       let file = Fs.file_from_string path in
-      Dav.parent_acl fs config rd.Wm.Rd.req_headers (file :> file_or_dir) >>= function
+      Dav.parent_acl fs config (Headers.get_user rd.Wm.Rd.req_headers) (file :> file_or_dir) >>= function
       | Error e -> Wm.respond (to_status `Forbidden) rd
       | Ok acl ->
         Dav.write_component fs ~path:file ~etag ~content_type acl (Ptime_clock.now ()) ics >>= function
         | Error e -> Wm.respond (to_status e) rd
         | Ok _ ->
           Printf.printf "wrote component %s\n%!" path ;
-          let rd = Wm.Rd.with_resp_headers (fun header ->
-              let header' = Cohttp.Header.remove header "ETag" in
-              let header'' = Cohttp.Header.add header' "Etag" etag in
-              Cohttp.Header.add header'' "Location"
-                (Uri.to_string @@ Uri.with_path config.host path)
-            ) rd
-          in
-          Wm.continue true rd
+          let rd' = Wm.Rd.with_resp_headers (Headers.replace_etag_add_location etag (Uri.with_path config.host path)) rd in
+          Wm.continue true rd'
 
   method private read_calendar rd =
     let file = self#path rd in
-    let gecko =
-      match Cohttp.Header.get rd.Wm.Rd.req_headers "User-Agent" with
-      | None -> false
-      | Some x ->
-        (* Apple seems to use the regular expression 'Mozilla/.*Gecko.*' *)
-        Astring.String.is_prefix ~affix:"Mozilla/" x &&
-        Astring.String.is_infix ~affix:"Gecko" x
-    in
+    let mozilla = Headers.is_user_agent_mozilla rd.Wm.Rd.req_headers in
 
     let (>>==) a f = a >>= function
     | Error e ->
@@ -77,7 +99,7 @@ class handler config fs = object(self)
 
     Fs.from_string fs file >>== function
     | `Dir dir ->
-      if gecko then
+      if mozilla then
         Dav.directory_as_html fs (`Dir dir) >>= fun listing ->
         Wm.continue (`String listing) rd
       else
@@ -91,13 +113,8 @@ class handler config fs = object(self)
       let ct = match Properties.unsafe_find (Xml.dav_ns, "getcontenttype") props with
         | Some (_, [ Xml.Pcdata ct ]) -> ct
         | _ -> "text/calendar" in
-      let rd =
-        Wm.Rd.with_resp_headers (fun header ->
-            let header' = Cohttp.Header.remove header "Content-Type" in
-            Cohttp.Header.add header' "Content-Type" ct)
-          rd
-      in
-      Wm.continue (`String (Cstruct.to_string data)) rd
+      let rd' = Wm.Rd.with_resp_headers (Headers.replace_content_type ct) rd in
+      Wm.continue (`String (Cstruct.to_string data)) rd'
 
   method allowed_methods rd =
     Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "MKCOL"; `Other "MKCALENDAR" ; `Other "REPORT" ; `Other "ACL" ] rd
@@ -128,15 +145,12 @@ class handler config fs = object(self)
 
   method is_authorized rd =
     (* TODO implement digest authentication! *)
-    (match Cohttp.Header.get rd.Wm.Rd.req_headers "Authorization" with
+    (match Headers.get_authorization rd.Wm.Rd.req_headers with
      | None -> Lwt.return (`Basic "calendar", rd)
      | Some v ->
        Dav.verify_auth_header fs config v >|= function
        | Ok user ->
-         let replace_header h =
-           Cohttp.Header.replace h "Authorization" user
-         in
-         let rd' = Wm.Rd.with_req_headers replace_header rd in
+         let rd' = Wm.Rd.with_req_headers (Headers.replace_authorization user) rd in
          `Authorized, rd'
        | Error msg ->
          Printf.printf "ivalid authorization: %s\n" msg ;
@@ -145,12 +159,12 @@ class handler config fs = object(self)
 
   method forbidden rd =
     let path = self#path rd in
-    Dav.properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
+    Dav.properties_for_current_user fs config (Headers.get_user rd.Wm.Rd.req_headers) >>= fun auth_user_props ->
     Dav.access_granted_for_acl fs path rd.Wm.Rd.meth auth_user_props >>= fun granted ->
     Wm.continue (not granted) rd
 
   method private process_propfind rd auth_user_props path =
-    let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
+    let depth = Headers.get_depth rd.Wm.Rd.req_headers in
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "PROPFIND: %s\n%!" body;
     match Xml.string_to_tree body with
@@ -173,12 +187,11 @@ class handler config fs = object(self)
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
   method process_property rd =
-    let replace_header h = Cohttp.Header.replace h "Content-Type" "application/xml" in
-    let rd' = Wm.Rd.with_resp_headers replace_header rd in
+    let rd' = Wm.Rd.with_resp_headers (Headers.replace_content_type "application/xml") rd in
     Fs.from_string fs (self#path rd) >>= function
     | Error _ -> Wm.respond (to_status `Bad_request) rd
     | Ok f_or_d ->
-      Dav.properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
+      Dav.properties_for_current_user fs config (Headers.get_user rd.Wm.Rd.req_headers) >>= fun auth_user_props ->
       match rd'.Wm.Rd.meth with
       | `Other "PROPFIND" -> self#process_propfind rd' auth_user_props f_or_d
       | `Other "PROPPATCH" -> self#process_proppatch rd' auth_user_props f_or_d
@@ -193,11 +206,12 @@ class handler config fs = object(self)
       match Xml.string_to_tree body with
       | None -> Wm.respond (to_status `Bad_request) rd
       | Some tree ->
-        Dav.properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
+        Dav.properties_for_current_user fs config (Headers.get_user rd.Wm.Rd.req_headers) >>= fun auth_user_props ->
         Dav.report fs ~host:config.host ~path:f_or_d tree ~auth_user_props >>= function
         | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
         | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
+  (* required by webmachine API *)
   method cannot_create rd =
     let xml = Xml.node ~ns:Xml.dav_ns "error" [Xml.node ~ns:Xml.dav_ns "resource-must-be-null" []] in
     let err = Xml.tree_to_string xml in
@@ -222,7 +236,7 @@ class handler config fs = object(self)
         if is_calendar && parent_is_calendar
         then Wm.continue `Conflict rd
         else
-          Dav.parent_acl fs config rd.Wm.Rd.req_headers (path :> file_or_dir) >>= function
+          Dav.parent_acl fs config (Headers.get_user rd.Wm.Rd.req_headers) (path :> file_or_dir) >>= function
           | Error e -> Wm.continue e rd
           | Ok acl ->
             Dav.mkcol fs ~path acl (Ptime_clock.now ()) ~is_calendar tree >>= function
@@ -259,8 +273,7 @@ class handler config fs = object(self)
         (* no special property, already checked for resource *)
         match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
         | Some (_, [ Xml.Pcdata lm ]) ->
-          let add_headers h = Cohttp.Header.add_list h [ ("Last-Modified", lm) ] in
-          Wm.Rd.with_resp_headers add_headers rd
+          Wm.Rd.with_resp_headers (Headers.replace_last_modified lm) rd
         | _ -> rd
       in
       (* no special property, already checked for resource *)
@@ -274,7 +287,6 @@ class handler config fs = object(self)
 
   method finish_request rd =
     let rd' = if rd.Wm.Rd.meth = `OPTIONS then
-        let add_headers h = Cohttp.Header.add_list h [ ("DAV", "1, extended-mkcol, calendar-access") ] in
         (* access-control, access-control, calendar-access, calendar-schedule, calendar-auto-schedule,
            calendar-availability, inbox-availability, calendar-proxy, calendarserver-private-events,
            calendarserver-private-comments, calendarserver-sharing, calendarserver-sharing-no-scheduling,
@@ -282,17 +294,13 @@ class handler config fs = object(self)
            calendar-managed-attachments, calendarserver-partstat-changes, calendarserver-group-attendee,
            calendar-no-timezone, calendarserver-recurrence-split, addressbook, addressbook, extended-mkcol,
            calendarserver-principal-property-search, calendarserver-principal-search, calendarserver-home-sync *)
-      Wm.Rd.with_resp_headers add_headers rd
+      Wm.Rd.with_resp_headers (Headers.replace_dav "1, extended-mkcol, calendar-access") rd
     else
       rd in
     Wm.continue () rd'
 
   method private path rd =
     Uri.path (rd.Wm.Rd.uri)
-    (*if String.length p > 0 && String.get p 0 = '/' then
-      String.sub p 1 (String.length p - 1)
-    else
-      p *)
 end
 
 class redirect config = object(self)
@@ -331,6 +339,7 @@ class create_user config fs = object(self)
     match Uri.get_query_param uri "user", Uri.get_query_param uri "password" with
     | None, _ | _, None -> Wm.respond (to_status `Bad_request) rd
     | Some name, Some pass ->
+      (* TODO may fail if user exists *)
       Dav.make_user fs config name pass >>= fun () ->
       Wm.continue true rd
 

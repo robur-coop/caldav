@@ -41,12 +41,12 @@ sig
 
   val compute_etag : string -> string
 
-  val parent_acl : state -> config -> Cohttp.Header.t -> Webdav_fs.file_or_dir -> (Xml.ace list, [> `Forbidden ]) result Lwt.t
+  val parent_acl : state -> config -> string -> Webdav_fs.file_or_dir -> (Xml.ace list, [> `Forbidden ]) result Lwt.t
 
   val directory_as_html : state -> Webdav_fs.dir -> string Lwt.t
   val directory_as_ics : state -> Webdav_fs.dir -> string Lwt.t
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, string) result Lwt.t
-  val properties_for_current_user : state -> Webdav_config.config -> Cohttp.Header.t -> Properties.t Lwt.t
+  val properties_for_current_user : state -> Webdav_config.config -> string -> Properties.t Lwt.t
   val calendar_to_collection : string -> (string, [ `Bad_request ]) result
   val parent_is_calendar : state -> Webdav_fs.file_or_dir -> bool Lwt.t
 
@@ -888,17 +888,12 @@ let parent_is_calendar fs file =
      | _ -> false in
      List.exists calendar_node trees
 
-let properties_for_current_user fs config req_headers =
-  let user =
-    match Cohttp.Header.get req_headers "Authorization" with
-    | None -> assert false
-    | Some v -> v
-  in
+let properties_for_current_user fs config user =
   let user_path = `Dir [ config.principals ; user ] in
   Fs.get_property_map fs user_path
 
-let parent_acl fs config req_headers path =
-  properties_for_current_user fs config req_headers >>= fun auth_user_props ->
+let parent_acl fs config user path =
+  properties_for_current_user fs config user >>= fun auth_user_props ->
   Fs.get_property_map fs (Fs.parent (path :> Webdav_fs.file_or_dir) :> Webdav_fs.file_or_dir) >|= fun parent_resource_props ->
   if not (Privileges.is_met ~requirement:`Read_acl @@
           Properties.privileges ~auth_user_props parent_resource_props)

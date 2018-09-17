@@ -38,11 +38,11 @@ sig
 
   val compute_etag : string -> string
 
-  val parent_acl : state -> Webdav_config.config -> Cohttp.Header.t -> Webdav_fs.file_or_dir -> (Webdav_xml.ace list, [> `Forbidden ]) result Lwt.t
+  val parent_acl : state -> Webdav_config.config -> string -> Webdav_fs.file_or_dir -> (Webdav_xml.ace list, [> `Forbidden ]) result Lwt.t
   val directory_as_html : state -> Webdav_fs.dir -> string Lwt.t
   val directory_as_ics : state -> Webdav_fs.dir -> string Lwt.t
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, string) result Lwt.t
-  val properties_for_current_user : state -> Webdav_config.config -> Cohttp.Header.t -> Properties.t Lwt.t
+  val properties_for_current_user : state -> Webdav_config.config -> string -> Properties.t Lwt.t
   val calendar_to_collection : string -> (string, [ `Bad_request ]) result
   val parent_is_calendar : state -> Webdav_fs.file_or_dir -> bool Lwt.t
 
