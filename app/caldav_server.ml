@@ -143,6 +143,11 @@ let properties_for_current_user fs config req_headers =
   let user_path = `Dir [ config.principals ; user ] in
   Fs.get_property_map fs user_path
 
+let can_read_parent_acl fs config req_headers path =
+  properties_for_current_user fs config req_headers >>= fun auth_user_props ->
+  Fs.get_property_map fs (Fs.parent (path :> file_or_dir) :> file_or_dir) >|= fun parent_resource_props ->
+  Properties.privilege_met ~requirement:`Read_acl @@ Properties.privileges ~auth_user_props parent_resource_props
+
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
 class handler config fs = object(self)
@@ -165,19 +170,23 @@ class handler config fs = object(self)
       let ics = Icalendar.to_ics cal in
       let etag = etag ics in
       let file = Fs.file_from_string path in
-      parent_acl fs file >>= fun acl ->
-      Dav.write_component fs ~path:file ~etag ~content_type acl (Ptime_clock.now ()) ics >>= function
-      | Error e -> Wm.respond (to_status e) rd
-      | Ok _ ->
-        Printf.printf "wrote component %s\n%!" path ;
-        let rd = Wm.Rd.with_resp_headers (fun header ->
-            let header' = Cohttp.Header.remove header "ETag" in
-            let header'' = Cohttp.Header.add header' "Etag" etag in
-            Cohttp.Header.add header'' "Location"
-              (Uri.to_string @@ Uri.with_path config.host path)
-          ) rd
-        in
-        Wm.continue true rd
+      can_read_parent_acl fs config rd.Wm.Rd.req_headers file >>= fun parent_acl_readable ->
+      if not parent_acl_readable
+      then Wm.respond (to_status `Forbidden) rd
+      else
+        parent_acl fs file >>= fun acl ->
+        Dav.write_component fs ~path:file ~etag ~content_type acl (Ptime_clock.now ()) ics >>= function
+        | Error e -> Wm.respond (to_status e) rd
+        | Ok _ ->
+          Printf.printf "wrote component %s\n%!" path ;
+          let rd = Wm.Rd.with_resp_headers (fun header ->
+              let header' = Cohttp.Header.remove header "ETag" in
+              let header'' = Cohttp.Header.add header' "Etag" etag in
+              Cohttp.Header.add header'' "Location"
+                (Uri.to_string @@ Uri.with_path config.host path)
+            ) rd
+          in
+          Wm.continue true rd
 
   method private read_calendar rd =
     let file = self#path rd in
@@ -339,12 +348,7 @@ class handler config fs = object(self)
       | tree ->
         let path = Fs.dir_from_string (self#path rd) in
         parent_is_calendar fs path >>= fun parent_is_calendar ->
-        properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
-        Fs.get_property_map fs (Fs.parent (path :> file_or_dir) :> file_or_dir) >>= fun resource_props ->
-        let privileges = Properties.privileges ~auth_user_props resource_props in
-        let parent_acl_readable =
-          Properties.privilege_met `Read_acl privileges
-        in
+        can_read_parent_acl fs config rd.Wm.Rd.req_headers path >>= fun parent_acl_readable ->
         if is_calendar && parent_is_calendar && parent_acl_readable
         then Wm.continue `Conflict rd
         else
