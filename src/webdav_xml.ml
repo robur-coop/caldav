@@ -103,6 +103,7 @@ type ace =
 
 let caldav_ns = "urn:ietf:params:xml:ns:caldav"
 let dav_ns = "DAV:"
+let robur_ns = "io:robur:webdav"
 
 let node ?(ns = "") name ?(a = []) children = Node (ns, name, a, children)
 let dav_node = node ~ns:dav_ns

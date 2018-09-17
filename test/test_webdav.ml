@@ -534,7 +534,6 @@ let report_parse_tests = [
 let config = {
   principals = "principals" ;
   calendars = "calendars" ;
-  user_password = [] ;
   host = Uri.of_string "http://example.com" ;
   default_acl = [ (`All, `Grant [ `All ]) ]
 }

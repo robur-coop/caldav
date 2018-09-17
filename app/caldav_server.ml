@@ -85,24 +85,27 @@ let directory_as_ics fs (`Dir dir) =
 
 let hash_password password =
   let server_secret = "server_secret--" in
-  Cstruct.to_string @@
-  Nocrypto.Hash.SHA256.digest @@
-  Cstruct.of_string (server_secret ^ password)
+  Cstruct.to_string @@ Nocrypto.Base64.encode @@
+  Nocrypto.Hash.SHA256.digest @@ Cstruct.of_string (server_secret ^ password)
 
-let verify_auth_header user_password v =
+let verify_auth_header fs config v =
   match Astring.String.cut ~sep:"Basic " v with
   | Some ("", b64) ->
     begin match Nocrypto.Base64.decode (Cstruct.of_string b64) with
-      | None -> Error "invalid base64 encoding"
+      | None -> Lwt.return @@ Error "invalid base64 encoding"
       | Some data -> match Astring.String.cut ~sep:":" (Cstruct.to_string data) with
-        | None -> Error "invalid user:password encoding"
+        | None -> Lwt.return @@ Error "invalid user:password encoding"
         | Some (user, password) ->
           let hashed = hash_password password in
-          if List.mem (user, hashed) user_password
-          then Ok user
-          else Error "invalid user or wrong password"
+          Fs.get_property_map fs (`Dir [config.principals ; user]) >|= fun props ->
+          match Properties.find (Xml.robur_ns, "password") props with
+          | Some (_, [ Xml.Pcdata stored ]) ->
+            if String.equal hashed stored
+            then Ok user
+            else Error "wrong password"
+          | _ -> Error "invalid user"
     end
-  | _ -> Error "bad header"
+  | _ -> Lwt.return @@ Error "bad header"
 
 let calendar_to_collection data =
   if data = "" then Ok "" else
@@ -233,21 +236,19 @@ class handler config fs = object(self)
 
   method is_authorized rd =
     (* TODO implement digest authentication! *)
-    let res, rd' =
-      match Cohttp.Header.get rd.Wm.Rd.req_headers "Authorization" with
-      | None -> `Basic "calendar", rd
-      | Some v ->
-        match verify_auth_header config.user_password v with
-        | Ok user ->
-          let replace_header h =
-            Cohttp.Header.replace h "Authorization" user
-          in
-          let rd' = Wm.Rd.with_req_headers replace_header rd in
-          `Authorized, rd'
-        | Error msg ->
-          Printf.printf "ivalid authorization: %s\n" msg ;
-          `Basic "invalid authorization", rd
-    in
+    (match Cohttp.Header.get rd.Wm.Rd.req_headers "Authorization" with
+     | None -> Lwt.return (`Basic "calendar", rd)
+     | Some v ->
+       verify_auth_header fs config v >|= function
+       | Ok user ->
+         let replace_header h =
+           Cohttp.Header.replace h "Authorization" user
+         in
+         let rd' = Wm.Rd.with_req_headers replace_header rd in
+         `Authorized, rd'
+       | Error msg ->
+         Printf.printf "ivalid authorization: %s\n" msg ;
+         `Basic "invalid authorization", rd) >>= fun (res, rd') ->
     Wm.continue res rd'
 
   method forbidden rd =
@@ -532,7 +533,7 @@ PROPFIND /principals/user -- <calendar-home-set>
 --> <calendar-home-set><href>http://.../calendars/user/</calendar-home-set>
  *)
 
-let make_user ?(props = []) fs config name =
+let make_user ?(props = []) fs config name password =
   let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
   let get_url dir = Uri.with_path config.host (Fs.to_string (dir :> file_or_dir)) in
   let principal_dir = `Dir [ config.principals ; name ] in
@@ -543,8 +544,10 @@ let make_user ?(props = []) fs config name =
     ((Xml.dav_ns, "principal-URL"),
      ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata @@ Uri.to_string principal_url ] ]))
     :: ((Xml.caldav_ns, "calendar-home-set"),
-        ([], [Xml.dav_node "href" [Xml.pcdata @@ Uri.to_string home_set_url ]])) ::
-    props
+        ([], [Xml.dav_node "href" [Xml.pcdata @@ Uri.to_string home_set_url ]]))
+    :: ((Xml.robur_ns, "password"),
+        ([], [Xml.pcdata @@ hash_password password]))
+    :: props
   in
   let acl = [ (`Href principal_url, `Grant [ `All ]) ; (`All, `Grant [ `Read ]) ] in
   (* TODO should root have access to principals/user? *)
@@ -571,7 +574,7 @@ class create_user config fs = object(self)
     match Uri.get_query_param uri "user", Uri.get_query_param uri "password" with
     | None, _ | _, None -> Wm.respond (to_status `Bad_request) rd
     | Some name, Some pass ->
-      make_user fs config name (* pass *) >>= fun () ->
+      make_user fs config name pass >>= fun () ->
       Wm.continue true rd
 
   method content_types_provided rd =
@@ -583,7 +586,7 @@ class create_user config fs = object(self)
     ] rd
 end
 
-let make_group fs config name members =
+let make_group fs config name password members =
   let principal_path user = Fs.to_string (`Dir [ config.principals ; user ]) in
   let new_member_paths = List.map principal_path members in
   let new_member_urls =
@@ -595,7 +598,7 @@ let make_group fs config name members =
     (Xml.dav_ns, "group-member-set"),
     ([], List.map (fun u -> Xml.dav_node "href" [ Xml.pcdata u ]) new_member_urls)
   ] in
-  make_user ~props:group_props fs config name >>= fun () ->
+  make_user ~props:group_props fs config name password >>= fun () ->
   let group_node =
     Xml.dav_node "href"
       [ Xml.pcdata (Uri.to_string @@ Uri.with_path config.host (principal_path name)) ]
@@ -612,12 +615,9 @@ let make_group fs config name members =
       Lwt.return_unit)
     new_member_paths
 
-let init_users fs config =
-  Lwt_list.iter_p (make_user fs config) (List.map fst config.user_password)
-(*  make_user fs config "root" >>= fun () ->
-  make_user fs config "nobody" >>= fun () ->
-  make_user fs config "test" >>= fun () ->
-    make_group fs config "group" ["root" ; "test"] *)
+let init_users fs config user_password =
+  Lwt_list.iter_p (fun (u, p) -> make_user fs config u p) user_password >>= fun () ->
+  make_group fs config "group" "group-password" ["root" ; "test"]
 
 let main () =
   (* listen on port 8080 *)
@@ -631,10 +631,6 @@ let main () =
     principals ;
     calendars = "calendars" ;
     host ;
-    user_password = [
-      ("test", hash_password "password") ;
-      ("root", hash_password "toor") ;
-      ("nobody", hash_password "1") ] ;
     default_acl = [ (`Href (Uri.with_path host @@ "/" ^ principals ^ "/root/"),
                      `Grant [ `All ]) ; (`All, `Grant [`Read]) ]
   } in
@@ -643,7 +639,12 @@ let main () =
   (* only for apple test suite *)
   (* initialise_fs_for_apple_testsuite fs config >>= fun () -> *)
   initialise_fs fs config >>= fun () ->
-  init_users fs config >>= fun () ->
+  let user_password = [
+    ("test", "password") ;
+    ("root", "toor") ;
+    ("nobody", "1")
+  ] in
+  init_users fs config user_password >>= fun () ->
   (* the route table *)
   let routes = [
     ("/.well-known/caldav", fun () -> new redirect config) ;
