@@ -140,9 +140,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
   let write_property_map fs f_or_d map =
     let map' = match f_or_d with
       | `File _ -> map
-      | `Dir _ -> 
-        let map' = Properties.remove (Xml.dav_ns, "getetag") map in
-        Properties.remove (Xml.dav_ns, "getlastmodified") map'
+      | `Dir _ -> Properties.prepare_for_disk map
     in
     let data = Properties.to_string map' in
     let filename = to_string (propfilename f_or_d) in
@@ -206,7 +204,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
       Printf.printf "invalid XML!\n" ;
       None
     | Some map ->
-      match Properties.find (Xml.dav_ns, "getlastmodified") map with
+      match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
       | Some (_, [ Xml.Pcdata last_modified ]) ->
         begin match Ptime.of_rfc3339 last_modified with
           | Error _ ->
@@ -218,7 +216,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
 
   (* we only take depth 1 into account when computing the overall last modified *)
   let last_modified_of_dir map fs (`Dir dir) =
-    let start = match Properties.find (Xml.dav_ns, "creationdate") map with
+    let start = match Properties.unsafe_find (Xml.dav_ns, "creationdate") map with
       | Some (_, [ Xml.Pcdata date ]) ->
         begin match Ptime.of_rfc3339 date with
           | Error _ -> assert false
@@ -240,7 +238,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
     | None ->
       Printf.printf "invalid XML!\n" ;
       None
-    | Some map -> match Properties.find (Xml.dav_ns, "getetag") map with
+    | Some map -> match Properties.unsafe_find (Xml.dav_ns, "getetag") map with
       | Some (_, [ Xml.Pcdata etag ]) -> Some etag
       | _ -> Some (to_string f_or_d)
 
@@ -261,7 +259,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
     | None -> Lwt.return Properties.empty
     | Some map -> match f_or_d with
       | `File _ ->
-        begin match Properties.find (Xml.dav_ns, "getlastmodified") map with
+        begin match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
           | Some (_, [ Xml.Pcdata rfc3339 ]) ->
             begin match Ptime.of_rfc3339 rfc3339 with
               | Error _ ->

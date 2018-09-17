@@ -27,7 +27,8 @@ let list_dir fs (`Dir dir) =
   let list_file f_or_d =
     (* maybe implement a Fs.get_property? *)
     Fs.get_property_map fs f_or_d >|= fun m ->
-    let last_modified = match Properties.find (Xml.dav_ns, "getlastmodified") m with
+    (* restore last modified from properties as a workaround because the file system does not provide it *)
+    let last_modified = match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") m with
       | Some (_, [ Xml.Pcdata lm ]) -> lm
       | _ -> assert false
     in
@@ -72,7 +73,8 @@ let directory_as_ics fs (`Dir dir) =
     Fs.get_property_map fs (`Dir dir) >>= fun props ->
     let empty = Icalendar.Params.empty in
     let name =
-      match Properties.find (Xml.dav_ns, "displayname") props with
+      (* instantiate the calendar name from the displayname property *)
+      match Properties.unsafe_find (Xml.dav_ns, "displayname") props with
       | Some (_, [ Xml.Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), empty, name) ]
       | _ -> []
     in
@@ -98,7 +100,8 @@ let verify_auth_header fs config v =
         | Some (user, password) ->
           let hashed = hash_password password in
           Fs.get_property_map fs (`Dir [config.principals ; user]) >|= fun props ->
-          match Properties.find (Xml.robur_ns, "password") props with
+          (* no user context yet *)
+          match Properties.unsafe_find (Xml.robur_ns, "password") props with
           | Some (_, [ Xml.Pcdata stored ]) ->
             if String.equal hashed stored
             then Ok user
@@ -115,7 +118,7 @@ let calendar_to_collection data =
 
 let parent_acl fs file =
   Fs.get_property_map fs (Fs.parent (file :> file_or_dir) :> file_or_dir) >|= fun map ->
-  match Properties.find (Xml.dav_ns, "acl") map with
+  match Properties.unsafe_find (Xml.dav_ns, "acl") map with
   | None -> []
   | Some (_, aces) ->
     let aces' = List.map Xml.xml_to_ace aces in
@@ -123,13 +126,22 @@ let parent_acl fs file =
 
 let parent_is_calendar fs file =
   Fs.get_property_map fs (Fs.parent (file :> file_or_dir) :> file_or_dir) >|= fun map ->
-  match Properties.find (Xml.dav_ns, "resourcetype") map with
+  match Properties.unsafe_find (Xml.dav_ns, "resourcetype") map with
   | None -> false
-  | Some (_, trees) -> 
-     let calendar_node = function 
+  | Some (_, trees) ->
+     let calendar_node = function
      | Xml.Node (ns, "calendar", _, _) when ns = Xml.caldav_ns -> true
      | _ -> false in
      List.exists calendar_node trees
+
+let properties_for_current_user fs config req_headers =
+  let user =
+    match Cohttp.Header.get req_headers "Authorization" with
+    | None -> assert false
+    | Some v -> v
+  in
+  let user_path = `Dir [ config.principals ; user ] in
+  Fs.get_property_map fs user_path
 
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
@@ -196,7 +208,7 @@ class handler config fs = object(self)
         Wm.continue (`String data) rd
     | `File f ->
       Fs.read fs (`File f) >>== fun (data, props) ->
-      let ct = match Properties.find (Xml.dav_ns, "getcontenttype") props with
+      let ct = match Properties.unsafe_find (Xml.dav_ns, "getcontenttype") props with
         | Some (_, [ Xml.Pcdata ct ]) -> ct
         | _ -> "text/calendar" in
       let rd =
@@ -253,40 +265,30 @@ class handler config fs = object(self)
 
   method forbidden rd =
     let path = self#path rd in
-    let user =
-      match Cohttp.Header.get rd.Wm.Rd.req_headers "Authorization" with
-      | None -> assert false
-      | Some v -> v
-    in
-    let get_property_map_for_user name =
-      let user_path = `Dir [ config.principals ; name ] in
-      Fs.get_property_map fs user_path
-    in
-    get_property_map_for_user user >>= fun auth_user_props ->
-    Printf.printf "User %s auth user props %d \n" user (Properties.count auth_user_props); 
+    properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
     Dav.access_granted_for_acl fs path rd.Wm.Rd.meth auth_user_props >>= fun granted ->
     Wm.continue (not granted) rd
 
-  method private process_propfind rd user path =
+  method private process_propfind rd auth_user_props path =
     let depth = Cohttp.Header.get rd.Wm.Rd.req_headers "Depth" in
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "PROPFIND: %s\n%!" body;
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
-      Dav.propfind fs ~host:config.host ~path tree ~user ~depth >>= function
+      Dav.propfind fs ~host:config.host ~path tree ~auth_user_props ~depth >>= function
       | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Property_not_found -> Wm.continue `Property_not_found rd
       | Error (`Forbidden b) -> Wm.respond ~body:(`String (Xml.tree_to_string b)) (to_status `Forbidden) rd
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
-  method private process_proppatch rd user path =
+  method private process_proppatch rd auth_user_props path =
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "PROPPATCH: %s\n%!" body;
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
-      Dav.proppatch fs ~host:config.host ~path tree ~user >>= function
+      Dav.proppatch fs ~host:config.host ~path tree ~auth_user_props >>= function
       | Ok (_, b) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
@@ -296,14 +298,10 @@ class handler config fs = object(self)
     Fs.from_string fs (self#path rd) >>= function
     | Error _ -> Wm.respond (to_status `Bad_request) rd
     | Ok f_or_d ->
-      let user =
-        match Cohttp.Header.get rd.Wm.Rd.req_headers "Authorization" with
-        | None -> assert false
-        | Some user -> (`Dir [ config.principals ; user ])
-      in
+      properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
       match rd'.Wm.Rd.meth with
-      | `Other "PROPFIND" -> self#process_propfind rd' user f_or_d
-      | `Other "PROPPATCH" -> self#process_proppatch rd' user f_or_d
+      | `Other "PROPFIND" -> self#process_propfind rd' auth_user_props f_or_d
+      | `Other "PROPPATCH" -> self#process_proppatch rd' auth_user_props f_or_d
       | _ -> assert false
 
   method report rd =
@@ -315,12 +313,8 @@ class handler config fs = object(self)
       match Xml.string_to_tree body with
       | None -> Wm.respond (to_status `Bad_request) rd
       | Some tree ->
-        let user =
-          match Cohttp.Header.get rd.Wm.Rd.req_headers "Authorization" with
-          | None -> assert false
-          | Some user -> (`Dir [ config.principals ; user ])
-        in
-        Dav.report fs ~host:config.host ~path:f_or_d tree ~user >>= function
+        properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
+        Dav.report fs ~host:config.host ~path:f_or_d tree ~auth_user_props >>= function
         | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
         | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
@@ -345,7 +339,13 @@ class handler config fs = object(self)
       | tree ->
         let path = Fs.dir_from_string (self#path rd) in
         parent_is_calendar fs path >>= fun parent_is_calendar ->
-        if is_calendar && parent_is_calendar 
+        properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
+        Fs.get_property_map fs (Fs.parent (path :> file_or_dir) :> file_or_dir) >>= fun resource_props ->
+        let privileges = Properties.privileges ~auth_user_props resource_props in
+        let parent_acl_readable =
+          Properties.privilege_met `Read_acl privileges
+        in
+        if is_calendar && parent_is_calendar && parent_acl_readable
         then Wm.continue `Conflict rd
         else
           parent_acl fs path >>= fun acl ->
@@ -368,7 +368,7 @@ class handler config fs = object(self)
     | Error _ -> Wm.continue None rd
     | Ok f_or_d ->
       Fs.get_property_map fs f_or_d >|= (fun map ->
-        match Properties.find (Xml.dav_ns, "getlastmodified") map with
+        match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
           | Some (_, [ Xml.Pcdata lm]) -> Some lm
           | _ -> None) >>= fun res ->
       Wm.continue res rd
@@ -379,13 +379,13 @@ class handler config fs = object(self)
     | Ok f_or_d ->
       Fs.get_property_map fs f_or_d >>= fun map ->
       let rd' =
-        match Properties.find (Xml.dav_ns, "getlastmodified") map with
+        match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
         | Some (_, [ Xml.Pcdata lm ]) ->
           let add_headers h = Cohttp.Header.add_list h [ ("Last-Modified", lm) ] in
           Wm.Rd.with_resp_headers add_headers rd
         | _ -> rd
       in
-      let etag = match Properties.find (Xml.dav_ns, "getetag") map with
+      let etag = match Properties.unsafe_find (Xml.dav_ns, "getetag") map with
         | Some (_, [ Xml.Pcdata etag ]) -> Some etag
         | _ -> None
       in
@@ -557,7 +557,6 @@ let make_user ?(props = []) fs config name password =
   Lwt.return_unit
 
 (* TODO access control for /user *)
-(* TODO save user-password combination *)
 (* TODO delete user, delete all existing references (in acls, calendars) *)
 (* TODO force create user, uses delete user *)
 class create_user config fs = object(self)
@@ -607,7 +606,7 @@ let make_group fs config name password members =
   Lwt_list.iter_p (fun path ->
       let f_or_d = (Fs.dir_from_string path :> file_or_dir) in
       Fs.get_property_map fs f_or_d >>= fun props ->
-      let props' = match Properties.find group_key props with
+      let props' = match Properties.unsafe_find group_key props with
         | None -> Properties.add group_key ([], [ group_node ]) props
         | Some (attrs, groups) -> Properties.add group_key (attrs, group_node :: groups) props
       in

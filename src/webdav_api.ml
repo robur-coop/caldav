@@ -7,13 +7,13 @@ sig
     (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
       result Lwt.t
 
-  val propfind : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> user:Webdav_fs.file_or_dir -> depth:string option ->
+  val propfind : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t -> depth:string option ->
     (tree, [ `Bad_request | `Forbidden of tree | `Property_not_found ]) result Lwt.t
 
-  val proppatch : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> user:Webdav_fs.file_or_dir ->
+  val proppatch : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t ->
     (state * tree, [ `Bad_request ]) result Lwt.t
 
-  val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> user:Webdav_fs.file_or_dir ->
+  val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t ->
     (tree, [`Bad_request]) result Lwt.t
 
   val write_component : state -> path:Webdav_fs.file -> Webdav_xml.ace list -> Ptime.t -> ?etag:string -> content_type:string ->
@@ -103,17 +103,16 @@ module Make(Fs: Webdav_fs.S) = struct
   let uri_string host f_or_d =
     Uri.to_string @@ Uri.with_path host (Fs.to_string f_or_d)
 
-  let property_selector fs host propfind_request user f_or_d =
-    Fs.get_property_map fs f_or_d >>= fun map ->
+  let property_selector fs host propfind_request auth_user_props f_or_d =
+    Fs.get_property_map fs f_or_d >|= fun map ->
     if map = Properties.empty
-    then Lwt.return `Not_found
+    then `Not_found
     else
-      Fs.get_property_map fs user >|= fun userprops ->
       (* results for props, grouped by code *)
       let propstats = match propfind_request with
         | `Propname -> [`OK, Properties.names map]
         | `All_prop includes -> [`OK, Properties.all map] (* TODO: finish this *)
-        | `Props ps -> Properties.find_many ~userprops ps map
+        | `Props ps -> Properties.find_many ~auth_user_props ps map
       in
       let ps = List.map propstat_node propstats in
       let selected_properties =
@@ -126,9 +125,9 @@ module Make(Fs: Webdav_fs.S) = struct
 
   let error_xml element = Xml.dav_node "error" [ Xml.dav_node element [] ]
 
-  let propfind fs f_or_d host req user depth =
+  let propfind fs f_or_d host req auth_user_props depth =
     let process_files fs host dir req els =
-      Lwt_list.map_s (property_selector fs host req user) (dir :: els) >|= fun answers ->
+      Lwt_list.map_s (property_selector fs host req auth_user_props) (dir :: els) >|= fun answers ->
       (* answers : [ `Not_found | `Single_response of Tyxml.Xml.node ] list *)
       let nodes = List.fold_left (fun acc element ->
           match element with
@@ -144,7 +143,7 @@ module Make(Fs: Webdav_fs.S) = struct
     | `Zero, _
     | _, `File _ ->
       begin
-        property_selector fs host req user f_or_d >|= function
+        property_selector fs host req auth_user_props f_or_d >|= function
         | `Not_found -> Error `Property_not_found
         | `Single_response t -> Ok (multistatus [t])
       end
@@ -153,14 +152,14 @@ module Make(Fs: Webdav_fs.S) = struct
       | Error _ -> assert false
       | Ok els -> process_files fs host (`Dir data) req els
 
-  let propfind state ~host ~path tree ~user ~depth =
+  let propfind state ~host ~path tree ~auth_user_props ~depth =
     match parse_depth depth with
     | Error `Bad_request -> Lwt.return (Error `Bad_request)
     | Ok depth ->
       match Xml.parse_propfind_xml tree with
       | Error _ -> Lwt.return (Error `Property_not_found)
       | Ok req ->
-        propfind state path host req user depth >|= function
+        propfind state path host req auth_user_props depth >|= function
         | Ok body -> Ok body
         | Error e -> Error e
 
@@ -174,7 +173,7 @@ module Make(Fs: Webdav_fs.S) = struct
     | Error e -> Error e
     | Ok () -> Ok propstats
 
-  let proppatch state ~host ~path body ~user =
+  let proppatch state ~host ~path body ~auth_user_props =
     match Xml.parse_propupdate_xml body with
     | Error _ -> Lwt.return (Error `Bad_request)
     | Ok updates ->
@@ -619,7 +618,7 @@ module Make(Fs: Webdav_fs.S) = struct
       matches_timerange && matches_cfs && matches_pfs
     | _ -> false
 
-  let apply_transformation (t : Xml.report_prop option) d map ~userprops = match t with
+  let apply_transformation (t : Xml.report_prop option) d map ~auth_user_props = match t with
     | None -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics ~cr:false d)]]]
     | Some `All_props -> [`OK, Properties.all map]
     | Some `Propname -> [`OK, Properties.names map]
@@ -635,7 +634,7 @@ module Make(Fs: Webdav_fs.S) = struct
         | None -> d, None
         | Some ((filter, _, _) as tr) -> select_calendar_data d tr, filter
       in
-      let found_props = Properties.find_many ~userprops props' map in
+      let found_props = Properties.find_many ~auth_user_props props' map in
       let ok_props, rest_props = List.partition (fun (st, _) -> st = `OK) found_props in
       let ok_props' = List.flatten (List.map snd ok_props) in
       match snd output with (* kill whole calendar if comps are empty *)
@@ -645,20 +644,20 @@ module Make(Fs: Webdav_fs.S) = struct
         let cs = [ Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata ics] ] in
         [`OK, ok_props' @ cs ] @ rest_props
 
-  let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.component_filter) data map ~userprops =
+  let apply_to_vcalendar ((transform, filter): Xml.report_prop option * Xml.component_filter) data map ~auth_user_props =
     if vcalendar_matches_comp_filter filter data then
-      apply_transformation transform data map ~userprops
+      apply_transformation transform data map ~auth_user_props
     else
       []
 
-  let handle_calendar_query_report calendar_query state host path ~userprops =
+  let handle_calendar_query_report calendar_query state host path ~auth_user_props =
     let report_one query = function
       | `Dir _ -> Lwt.return (Error `Bad_request)
       | `File f ->
         Fs.read state (`File f) >|= function
         | Error _ -> Error `Bad_request
         | Ok (data, props) ->
-          let privileges = Properties.privileges ~userprops props in
+          let privileges = Properties.privileges ~auth_user_props props in
           if not (Properties.privilege_met ~requirement:`Read privileges) then
             let node = Xml.dav_node "response"
                 [ Xml.dav_node "href" [ Xml.pcdata (uri_string host (`File f)) ] ;
@@ -670,7 +669,7 @@ module Make(Fs: Webdav_fs.S) = struct
               Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
               Error `Bad_request
             | Ok ics ->
-              match apply_to_vcalendar query ics props ~userprops with
+              match apply_to_vcalendar query ics props ~auth_user_props with
               | [] -> Ok None
               | xs ->
                 let node =
@@ -701,7 +700,7 @@ module Make(Fs: Webdav_fs.S) = struct
             | Error _ -> acc) [] responses in
         Lwt.return (Ok (multistatus responses'))
 
-  let handle_calendar_multiget_report (transformation, filenames) state host path ~userprops =
+  let handle_calendar_multiget_report (transformation, filenames) state host path ~auth_user_props =
     let report_one (filename : string) =
       Printf.printf "calendar_multiget: filename %s\n%!" filename ;
       let file = Fs.file_from_string filename in
@@ -714,7 +713,7 @@ module Make(Fs: Webdav_fs.S) = struct
         in
         Ok node
       | Ok (data, props) ->
-        let privileges = Properties.privileges ~userprops props in
+        let privileges = Properties.privileges ~auth_user_props props in
         if not (Properties.privilege_met ~requirement:`Read privileges) then
           let node = Xml.dav_node "response"
               [ Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Webdav_fs.file_or_dir)) ] ;
@@ -727,7 +726,7 @@ module Make(Fs: Webdav_fs.S) = struct
             Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
             Error `Bad_request
           | Ok ics ->
-            let xs = apply_transformation transformation ics props ~userprops in
+            let xs = apply_transformation transformation ics props ~auth_user_props in
             let node =
               Xml.dav_node "response"
                 (Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Webdav_fs.file_or_dir)) ]
@@ -742,11 +741,10 @@ module Make(Fs: Webdav_fs.S) = struct
         | Error _ -> acc) [] responses in
     Lwt.return (Ok (multistatus @@ List.rev responses'))
 
-  let report state ~host ~path req ~user =
-    Fs.get_property_map state user >>= fun userprops ->
+  let report state ~host ~path req ~auth_user_props =
     match Xml.parse_calendar_query_xml req, Xml.parse_calendar_multiget_xml req with
-    | Ok calendar_query, _ -> handle_calendar_query_report calendar_query state host path ~userprops
-    | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget state host path ~userprops
+    | Ok calendar_query, _ -> handle_calendar_query_report calendar_query state host path ~auth_user_props
+    | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget state host path ~auth_user_props
     | Error e, Error _ -> Lwt.return (Error `Bad_request)
 
   let required_privilege verb target_exists = match verb with
@@ -794,11 +792,11 @@ module Make(Fs: Webdav_fs.S) = struct
     | Error _ -> Lwt.return Properties.empty
     | Ok f_or_d -> Fs.get_property_map fs f_or_d
 
-  let access_granted_for_acl fs path http_verb userprops =
+  let access_granted_for_acl fs path http_verb auth_user_props =
     Fs.exists fs path >>= fun target_exists ->
     let requirement, target_or_parent = required_privilege http_verb target_exists in
     read_target_or_parent_properties fs path target_or_parent >|= fun propmap ->
-    let privileges = Properties.privileges ~userprops propmap in
+    let privileges = Properties.privileges ~auth_user_props propmap in
     Format.printf "privileges are %a\n%!" Fmt.(list ~sep:(unit "; ") Xml.pp_privilege) privileges ;
     Properties.privilege_met ~requirement privileges
 end

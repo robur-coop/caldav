@@ -9,16 +9,26 @@ end)
 
 type t = (Webdav_xml.attribute list * Webdav_xml.tree list) PairMap.t
 
-let find = PairMap.find_opt
+(* not safe *)
+let unsafe_find = PairMap.find_opt
 
+(* not safe *)
 let add = PairMap.add
 
+(* not safe, not public *)
 let remove = PairMap.remove
 
+let prepare_for_disk map =
+  let map' = remove (Xml.dav_ns, "getetag") map in
+  remove (Xml.dav_ns, "getlastmodified") map'
+
+(* public and ok *)
 let empty = PairMap.empty
 
+(* internal *)
 let keys m = List.map fst (PairMap.bindings m)
 
+(* public and ok *)
 let count = PairMap.cardinal
 
 let not_returned_by_allprop = [
@@ -53,29 +63,37 @@ let write_protected = [
   (Xml.dav_ns, "etag");
 ]
 
-let patch ?(is_mkcol = false) m updates =
-  let set_prop k v m =
+let computed_properties = [
+  (Xml.dav_ns, "current-user-privilege-set") ;
+  (Xml.dav_ns, "current-user-principal")
+]
+
+(* assume that it is safe, should call can_write_prop *)
+(* TODO check `Write_acl if writing an ACL property *)
+(* TODO remove doesn't check write_protected list here *)
+let patch ?(is_mkcol = false) props_for_resource updates =
+  let set_prop k v props_for_resource =
     if List.mem k write_protected && not (is_mkcol && k = (Xml.dav_ns, "resourcetype"))
     then None, `Forbidden
     else
       (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
-      let map = add k v m in
+      let map = add k v props_for_resource in
       Some map, `OK
   in
   (* if an update did not apply, m will be None! *)
   let xml (ns, n) = [ Xml.node ~ns n [] ] in
-  let apply (m, propstats) update = match m, update with
+  let apply (props_for_resource, propstats) update = match props_for_resource, update with
     | None, `Set (_, k, _) -> None, (`Failed_dependency, xml k) :: propstats
     | None, `Remove k   -> None, (`Failed_dependency, xml k) :: propstats
-    | Some m, `Set (a, k, v) ->
-      let m, p = set_prop k (a, v) m in
-      (m, (p, xml k) :: propstats)
-    | Some m, `Remove k ->
-      let map = remove k m in
-      Some map, (`OK, xml k) :: propstats
+    | Some props_for_resource', `Set (a, k, v) ->
+      let props_for_resource'', p = set_prop k (a, v) props_for_resource' in
+      (props_for_resource'', (p, xml k) :: propstats)
+    | Some props_for_resource', `Remove k ->
+      let props_for_resource'' = remove k props_for_resource' in
+      Some props_for_resource'', (`OK, xml k) :: propstats
   in
-  match List.fold_left apply (Some m, []) updates with
-  | Some m, xs -> Some m, xs
+  match List.fold_left apply (Some props_for_resource, []) updates with
+  | Some props_for_resource', xs -> Some props_for_resource', xs
   | None, xs ->
     (* some update did not apply -> tree: None *)
     let ok_to_failed (s, k) =
@@ -85,30 +103,23 @@ let patch ?(is_mkcol = false) m updates =
     in
     None, List.map ok_to_failed xs
 
+(* housekeeping *)
 let to_trees m =
   PairMap.fold (fun (ns, k) (a, v) acc ->
     Xml.node ~ns ~a k v :: acc) m []
 
-let all m = to_trees (List.fold_right remove not_returned_by_allprop m)
-
-let names m =
-  List.map (fun (ns, k) -> Xml.node ~ns k []) @@
-  (Xml.dav_ns, "current-user-privilege-set") :: keys m
-
+(* housekeeping *)
 let to_string m =
   let c = to_trees m in
   Xml.tree_to_string (Xml.dav_node "prop" c)
 
+(* housekeeping *)
 let pp ppf t = Fmt.string ppf @@ to_string t
 
-let equal a b = 
-  String.equal (to_string a) (to_string b)
-  (*let compare (attrs, trees) (attrs', trees') = 
-    List.length attrs = List.length attrs' && 
-    List.length trees = List.length trees' && 
-    List.for_all2 Xml.equal_attribute attrs attrs' && List.for_all2 Xml.equal_tree trees trees' in
-  PairMap.equal compare a b*)
+(* housekeeping *)
+let equal a b = String.equal (to_string a) (to_string b)
 
+(* creates property map for file, only needs to check `Bind in parent, done by webmachine *)
 let create ?(content_type = "text/html") ?(language = "en") ?etag ?(resourcetype = []) acl timestamp length filename =
   let filename = if filename = "" then "hinz und kunz" else filename in
   let etag' m = match etag with None -> m | Some e -> PairMap.add (Xml.dav_ns, "getetag") ([], [ Xml.Pcdata e ]) m in
@@ -125,11 +136,13 @@ let create ?(content_type = "text/html") ?(language = "en") ?etag ?(resourcetype
   PairMap.add (Xml.dav_ns, "resourcetype") ([], resourcetype) PairMap.empty
   (* PairMap.add "supportedlock" *)
 
+(* creates property map for directory *)
 let create_dir ?(resourcetype = []) acl timestamp dirname =
   create ~content_type:"text/directory"
     ~resourcetype:(Xml.dav_node "collection" [] :: resourcetype)
     acl timestamp 0 dirname
 
+(* housekeeping *)
 let from_tree = function
   | Xml.Node (_, "prop", _, children) ->
     List.fold_left (fun m c -> match c with
@@ -139,22 +152,25 @@ let from_tree = function
   | _ -> assert false
 
 (* TODO groups only one level deep right now *)
-let identities props =
+(* TODO belongs elsewhere? *)
+(* outputs identities for a single user *)
+let identities userprops =
   let url = function
     | Xml.Node (_, "href", _, [ Xml.Pcdata url ]) -> [ Uri.of_string url ]
     | _ -> []
   in
   let urls n = List.flatten (List.map url n) in
   match
-    find (Xml.dav_ns, "principal-URL") props,
-    find (Xml.dav_ns, "group-membership") props
+    unsafe_find (Xml.dav_ns, "principal-URL") userprops,
+    unsafe_find (Xml.dav_ns, "group-membership") userprops
   with
   | None, _ -> []
   | Some (_, principal), Some (_, groups) -> urls principal @ urls groups
   | Some (_, principal), None -> urls principal
 
-let privileges ~userprops map =
-  let aces = match find (Xml.dav_ns, "acl") map with
+(* user_privileges_for_resource: user properties and resource properties as input, output is the list of granted privileges *)
+let privileges ~auth_user_props props_for_resource =
+  let aces = match unsafe_find (Xml.dav_ns, "acl") props_for_resource with
     | None -> []
     | Some (_, aces) -> aces
   in
@@ -162,15 +178,17 @@ let privileges ~userprops map =
   let aces'' = List.fold_left (fun acc -> function Ok ace -> ace :: acc | Error _ -> acc) [] aces' in (* TODO malformed ace? *)
   let aces''' = List.filter (function
       | `All, _ -> true
-      | `Href principal, _ -> List.exists (Uri.equal principal) (identities userprops)
+      | `Href principal, _ -> List.exists (Uri.equal principal) (identities auth_user_props)
       | _ -> assert false) aces''
   in
   List.flatten @@ List.map (function `Grant ps -> ps | `Deny _ -> []) (List.map snd aces''')
 
-let current_user_privilege_set ~userprops map =
+(* helper computing "current-user-privilege-set", not public *)
+let current_user_privilege_set ~auth_user_props map =
   let make_node p = Xml.dav_node "privilege" [ Xml.priv_to_xml p ] in
-  Some ([], (List.map make_node (privileges ~userprops map)))
+  Some ([], (List.map make_node (privileges ~auth_user_props map)))
 
+(* TODO maybe move to own module *)
 let privilege_met ~requirement privileges =
   List.exists (fun privilege -> match requirement, privilege with
   | _, `All -> true
@@ -191,6 +209,7 @@ let privilege_met ~requirement privileges =
   | `Unbind, `Unbind -> true
   | _ -> false ) privileges
 
+(* checks privileges for "current-user-privilege-set" (`Read_current_user_privilege_set) and "acl" (`Read_acl) *)
 let can_read_prop fqname privileges =
   let requirement = match fqname with
     | ns, "current-user-privilege-set" when ns = Xml.dav_ns -> Some `Read_current_user_privilege_set
@@ -201,21 +220,31 @@ let can_read_prop fqname privileges =
   | Some requirement -> privilege_met ~requirement privileges
   | None -> true
 
+(* checks nothing, computes current-user-principal, helper function *)
 let current_user_principal props =
-  match find (Xml.dav_ns, "principal-URL") props with
+  match unsafe_find (Xml.dav_ns, "principal-URL") props with
   | None -> Some ([], [ Xml.dav_node "unauthenticated" [] ])
   | Some url -> Some url
 
-let get_prop userprops m = function
-  | ns, "current-user-privilege-set" when ns = Xml.dav_ns -> current_user_privilege_set ~userprops m
-  | ns, "current-user-principal" when ns = Xml.dav_ns -> current_user_principal userprops
-  | fqname -> find fqname m
+(* checks nothing, computes properties, should be visible? but requires auth_user_props *)
+let get_prop auth_user_props m = function
+  | ns, "current-user-privilege-set" when ns = Xml.dav_ns -> current_user_privilege_set ~auth_user_props m
+  | ns, "current-user-principal" when ns = Xml.dav_ns -> current_user_principal auth_user_props
+  | fqname -> unsafe_find fqname m
 
-let find_many ~userprops property_names m =
-  let privileges = privileges ~userprops m in
+let authorized_properties_for_resource ~auth_user_props requested_props propmap_for_resource =
+  let privileges = privileges ~auth_user_props propmap_for_resource in
+  let requested_allowed, requested_forbidden =
+    List.partition (fun prop -> can_read_prop prop privileges) requested_props
+  in
+  (requested_allowed, requested_forbidden)
+
+(* checks sufficient privileges for "current-user-privilege-set" and "read-acl" via can_read_prop *)
+let find_many ~auth_user_props property_names m =
+  let privileges = privileges ~auth_user_props m in
   let props = List.map (fun fqname ->
     if can_read_prop fqname privileges
-    then match get_prop userprops m fqname with
+    then match get_prop auth_user_props m fqname with
       | None -> `Not_found
       | Some v -> `Found v
     else `Forbidden
@@ -230,3 +259,11 @@ let find_many ~userprops property_names m =
   let not_found, forbidden = List.partition (function | `Not_found, _ -> true | `Forbidden, _ -> false | `Found _, _ -> assert false) rest in
   let apply_tag tag l = if l = [] then [] else [ tag, List.map snd l ] in
   apply_tag `OK found @ apply_tag `Not_found not_found @ apply_tag `Forbidden forbidden
+
+(* not safe, exposed, returns property names *)
+let names m =
+  List.map (fun (ns, k) -> Xml.node ~ns k []) @@
+  computed_properties @ keys m
+
+(* not really safe, but excludes from the not-returned-by-allprop list *)
+let all m = to_trees (List.fold_right remove not_returned_by_allprop m)
