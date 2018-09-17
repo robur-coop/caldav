@@ -140,7 +140,7 @@ let properties_for_current_user fs config req_headers =
 let parent_acl fs config req_headers path =
   properties_for_current_user fs config req_headers >>= fun auth_user_props ->
   Fs.get_property_map fs (Fs.parent (path :> file_or_dir) :> file_or_dir) >|= fun parent_resource_props ->
-  if not (Privileges.privilege_met ~requirement:`Read_acl @@
+  if not (Privileges.is_met ~requirement:`Read_acl @@
           Properties.privileges ~auth_user_props parent_resource_props)
   then Error `Forbidden
   (* we check above that Read_acl is allowed, TODO express with find_many *)

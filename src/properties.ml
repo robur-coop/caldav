@@ -177,7 +177,7 @@ let privileges ~auth_user_props resource_props =
     | None -> []
     | Some (_, aces) -> aces
   in
-  Privileges.privileges ~identities:(identities auth_user_props) aces
+  Privileges.list ~identities:(identities auth_user_props) aces
 
 (* helper computing "current-user-privilege-set", not public *)
 let current_user_privilege_set ~auth_user_props map =

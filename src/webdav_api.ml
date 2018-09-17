@@ -661,7 +661,7 @@ module Make(Fs: Webdav_fs.S) = struct
         | Error _ -> Error `Bad_request
         | Ok (data, props) ->
           let privileges = Properties.privileges ~auth_user_props props in
-          if not (Privileges.privilege_met ~requirement:`Read privileges) then
+          if not (Privileges.is_met ~requirement:`Read privileges) then
             let node = Xml.dav_node "response"
                 [ Xml.dav_node "href" [ Xml.pcdata (uri_string host (`File f)) ] ;
                   Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
@@ -717,7 +717,7 @@ module Make(Fs: Webdav_fs.S) = struct
         Ok node
       | Ok (data, props) ->
         let privileges = Properties.privileges auth_user_props props in
-        if not (Privileges.privilege_met ~requirement:`Read privileges) then
+        if not (Privileges.is_met ~requirement:`Read privileges) then
           let node = Xml.dav_node "response"
               [ Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Webdav_fs.file_or_dir)) ] ;
                 Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
@@ -759,9 +759,9 @@ module Make(Fs: Webdav_fs.S) = struct
 
   let access_granted_for_acl fs path http_verb auth_user_props =
     Fs.exists fs path >>= fun target_exists ->
-    let requirement, target_or_parent = Privileges.required_privilege http_verb target_exists in
+    let requirement, target_or_parent = Privileges.required http_verb ~target_exists in
     read_target_or_parent_properties fs path target_or_parent >|= fun propmap ->
     let privileges = Properties.privileges ~auth_user_props propmap in
     Format.printf "privileges are %a\n%!" Fmt.(list ~sep:(unit "; ") Xml.pp_privilege) privileges ;
-    Privileges.privilege_met ~requirement privileges
+    Privileges.is_met ~requirement privileges
 end

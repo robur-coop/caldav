@@ -1,7 +1,7 @@
 module Xml = Webdav_xml
 
 (* user_privileges_for_resource: user properties and resource properties as input, output is the list of granted privileges *)
-let privileges ~identities aces =
+let list ~identities aces =
   let aces' = List.map Xml.xml_to_ace aces in
   let aces'' = List.fold_left (fun acc -> function Ok ace -> ace :: acc | Error _ -> acc) [] aces' in (* TODO malformed ace? *)
   let aces''' = List.filter (function
@@ -12,7 +12,7 @@ let privileges ~identities aces =
   List.flatten @@ List.map (function `Grant ps -> ps | `Deny _ -> []) (List.map snd aces''')
 
 (* TODO maybe move to own module *)
-let privilege_met ~requirement privileges =
+let is_met ~requirement privileges =
   List.exists (fun privilege -> match requirement, privilege with
   | _, `All -> true
   | `Read, `Read -> true
@@ -40,10 +40,10 @@ let can_read_prop fqname privileges =
     | _ -> None
   in
   match requirement with
-  | Some requirement -> privilege_met ~requirement privileges
+  | Some requirement -> is_met ~requirement privileges
   | None -> true
 
-let required_privilege verb target_exists = match verb with
+let required verb ~target_exists = match verb with
   | `GET -> `Read, `Target
   | `HEAD -> `Read, `Target
   | `OPTIONS -> `Read, `Target
