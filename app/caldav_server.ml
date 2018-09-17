@@ -553,6 +553,36 @@ let make_user ?(props = []) fs config name =
   create_calendar fs acl (`Dir [config.calendars ; name ; "calendar"]) >>= fun _ ->
   Lwt.return_unit
 
+(* TODO access control for /user *)
+(* TODO save user-password combination *)
+(* TODO delete user, delete all existing references (in acls, calendars) *)
+(* TODO force create user, uses delete user *)
+class create_user config fs = object(self)
+  inherit [Cohttp_lwt.Body.t] Wm.resource
+
+  method allowed_methods rd =
+    Wm.continue [`PUT; `OPTIONS ] rd
+
+  method known_methods rd =
+    Wm.continue [`PUT; `OPTIONS ] rd
+
+  method private create_user rd =
+    let uri = rd.Wm.Rd.uri in
+    match Uri.get_query_param uri "user", Uri.get_query_param uri "password" with
+    | None, _ | _, None -> Wm.respond (to_status `Bad_request) rd
+    | Some name, Some pass ->
+      make_user fs config name (* pass *) >>= fun () ->
+      Wm.continue true rd
+
+  method content_types_provided rd =
+    Wm.continue [ ("*/*", Wm.continue `Empty) ] rd
+
+  method content_types_accepted rd =
+    Wm.continue [
+      ("application/octet-stream", self#create_user)
+    ] rd
+end
+
 let make_group fs config name members =
   let principal_path user = Fs.to_string (`Dir [ config.principals ; user ]) in
   let new_member_paths = List.map principal_path members in
@@ -617,6 +647,7 @@ let main () =
   (* the route table *)
   let routes = [
     ("/.well-known/caldav", fun () -> new redirect config) ;
+    ("/user", fun () -> new create_user config fs) ;
     ("/" ^ config.principals, fun () -> new handler config fs) ;
     ("/" ^ config.principals ^ "/*", fun () -> new handler config fs) ;
     ("/" ^ config.calendars, fun () -> new handler config fs) ;
