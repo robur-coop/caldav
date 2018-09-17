@@ -30,6 +30,7 @@ sig
 
   val parent : file_or_dir -> dir
 
+  (* careful: uses Properties.unsafe_find *)
   val get_property_map : t -> file_or_dir -> Properties.t Lwt.t
 
   val write_property_map : t -> file_or_dir -> Properties.t ->

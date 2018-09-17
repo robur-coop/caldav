@@ -116,16 +116,9 @@ let calendar_to_collection data =
   | Some (Xml.Node (ns, "mkcalendar", a, c)) when ns = Xml.caldav_ns -> Ok (Xml.tyxml_to_body (Xml.tree_to_tyxml (Xml.node ~ns:Xml.dav_ns ~a "mkcol" c)))
   | _ -> Error `Bad_request
 
-let parent_acl fs file =
-  Fs.get_property_map fs (Fs.parent (file :> file_or_dir) :> file_or_dir) >|= fun map ->
-  match Properties.unsafe_find (Xml.dav_ns, "acl") map with
-  | None -> []
-  | Some (_, aces) ->
-    let aces' = List.map Xml.xml_to_ace aces in
-    List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces'
-
 let parent_is_calendar fs file =
   Fs.get_property_map fs (Fs.parent (file :> file_or_dir) :> file_or_dir) >|= fun map ->
+  (* TODO access check missing *)
   match Properties.unsafe_find (Xml.dav_ns, "resourcetype") map with
   | None -> false
   | Some (_, trees) ->
@@ -143,10 +136,17 @@ let properties_for_current_user fs config req_headers =
   let user_path = `Dir [ config.principals ; user ] in
   Fs.get_property_map fs user_path
 
-let can_read_parent_acl fs config req_headers path =
+let parent_acl fs config req_headers path =
   properties_for_current_user fs config req_headers >>= fun auth_user_props ->
   Fs.get_property_map fs (Fs.parent (path :> file_or_dir) :> file_or_dir) >|= fun parent_resource_props ->
-  Properties.privilege_met ~requirement:`Read_acl @@ Properties.privileges ~auth_user_props parent_resource_props
+  if not (Properties.privilege_met ~requirement:`Read_acl @@ Properties.privileges ~auth_user_props parent_resource_props)
+  then Error `Forbidden
+  (* we check above that Read_acl is allowed, TODO express with find_many *)
+  else match Properties.unsafe_find (Xml.dav_ns, "acl") parent_resource_props with
+    | None -> Ok []
+    | Some (_, aces) ->
+      let aces' = List.map Xml.xml_to_ace aces in
+      Ok (List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces')
 
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
@@ -170,11 +170,9 @@ class handler config fs = object(self)
       let ics = Icalendar.to_ics cal in
       let etag = etag ics in
       let file = Fs.file_from_string path in
-      can_read_parent_acl fs config rd.Wm.Rd.req_headers file >>= fun parent_acl_readable ->
-      if not parent_acl_readable
-      then Wm.respond (to_status `Forbidden) rd
-      else
-        parent_acl fs file >>= fun acl ->
+      parent_acl fs config rd.Wm.Rd.req_headers file >>= function
+      | Error e -> Wm.respond (to_status `Forbidden) rd
+      | Ok acl ->
         Dav.write_component fs ~path:file ~etag ~content_type acl (Ptime_clock.now ()) ics >>= function
         | Error e -> Wm.respond (to_status e) rd
         | Ok _ ->
@@ -217,6 +215,7 @@ class handler config fs = object(self)
         Wm.continue (`String data) rd
     | `File f ->
       Fs.read fs (`File f) >>== fun (data, props) ->
+      (* this property only needs read, which has been checked on the resource already *)
       let ct = match Properties.unsafe_find (Xml.dav_ns, "getcontenttype") props with
         | Some (_, [ Xml.Pcdata ct ]) -> ct
         | _ -> "text/calendar" in
@@ -348,16 +347,17 @@ class handler config fs = object(self)
       | tree ->
         let path = Fs.dir_from_string (self#path rd) in
         parent_is_calendar fs path >>= fun parent_is_calendar ->
-        can_read_parent_acl fs config rd.Wm.Rd.req_headers path >>= fun parent_acl_readable ->
-        if is_calendar && parent_is_calendar && parent_acl_readable
+        if is_calendar && parent_is_calendar
         then Wm.continue `Conflict rd
         else
-          parent_acl fs path >>= fun acl ->
-          Dav.mkcol fs ~path acl (Ptime_clock.now ()) ~is_calendar tree >>= function
-          | Ok _ -> Wm.continue `Created rd
-          | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string t) }
-          | Error `Conflict -> Wm.continue `Conflict rd
-          | Error `Bad_request -> Wm.continue `Conflict rd
+          parent_acl fs config rd.Wm.Rd.req_headers path >>= function
+          | Error e -> Wm.continue e rd
+          | Ok acl ->
+            Dav.mkcol fs ~path acl (Ptime_clock.now ()) ~is_calendar tree >>= function
+            | Ok _ -> Wm.continue `Created rd
+            | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string t) }
+            | Error `Conflict -> Wm.continue `Conflict rd
+            | Error `Bad_request -> Wm.continue `Conflict rd
 
   method delete_resource rd =
     Fs.from_string fs (self#path rd) >>= function
@@ -372,6 +372,7 @@ class handler config fs = object(self)
     | Error _ -> Wm.continue None rd
     | Ok f_or_d ->
       Fs.get_property_map fs f_or_d >|= (fun map ->
+          (* no special property, already checked for resource *)
         match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
           | Some (_, [ Xml.Pcdata lm]) -> Some lm
           | _ -> None) >>= fun res ->
@@ -383,12 +384,14 @@ class handler config fs = object(self)
     | Ok f_or_d ->
       Fs.get_property_map fs f_or_d >>= fun map ->
       let rd' =
+        (* no special property, already checked for resource *)
         match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
         | Some (_, [ Xml.Pcdata lm ]) ->
           let add_headers h = Cohttp.Header.add_list h [ ("Last-Modified", lm) ] in
           Wm.Rd.with_resp_headers add_headers rd
         | _ -> rd
       in
+      (* no special property, already checked for resource *)
       let etag = match Properties.unsafe_find (Xml.dav_ns, "getetag") map with
         | Some (_, [ Xml.Pcdata etag ]) -> Some etag
         | _ -> None
@@ -444,10 +447,9 @@ let carddav_ns = "urn:ietf:params:xml:ns:carddav"
 
 let make_dir fs acl ?(resourcetype = []) ?(props=[]) dir =
   let propmap =
-    Properties.create_dir ~resourcetype acl (Ptime_clock.now ()) (Fs.basename (dir :> file_or_dir))
+    Properties.create_dir ~initial_props:props ~resourcetype acl (Ptime_clock.now ()) (Fs.basename (dir :> file_or_dir))
   in
-  let propmap' = List.fold_left (fun p (k, v) -> Properties.add k v p) propmap props in
-  Fs.mkdir fs dir propmap'
+  Fs.mkdir fs dir propmap
 
 let make_dir_if_not_present fs acl ?resourcetype ?props dir =
   Fs.dir_exists fs dir >>= fun exists ->
@@ -610,9 +612,10 @@ let make_group fs config name password members =
   Lwt_list.iter_p (fun path ->
       let f_or_d = (Fs.dir_from_string path :> file_or_dir) in
       Fs.get_property_map fs f_or_d >>= fun props ->
+      (* TODO should use find_many *)
       let props' = match Properties.unsafe_find group_key props with
-        | None -> Properties.add group_key ([], [ group_node ]) props
-        | Some (attrs, groups) -> Properties.add group_key (attrs, group_node :: groups) props
+        | None -> Properties.unsafe_add group_key ([], [ group_node ]) props
+        | Some (attrs, groups) -> Properties.unsafe_add group_key (attrs, group_node :: groups) props
       in
       Fs.write_property_map fs f_or_d props' >>= fun _ ->
       Lwt.return_unit)

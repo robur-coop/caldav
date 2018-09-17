@@ -70,10 +70,13 @@ module Make(Fs: Webdav_fs.S) = struct
   let delete state ~path now =
     Fs.destroy state path >>= fun res ->
     let now = Ptime.to_rfc3339 now in
+    (* TODO for a collection/directory, the last modified is defined as maximum last modified of
+       all present files or directories.  If the directory is empty, its creationdate is used.
+       if we delete the last file in a directory, we need to update the getlastmodified property *)
     let rec update_parent f_or_d =
       let (`Dir parent) = Fs.parent f_or_d in
       Fs.get_property_map state (`Dir parent) >>= fun map ->
-      let map' = Properties.add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
+      let map' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
       Fs.write_property_map state (`Dir parent) map' >>= function
       | Error e -> assert false
       | Ok () -> match parent with

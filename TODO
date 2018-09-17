@@ -29,13 +29,12 @@ DONE:
 
 - a private calendar which should turn into a public one: how to adjust all the event ACLs? maybe DAV:inherited ACL?
 
+- unsafe_find and unsafe_add: comment reasons
+- access control into separate module
+- move stuff to webdav_api
 - curl commands to add a user, delete a user, make calendar public/private/read-only/protected (freebusy only)
   - adding a user, missing:
-    - calendar-home-set
-    - in resourcetype principal
-    - principal-URL
-    - displayname
-    - acl
+    - access control?
 - curl command to add group, add group members, delete group members, delete group
   - add group calendar, remove group calendar
 - access control XML content when forbidden

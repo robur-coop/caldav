@@ -7,13 +7,15 @@ module PairMap = Map.Make (struct
       | x -> x
 end)
 
-type t = (Webdav_xml.attribute list * Webdav_xml.tree list) PairMap.t
+type property = Xml.attribute list * Xml.tree list
+
+type t = property PairMap.t
 
 (* not safe *)
 let unsafe_find = PairMap.find_opt
 
 (* not safe *)
-let add = PairMap.add
+let unsafe_add = PairMap.add
 
 (* not safe, not public *)
 let remove = PairMap.remove
@@ -77,7 +79,7 @@ let patch ?(is_mkcol = false) props_for_resource updates =
     then None, `Forbidden
     else
       (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
-      let map = add k v props_for_resource in
+      let map = unsafe_add k v props_for_resource in
       Some map, `OK
   in
   (* if an update did not apply, m will be None! *)
@@ -120,25 +122,27 @@ let pp ppf t = Fmt.string ppf @@ to_string t
 let equal a b = String.equal (to_string a) (to_string b)
 
 (* creates property map for file, only needs to check `Bind in parent, done by webmachine *)
-let create ?(content_type = "text/html") ?(language = "en") ?etag ?(resourcetype = []) acl timestamp length filename =
+let create ?(initial_props = []) ?(content_type = "text/html") ?(language = "en") ?etag ?(resourcetype = []) acl timestamp length filename =
   let filename = if filename = "" then "hinz und kunz" else filename in
-  let etag' m = match etag with None -> m | Some e -> PairMap.add (Xml.dav_ns, "getetag") ([], [ Xml.Pcdata e ]) m in
+  let etag' m = match etag with None -> m | Some e -> unsafe_add (Xml.dav_ns, "getetag") ([], [ Xml.Pcdata e ]) m in
   let timestamp' = Ptime.to_rfc3339 timestamp in
-  etag' @@
-  PairMap.add (Xml.dav_ns, "acl") ([], List.map Xml.ace_to_xml acl) @@
-  PairMap.add (Xml.dav_ns, "creationdate") ([], [ Xml.Pcdata timestamp' ]) @@
-  PairMap.add (Xml.dav_ns, "displayname") ([], [ Xml.Pcdata filename ]) @@
-  PairMap.add (Xml.dav_ns, "getcontentlanguage") ([], [ Xml.Pcdata language ]) @@
-  PairMap.add (Xml.dav_ns, "getcontenttype") ([], [ Xml.Pcdata content_type ]) @@
-  PairMap.add (Xml.dav_ns, "getcontentlength") ([], [ Xml.Pcdata (string_of_int length) ]) @@
-  PairMap.add (Xml.dav_ns, "getlastmodified") ([], [ Xml.Pcdata timestamp' ]) @@
-  (* PairMap.add "lockdiscovery" *)
-  PairMap.add (Xml.dav_ns, "resourcetype") ([], resourcetype) PairMap.empty
-  (* PairMap.add "supportedlock" *)
+  let propmap = etag' @@
+    unsafe_add (Xml.dav_ns, "acl") ([], List.map Xml.ace_to_xml acl) @@
+    unsafe_add (Xml.dav_ns, "creationdate") ([], [ Xml.Pcdata timestamp' ]) @@
+    unsafe_add (Xml.dav_ns, "displayname") ([], [ Xml.Pcdata filename ]) @@
+    unsafe_add (Xml.dav_ns, "getcontentlanguage") ([], [ Xml.Pcdata language ]) @@
+    unsafe_add (Xml.dav_ns, "getcontenttype") ([], [ Xml.Pcdata content_type ]) @@
+    unsafe_add (Xml.dav_ns, "getcontentlength") ([], [ Xml.Pcdata (string_of_int length) ]) @@
+    unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.Pcdata timestamp' ]) @@
+    (* unsafe_add "lockdiscovery" *)
+    unsafe_add (Xml.dav_ns, "resourcetype") ([], resourcetype) empty
+    (* unsafe_add "supportedlock" *)
+  in
+  List.fold_left (fun p (k, v) -> unsafe_add k v p) propmap initial_props
 
 (* creates property map for directory *)
-let create_dir ?(resourcetype = []) acl timestamp dirname =
-  create ~content_type:"text/directory"
+let create_dir ?initial_props ?(resourcetype = []) acl timestamp dirname =
+  create ?initial_props ~content_type:"text/directory"
     ~resourcetype:(Xml.dav_node "collection" [] :: resourcetype)
     acl timestamp 0 dirname
 
@@ -146,9 +150,9 @@ let create_dir ?(resourcetype = []) acl timestamp dirname =
 let from_tree = function
   | Xml.Node (_, "prop", _, children) ->
     List.fold_left (fun m c -> match c with
-        | Xml.Node (ns, k, a, v) -> PairMap.add (ns, k) (a, v) m
+        | Xml.Node (ns, k, a, v) -> unsafe_add (ns, k) (a, v) m
         | Xml.Pcdata _ -> assert false)
-      PairMap.empty children
+      empty children
   | _ -> assert false
 
 (* TODO groups only one level deep right now *)

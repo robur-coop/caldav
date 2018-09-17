@@ -198,6 +198,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
       | Some t -> Some (Properties.from_tree t)
 
   (* property getlastmodified does not exist for directories *)
+  (* careful: unsafe_find *)
   let last_modified_as_ptime fs f_or_d =
     get_raw_property_map fs f_or_d >|= function
     | None ->
@@ -215,6 +216,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
       | _ -> None
 
   (* we only take depth 1 into account when computing the overall last modified *)
+  (* careful: unsafe_find *)
   let last_modified_of_dir map fs (`Dir dir) =
     let start = match Properties.unsafe_find (Xml.dav_ns, "creationdate") map with
       | Some (_, [ Xml.Pcdata date ]) ->
@@ -233,6 +235,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
       in
       Lwt.return (Xml.ptime_to_http_date @@ List.fold_left max_mtime start lms)
 
+  (* careful: unsafe_find *)
   let get_etag fs f_or_d =
     get_raw_property_map fs f_or_d >|= function
     | None ->
@@ -242,6 +245,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
       | Some (_, [ Xml.Pcdata etag ]) -> Some etag
       | _ -> Some (to_string f_or_d)
 
+  (* careful: unsafe_find (when calling get_etag) *)
   let etag_of_dir fs (`Dir dir) =
     listdir fs (`Dir dir) >>= function
     | Error _ -> Lwt.return ""
@@ -254,6 +258,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
   (* let open_fs_error x =
    *   (x : ('a, Fs.error) result Lwt.t :> ('a, [> Fs.error ]) result Lwt.t) *)
 
+  (* careful: unsafe_find, unsafe_add *)
   let get_property_map fs f_or_d =
     get_raw_property_map fs f_or_d >>= function
     | None -> Lwt.return Properties.empty
@@ -268,7 +273,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
               | Ok (ts, _, _) ->
                 let http_date = Xml.ptime_to_http_date ts in
                 let map' =
-                  Properties.add (Xml.dav_ns, "getlastmodified")
+                  Properties.unsafe_add (Xml.dav_ns, "getlastmodified")
                     ([], [ Xml.pcdata http_date ]) map
                 in
                 Lwt.return map'
@@ -278,14 +283,15 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
       | `Dir d ->
         last_modified_of_dir map fs (`Dir d) >>= fun last_modified ->
         etag_of_dir fs (`Dir d) >|= fun etag ->
-        Properties.add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata last_modified ])
-          (Properties.add (Xml.dav_ns, "getetag") ([], [ Xml.pcdata etag ]) map)
+        (* inverse of Properties.prepare_for_disk *)
+        Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata last_modified ])
+          (Properties.unsafe_add (Xml.dav_ns, "getetag") ([], [ Xml.pcdata etag ]) map)
 
   let read fs (`File file) =
     let name = to_string (`File file) in
     Fs.size fs name >>== fun length ->
     Fs.read fs name 0 (Int64.to_int length) >>== fun data ->
-    get_property_map fs (`File file) >|= fun props -> 
+    get_property_map fs (`File file) >|= fun props ->
     Ok (Cstruct.concat data, props)
 
   let mkdir fs (`Dir dir) propmap =
