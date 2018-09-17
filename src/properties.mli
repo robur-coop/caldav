@@ -20,8 +20,6 @@ val from_tree : Xml.tree -> t
 
 val privileges : auth_user_props:t -> t -> Xml.privilege list
 
-val privilege_met : requirement:Xml.privilege -> Xml.privilege list -> bool
-
 (* unsafe methods *)
 val unsafe_add : Xml.fqname -> property -> t -> t
 

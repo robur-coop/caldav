@@ -6,6 +6,7 @@ module Fs = Caldav.Webdav_fs.Make(FS_unix)
 module Xml = Caldav.Webdav_xml
 module Dav = Caldav.Webdav_api.Make(Fs)
 module Properties = Caldav.Properties
+module Privileges = Caldav.Privileges
 type file_or_dir = Caldav.Webdav_fs.file_or_dir
 
 (* Apply the [Webmachine.Make] functor to the Lwt_unix-based IO module
@@ -139,7 +140,8 @@ let properties_for_current_user fs config req_headers =
 let parent_acl fs config req_headers path =
   properties_for_current_user fs config req_headers >>= fun auth_user_props ->
   Fs.get_property_map fs (Fs.parent (path :> file_or_dir) :> file_or_dir) >|= fun parent_resource_props ->
-  if not (Properties.privilege_met ~requirement:`Read_acl @@ Properties.privileges ~auth_user_props parent_resource_props)
+  if not (Privileges.privilege_met ~requirement:`Read_acl @@
+          Properties.privileges ~auth_user_props parent_resource_props)
   then Error `Forbidden
   (* we check above that Read_acl is allowed, TODO express with find_many *)
   else match Properties.unsafe_find (Xml.dav_ns, "acl") parent_resource_props with

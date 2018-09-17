@@ -20,16 +20,14 @@ DONE:
 - access control (WebDAV)
 - user management (config file: users, hostname, routing, etc.)
 - how to add user and set acl
-
+- unsafe_find and unsafe_add: comment reasons
+- test access control with apple and thunderbird
 - readonly xml props (sind live properties) - there may still be more (in caldav/acl)
 
 -- 31st August 2018:
 
-- test access control with apple and thunderbird
-
 - a private calendar which should turn into a public one: how to adjust all the event ACLs? maybe DAV:inherited ACL?
 
-- unsafe_find and unsafe_add: comment reasons
 - access control into separate module
 - move stuff to webdav_api
 - curl commands to add a user, delete a user, make calendar public/private/read-only/protected (freebusy only)

@@ -172,57 +172,18 @@ let identities userprops =
   | Some (_, principal), Some (_, groups) -> urls principal @ urls groups
   | Some (_, principal), None -> urls principal
 
-(* user_privileges_for_resource: user properties and resource properties as input, output is the list of granted privileges *)
-let privileges ~auth_user_props props_for_resource =
-  let aces = match unsafe_find (Xml.dav_ns, "acl") props_for_resource with
+let privileges ~auth_user_props resource_props =
+  let aces = match unsafe_find (Xml.dav_ns, "acl") resource_props with
     | None -> []
     | Some (_, aces) -> aces
   in
-  let aces' = List.map Xml.xml_to_ace aces in
-  let aces'' = List.fold_left (fun acc -> function Ok ace -> ace :: acc | Error _ -> acc) [] aces' in (* TODO malformed ace? *)
-  let aces''' = List.filter (function
-      | `All, _ -> true
-      | `Href principal, _ -> List.exists (Uri.equal principal) (identities auth_user_props)
-      | _ -> assert false) aces''
-  in
-  List.flatten @@ List.map (function `Grant ps -> ps | `Deny _ -> []) (List.map snd aces''')
+  Privileges.privileges ~identities:(identities auth_user_props) aces
 
 (* helper computing "current-user-privilege-set", not public *)
 let current_user_privilege_set ~auth_user_props map =
   let make_node p = Xml.dav_node "privilege" [ Xml.priv_to_xml p ] in
-  Some ([], (List.map make_node (privileges ~auth_user_props map)))
-
-(* TODO maybe move to own module *)
-let privilege_met ~requirement privileges =
-  List.exists (fun privilege -> match requirement, privilege with
-  | _, `All -> true
-  | `Read, `Read -> true
-  | `Read_acl, `Read_acl -> true
-  | `Read_current_user_privilege_set, `Read_current_user_privilege_set -> true
-  | `Read_current_user_privilege_set, `Read_acl -> true
-  | `Write, `Write -> true
-  | `Write_content, `Write -> true
-  | `Write_properties, `Write -> true
-  | `Write_acl, `Write -> true
-  | `Bind, `Write -> true
-  | `Unbind, `Write -> true
-  | `Write_content, `Write_content -> true
-  | `Write_properties, `Write_properties -> true
-  | `Write_acl, `Write_acl -> true
-  | `Bind, `Bind -> true
-  | `Unbind, `Unbind -> true
-  | _ -> false ) privileges
-
-(* checks privileges for "current-user-privilege-set" (`Read_current_user_privilege_set) and "acl" (`Read_acl) *)
-let can_read_prop fqname privileges =
-  let requirement = match fqname with
-    | ns, "current-user-privilege-set" when ns = Xml.dav_ns -> Some `Read_current_user_privilege_set
-    | ns, "acl" when ns = Xml.dav_ns -> Some `Read_acl
-    | _ -> None
-  in
-  match requirement with
-  | Some requirement -> privilege_met ~requirement privileges
-  | None -> true
+  let privileges = privileges auth_user_props map in
+  Some ([], (List.map make_node privileges))
 
 (* checks nothing, computes current-user-principal, helper function *)
 let current_user_principal props =
@@ -239,15 +200,15 @@ let get_prop auth_user_props m = function
 let authorized_properties_for_resource ~auth_user_props requested_props propmap_for_resource =
   let privileges = privileges ~auth_user_props propmap_for_resource in
   let requested_allowed, requested_forbidden =
-    List.partition (fun prop -> can_read_prop prop privileges) requested_props
+    List.partition (fun prop -> Privileges.can_read_prop prop privileges) requested_props
   in
   (requested_allowed, requested_forbidden)
 
 (* checks sufficient privileges for "current-user-privilege-set" and "read-acl" via can_read_prop *)
 let find_many ~auth_user_props property_names m =
-  let privileges = privileges ~auth_user_props m in
+  let privileges = privileges auth_user_props m in
   let props = List.map (fun fqname ->
-    if can_read_prop fqname privileges
+    if Privileges.can_read_prop fqname privileges
     then match get_prop auth_user_props m fqname with
       | None -> `Not_found
       | Some v -> `Found v

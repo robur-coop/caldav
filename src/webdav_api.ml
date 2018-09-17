@@ -661,7 +661,7 @@ module Make(Fs: Webdav_fs.S) = struct
         | Error _ -> Error `Bad_request
         | Ok (data, props) ->
           let privileges = Properties.privileges ~auth_user_props props in
-          if not (Properties.privilege_met ~requirement:`Read privileges) then
+          if not (Privileges.privilege_met ~requirement:`Read privileges) then
             let node = Xml.dav_node "response"
                 [ Xml.dav_node "href" [ Xml.pcdata (uri_string host (`File f)) ] ;
                   Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
@@ -716,8 +716,8 @@ module Make(Fs: Webdav_fs.S) = struct
         in
         Ok node
       | Ok (data, props) ->
-        let privileges = Properties.privileges ~auth_user_props props in
-        if not (Properties.privilege_met ~requirement:`Read privileges) then
+        let privileges = Properties.privileges auth_user_props props in
+        if not (Privileges.privilege_met ~requirement:`Read privileges) then
           let node = Xml.dav_node "response"
               [ Xml.dav_node "href" [ Xml.pcdata (uri_string host (file :> Webdav_fs.file_or_dir)) ] ;
                 Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
@@ -750,44 +750,6 @@ module Make(Fs: Webdav_fs.S) = struct
     | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget state host path ~auth_user_props
     | Error e, Error _ -> Lwt.return (Error `Bad_request)
 
-  let required_privilege verb target_exists = match verb with
-    | `GET -> `Read, `Target
-    | `HEAD -> `Read, `Target
-    | `OPTIONS -> `Read, `Target
-    | `PUT when target_exists     -> `Write_content, `Target
-    | `PUT (* no target exists *) -> `Bind, `Parent
-    | `Other "PROPPATCH" -> `Write_properties, `Target
-    | `Other "ACL" -> `Write_acl, `Target
-    | `Other "PROPFIND" -> `Read, `Target (* plus <D:read-acl> and <D:read-current-user-privilege-set> as needed, see check in Properties.find_many *)
-    | `DELETE -> `Unbind, `Parent
-    | `Other "MKCOL" -> `Bind, `Parent
-    | `Other "MKCALENDAR" -> `Bind, `Parent
-    | `Other "REPORT" -> `Read, `Target (* referenced_resources body *)
-    | _ -> assert false
-  (* | COPY (target exists)            | <D:read>, <D:write-content> and |
-     |                                 | <D:write-properties> on target  |
-     |                                 | resource                        |
-     | COPY (no target exists)         | <D:read>, <D:bind> on target    |
-     |                                 | collection                      |
-     | MOVE (no target exists)         | <D:unbind> on source collection |
-     |                                 | and <D:bind> on target          |
-     |                                 | collection                      |
-     | MOVE (target exists)            | As above, plus <D:unbind> on    |
-     |                                 | the target collection           |
-     | LOCK (target exists)            | <D:write-content>               |
-     | LOCK (no target exists)         | <D:bind> on parent collection   |
-     | UNLOCK                          | <D:unlock>                      |
-     | CHECKOUT                        | <D:write-properties>            |
-     | CHECKIN                         | <D:write-properties>            |
-     | VERSION-CONTROL                 | <D:write-properties>            |
-     | MERGE                           | <D:write-content>               |
-     | MKWORKSPACE                     | <D:write-content> on parent     |
-     |                                 | collection                      |
-     | BASELINE-CONTROL                | <D:write-properties> and        |
-     |                                 | <D:write-content>               |
-     | MKACTIVITY                      | <D:write-content> on parent     |
-     |                                 | collection                      | *)
-
   let read_target_or_parent_properties fs path target_or_parent =
     (match target_or_parent with
      | `Target -> Fs.from_string fs path
@@ -797,9 +759,9 @@ module Make(Fs: Webdav_fs.S) = struct
 
   let access_granted_for_acl fs path http_verb auth_user_props =
     Fs.exists fs path >>= fun target_exists ->
-    let requirement, target_or_parent = required_privilege http_verb target_exists in
+    let requirement, target_or_parent = Privileges.required_privilege http_verb target_exists in
     read_target_or_parent_properties fs path target_or_parent >|= fun propmap ->
     let privileges = Properties.privileges ~auth_user_props propmap in
     Format.printf "privileges are %a\n%!" Fmt.(list ~sep:(unit "; ") Xml.pp_privilege) privileges ;
-    Properties.privilege_met ~requirement privileges
+    Privileges.privilege_met ~requirement privileges
 end
