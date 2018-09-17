@@ -20,136 +20,6 @@ end
 
 let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 
-let etag str = Digest.to_hex @@ Digest.string str
-
-(* assumption: path is a directory - otherwise we return none *)
-(* out: ( name * typ * last_modified ) list - non-recursive *)
-let list_dir fs (`Dir dir) =
-  let list_file f_or_d =
-    (* maybe implement a Fs.get_property? *)
-    Fs.get_property_map fs f_or_d >|= fun m ->
-    (* restore last modified from properties as a workaround because the file system does not provide it *)
-    let last_modified = match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") m with
-      | Some (_, [ Xml.Pcdata lm ]) -> lm
-      | _ -> assert false
-    in
-    let is_dir = match f_or_d with
-      | `File _ -> false | `Dir _ -> true
-    in
-    (Fs.to_string f_or_d, is_dir, last_modified)
-  in
-  Fs.listdir fs (`Dir dir) >>= function
-  | Error e -> assert false
-  | Ok files -> Lwt_list.map_p list_file files
-
-let directory_as_html fs (`Dir dir) =
-  list_dir fs (`Dir dir) >|= fun files ->
-  let print_file (file, is_dir, last_modified) =
-    Printf.sprintf "<tr><td><a href=\"%s\">%s</a></td><td>%s</td><td>%s</td></tr>"
-      file file (if is_dir then "directory" else "text/calendar") last_modified in
-  String.concat "\n" (List.map print_file files)
-
-let directory_etag fs (`Dir dir) =
-  directory_as_html fs (`Dir dir) >|= fun data ->
-  etag data
-
-let directory_as_ics fs (`Dir dir) =
-  let calendar_components = function
-    | `Dir d ->
-      Printf.printf "calendar components of directory %s\n%!" (Fs.to_string (`Dir d)) ;
-      Lwt.return []
-      (* assert false (* CalDAV forbids nested calendars *) *)
-    | `File f ->
-      Fs.read fs (`File f) >|= function
-      | Error _ -> Printf.printf "error while reading file!\n" ; []
-      | Ok (data, _props) ->
-        match Icalendar.parse (Cstruct.to_string data) with
-        | Ok calendar -> snd calendar
-        | Error e -> Printf.printf "error %s while parsing ics\n" e ; []
-  in
-  Fs.listdir fs (`Dir dir) >>= function
-  | Error _ -> assert false (* previously checked that directory exists *)
-  | Ok files ->
-    (* TODO: hardcoded calprops, put them elsewhere *)
-    Fs.get_property_map fs (`Dir dir) >>= fun props ->
-    let empty = Icalendar.Params.empty in
-    let name =
-      (* instantiate the calendar name from the displayname property *)
-      match Properties.unsafe_find (Xml.dav_ns, "displayname") props with
-      | Some (_, [ Xml.Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), empty, name) ]
-      | _ -> []
-    in
-    let calprops = [
-      `Prodid (empty, "-//ROBUR.IO//EN") ;
-      `Version (empty, "2.0")
-    ] @ name in
-    Lwt_list.map_p calendar_components files >|= fun components ->
-    Icalendar.to_ics (calprops, List.flatten components)
-
-let hash_password password =
-  let server_secret = "server_secret--" in
-  Cstruct.to_string @@ Nocrypto.Base64.encode @@
-  Nocrypto.Hash.SHA256.digest @@ Cstruct.of_string (server_secret ^ password)
-
-let verify_auth_header fs config v =
-  match Astring.String.cut ~sep:"Basic " v with
-  | Some ("", b64) ->
-    begin match Nocrypto.Base64.decode (Cstruct.of_string b64) with
-      | None -> Lwt.return @@ Error "invalid base64 encoding"
-      | Some data -> match Astring.String.cut ~sep:":" (Cstruct.to_string data) with
-        | None -> Lwt.return @@ Error "invalid user:password encoding"
-        | Some (user, password) ->
-          let hashed = hash_password password in
-          Fs.get_property_map fs (`Dir [config.principals ; user]) >|= fun props ->
-          (* no user context yet *)
-          match Properties.unsafe_find (Xml.robur_ns, "password") props with
-          | Some (_, [ Xml.Pcdata stored ]) ->
-            if String.equal hashed stored
-            then Ok user
-            else Error "wrong password"
-          | _ -> Error "invalid user"
-    end
-  | _ -> Lwt.return @@ Error "bad header"
-
-let calendar_to_collection data =
-  if data = "" then Ok "" else
-  match Xml.string_to_tree data with
-  | Some (Xml.Node (ns, "mkcalendar", a, c)) when ns = Xml.caldav_ns -> Ok (Xml.tyxml_to_body (Xml.tree_to_tyxml (Xml.node ~ns:Xml.dav_ns ~a "mkcol" c)))
-  | _ -> Error `Bad_request
-
-let parent_is_calendar fs file =
-  Fs.get_property_map fs (Fs.parent (file :> file_or_dir) :> file_or_dir) >|= fun map ->
-  (* TODO access check missing *)
-  match Properties.unsafe_find (Xml.dav_ns, "resourcetype") map with
-  | None -> false
-  | Some (_, trees) ->
-     let calendar_node = function
-     | Xml.Node (ns, "calendar", _, _) when ns = Xml.caldav_ns -> true
-     | _ -> false in
-     List.exists calendar_node trees
-
-let properties_for_current_user fs config req_headers =
-  let user =
-    match Cohttp.Header.get req_headers "Authorization" with
-    | None -> assert false
-    | Some v -> v
-  in
-  let user_path = `Dir [ config.principals ; user ] in
-  Fs.get_property_map fs user_path
-
-let parent_acl fs config req_headers path =
-  properties_for_current_user fs config req_headers >>= fun auth_user_props ->
-  Fs.get_property_map fs (Fs.parent (path :> file_or_dir) :> file_or_dir) >|= fun parent_resource_props ->
-  if not (Privileges.is_met ~requirement:`Read_acl @@
-          Properties.privileges ~auth_user_props parent_resource_props)
-  then Error `Forbidden
-  (* we check above that Read_acl is allowed, TODO express with find_many *)
-  else match Properties.unsafe_find (Xml.dav_ns, "acl") parent_resource_props with
-    | None -> Ok []
-    | Some (_, aces) ->
-      let aces' = List.map Xml.xml_to_ace aces in
-      Ok (List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces')
-
 (** A resource for querying an individual item in the database by id via GET,
     modifying an item via PUT, and deleting an item via DELETE. *)
 class handler config fs = object(self)
@@ -170,9 +40,9 @@ class handler config fs = object(self)
       Wm.continue false rd
     | Ok cal ->
       let ics = Icalendar.to_ics cal in
-      let etag = etag ics in
+      let etag = Dav.compute_etag ics in
       let file = Fs.file_from_string path in
-      parent_acl fs config rd.Wm.Rd.req_headers file >>= function
+      Dav.parent_acl fs config rd.Wm.Rd.req_headers (file :> file_or_dir) >>= function
       | Error e -> Wm.respond (to_status `Forbidden) rd
       | Ok acl ->
         Dav.write_component fs ~path:file ~etag ~content_type acl (Ptime_clock.now ()) ics >>= function
@@ -208,12 +78,12 @@ class handler config fs = object(self)
     Fs.from_string fs file >>== function
     | `Dir dir ->
       if gecko then
-        directory_as_html fs (`Dir dir) >>= fun listing ->
+        Dav.directory_as_html fs (`Dir dir) >>= fun listing ->
         Wm.continue (`String listing) rd
       else
         (* TODO: check wheter CalDAV:calendar property is set as resourcetype!
            otherwise: standard WebDAV directory listing *)
-        directory_as_ics fs (`Dir dir) >>= fun data ->
+        Dav.directory_as_ics fs (`Dir dir) >>= fun data ->
         Wm.continue (`String data) rd
     | `File f ->
       Fs.read fs (`File f) >>== fun (data, props) ->
@@ -261,7 +131,7 @@ class handler config fs = object(self)
     (match Cohttp.Header.get rd.Wm.Rd.req_headers "Authorization" with
      | None -> Lwt.return (`Basic "calendar", rd)
      | Some v ->
-       verify_auth_header fs config v >|= function
+       Dav.verify_auth_header fs config v >|= function
        | Ok user ->
          let replace_header h =
            Cohttp.Header.replace h "Authorization" user
@@ -275,7 +145,7 @@ class handler config fs = object(self)
 
   method forbidden rd =
     let path = self#path rd in
-    properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
+    Dav.properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
     Dav.access_granted_for_acl fs path rd.Wm.Rd.meth auth_user_props >>= fun granted ->
     Wm.continue (not granted) rd
 
@@ -308,7 +178,7 @@ class handler config fs = object(self)
     Fs.from_string fs (self#path rd) >>= function
     | Error _ -> Wm.respond (to_status `Bad_request) rd
     | Ok f_or_d ->
-      properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
+      Dav.properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
       match rd'.Wm.Rd.meth with
       | `Other "PROPFIND" -> self#process_propfind rd' auth_user_props f_or_d
       | `Other "PROPPATCH" -> self#process_proppatch rd' auth_user_props f_or_d
@@ -323,7 +193,7 @@ class handler config fs = object(self)
       match Xml.string_to_tree body with
       | None -> Wm.respond (to_status `Bad_request) rd
       | Some tree ->
-        properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
+        Dav.properties_for_current_user fs config rd.Wm.Rd.req_headers >>= fun auth_user_props ->
         Dav.report fs ~host:config.host ~path:f_or_d tree ~auth_user_props >>= function
         | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
         | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
@@ -338,7 +208,7 @@ class handler config fs = object(self)
     Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
     Printf.printf "MKCOL/MKCALENDAR: %s\n%!" body;
     let is_calendar, body' = match rd.Wm.Rd.meth with
-    | `Other "MKCALENDAR" -> true, calendar_to_collection body
+    | `Other "MKCALENDAR" -> true, Dav.calendar_to_collection body
     | `Other "MKCOL" -> false, Ok body
     | _ -> assert false in
     match body' with
@@ -348,11 +218,11 @@ class handler config fs = object(self)
       | None when body'' <> "" -> Wm.continue `Conflict rd
       | tree ->
         let path = Fs.dir_from_string (self#path rd) in
-        parent_is_calendar fs path >>= fun parent_is_calendar ->
+        Dav.parent_is_calendar fs (path :> file_or_dir) >>= fun parent_is_calendar ->
         if is_calendar && parent_is_calendar
         then Wm.continue `Conflict rd
         else
-          parent_acl fs config rd.Wm.Rd.req_headers path >>= function
+          Dav.parent_acl fs config rd.Wm.Rd.req_headers (path :> file_or_dir) >>= function
           | Error e -> Wm.continue e rd
           | Ok acl ->
             Dav.mkcol fs ~path acl (Ptime_clock.now ()) ~is_calendar tree >>= function
@@ -444,126 +314,6 @@ class redirect config = object(self)
     Wm.respond 301 rd'
 end
 
-let server_ns = "http://calendarserver.org/ns/"
-let carddav_ns = "urn:ietf:params:xml:ns:carddav"
-
-let make_dir fs acl ?(resourcetype = []) ?(props=[]) dir =
-  let propmap =
-    Properties.create_dir ~initial_props:props ~resourcetype acl (Ptime_clock.now ()) (Fs.basename (dir :> file_or_dir))
-  in
-  Fs.mkdir fs dir propmap
-
-let make_dir_if_not_present fs acl ?resourcetype ?props dir =
-  Fs.dir_exists fs dir >>= fun exists ->
-  if not exists then
-    make_dir fs acl ?resourcetype ?props dir >|= fun _ -> ()
-  else
-    Lwt.return_unit
-
-let grant_test config =
-  let url = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; "test" ])) in
-  (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`Href url, `Grant [ `Read ]) ; Xml.ace_to_xml (`Href url, `Grant [ `Write ]) ])
-
-let deny_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Deny [ `All ]) ])
-let grant_all = (Xml.dav_ns, "acl"), ([], [ Xml.ace_to_xml (`All, `Grant [ `All ]) ])
-
-let create_calendar fs acl name =
-  let props =
-    let reports = [
-      Xml.caldav_ns, "calendar-query" ;
-      Xml.caldav_ns, "calendar-multiget" ;
-   (* Xml.dav_ns, "acl-principal-prop-set" ;
-      Xml.dav_ns, "principal-match" ;
-      Xml.dav_ns, "principal-property-search" ;
-      Xml.dav_ns, "expand-property" ;
-      server_ns, "calendarserver-principal-search" ;
-      Xml.caldav_ns, "free-busy-query" ;
-      carddav_ns, "addressbook-query" ;
-      carddav_ns, "addressbook-multiget" *)
-   (* Xml.dav_ns, "sync-collection" *)
-    ] in
-    let report_nodes =
-      List.map (fun (ns, s) ->
-          Xml.dav_node "supported-report"
-            [ Xml.dav_node "report" [ Xml.node ~ns s [] ] ])
-        reports
-    in
-    let comps =
-      List.map (fun s ->
-          Xml.node ~ns:Xml.caldav_ns "comp" ~a:[(("", "name"), s)] [])
-        [ "VEVENT" ; "VTODO" ; "VTIMEZONE" ; "VFREEBUSY" ]
-    in
-    [
-      (Xml.dav_ns, "supported-report-set"), ([], report_nodes) ;
-      (Xml.caldav_ns, "supported-calendar-component-set"), ([], comps) ;
-      (* (server_ns, "getctag"), ([], [ Xml.pcdata "hallo" ]) *)
-      (* (Xml.dav_ns, "owner"), ([], [ Xml.pcdata "/principals/__uids__/10000000-0000-0000-0000-000000000001" ]) ; *)
-    ] in
-  let resourcetype = [ Xml.node ~ns:Xml.caldav_ns "calendar" [] ] in
-  make_dir_if_not_present fs acl ~resourcetype ~props name
-
-let initialise_fs_for_apple_testsuite fs config =
-  let calendars_properties =
-    let url =
-      Uri.with_path config.host
-        (config.calendars ^ "/__uids__/10000000-0000-0000-0000-000000000001/calendar")
-    in
-    [
-    (Xml.caldav_ns, "calendar-home-set"),
-    ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata (Uri.to_string url) ]])
-  ] in
-  let acl = config.default_acl in
-  make_dir_if_not_present fs acl ~props:calendars_properties (`Dir [config.calendars]) >>= fun _ ->
-  make_dir_if_not_present fs acl (`Dir [config.calendars ; "users"]) >>= fun _ ->
-  make_dir_if_not_present fs acl (`Dir [config.calendars ; "__uids__"]) >>= fun _ ->
-  make_dir_if_not_present fs acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001"]) >>= fun _ ->
-  create_calendar fs acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "calendar" ]) >>= fun _ ->
-  make_dir_if_not_present fs acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "tasks"]) >>= fun _ ->
-  Lwt.return_unit
-
-let initialise_fs fs config =
-  make_dir_if_not_present fs config.default_acl (`Dir [config.principals]) >>= fun _ ->
-  make_dir_if_not_present fs config.default_acl (`Dir [config.calendars]) >>= fun _ ->
-  Lwt.return_unit
-
-(* use config.user_password for initial structure
-  /principals/ -- config.principals WebDAV
-  /principals/user/ -- WebDAV -- principal-URL for user user, prop.xml <- contains calendar-home-set
-  /calendars/  -- config.calendars WebDAV
-  /calendars/user/ -- WebDAV
-  /calendars/user/calendar/ -- CalDAV - default calendar
-  /calendars/user/my_other_calendar/ -- CalDAV
-
-PROPFIND /calendars -- eingeloggt als user -- <principal-URL>
---> <principal-URL>http://.../principals/user/
-
-PROPFIND /principals/user -- <calendar-home-set>
---> <calendar-home-set><href>http://.../calendars/user/</calendar-home-set>
- *)
-
-let make_user ?(props = []) fs config name password =
-  let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
-  let get_url dir = Uri.with_path config.host (Fs.to_string (dir :> file_or_dir)) in
-  let principal_dir = `Dir [ config.principals ; name ] in
-  let principal_url = get_url principal_dir in
-  let home_set_dir = `Dir [ config.calendars ; name ] in
-  let home_set_url = get_url home_set_dir in
-  let props' =
-    ((Xml.dav_ns, "principal-URL"),
-     ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata @@ Uri.to_string principal_url ] ]))
-    :: ((Xml.caldav_ns, "calendar-home-set"),
-        ([], [Xml.dav_node "href" [Xml.pcdata @@ Uri.to_string home_set_url ]]))
-    :: ((Xml.robur_ns, "password"),
-        ([], [Xml.pcdata @@ hash_password password]))
-    :: props
-  in
-  let acl = [ (`Href principal_url, `Grant [ `All ]) ; (`All, `Grant [ `Read ]) ] in
-  (* TODO should root have access to principals/user? *)
-  make_dir_if_not_present fs acl ~resourcetype ~props:props' principal_dir >>= fun _ ->
-  make_dir_if_not_present fs acl home_set_dir >>= fun _ ->
-  create_calendar fs acl (`Dir [config.calendars ; name ; "calendar"]) >>= fun _ ->
-  Lwt.return_unit
-
 (* TODO access control for /user *)
 (* TODO delete user, delete all existing references (in acls, calendars) *)
 (* TODO force create user, uses delete user *)
@@ -581,7 +331,7 @@ class create_user config fs = object(self)
     match Uri.get_query_param uri "user", Uri.get_query_param uri "password" with
     | None, _ | _, None -> Wm.respond (to_status `Bad_request) rd
     | Some name, Some pass ->
-      make_user fs config name pass >>= fun () ->
+      Dav.make_user fs config name pass >>= fun () ->
       Wm.continue true rd
 
   method content_types_provided rd =
@@ -593,39 +343,9 @@ class create_user config fs = object(self)
     ] rd
 end
 
-let make_group fs config name password members =
-  let principal_path user = Fs.to_string (`Dir [ config.principals ; user ]) in
-  let new_member_paths = List.map principal_path members in
-  let new_member_urls =
-    List.map
-      (fun path -> Uri.to_string @@ Uri.with_path config.host path)
-      new_member_paths
-  in
-  let group_props = [
-    (Xml.dav_ns, "group-member-set"),
-    ([], List.map (fun u -> Xml.dav_node "href" [ Xml.pcdata u ]) new_member_urls)
-  ] in
-  make_user ~props:group_props fs config name password >>= fun () ->
-  let group_node =
-    Xml.dav_node "href"
-      [ Xml.pcdata (Uri.to_string @@ Uri.with_path config.host (principal_path name)) ]
-  in
-  let group_key = (Xml.dav_ns, "group-membership") in
-  Lwt_list.iter_p (fun path ->
-      let f_or_d = (Fs.dir_from_string path :> file_or_dir) in
-      Fs.get_property_map fs f_or_d >>= fun props ->
-      (* TODO should use find_many *)
-      let props' = match Properties.unsafe_find group_key props with
-        | None -> Properties.unsafe_add group_key ([], [ group_node ]) props
-        | Some (attrs, groups) -> Properties.unsafe_add group_key (attrs, group_node :: groups) props
-      in
-      Fs.write_property_map fs f_or_d props' >>= fun _ ->
-      Lwt.return_unit)
-    new_member_paths
-
 let init_users fs config user_password =
-  Lwt_list.iter_p (fun (u, p) -> make_user fs config u p) user_password >>= fun () ->
-  make_group fs config "group" "group-password" ["root" ; "test"]
+  Lwt_list.iter_p (fun (u, p) -> Dav.make_user fs config u p) user_password >>= fun () ->
+  Dav.make_group fs config "group" "group-password" ["root" ; "test"]
 
 let main () =
   (* listen on port 8080 *)
@@ -645,8 +365,8 @@ let main () =
   (* create the file system *)
   FS_unix.connect "/tmp/calendar" >>= fun fs ->
   (* only for apple test suite *)
-  (* initialise_fs_for_apple_testsuite fs config >>= fun () -> *)
-  initialise_fs fs config >>= fun () ->
+  (* initialize_fs_for_apple_testsuite fs config >>= fun () -> *)
+  Dav.initialize_fs fs config >>= fun () ->
   let user_password = [
     ("test", "password") ;
     ("root", "toor") ;

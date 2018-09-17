@@ -35,6 +35,20 @@ sig
   *)
 
   val access_granted_for_acl : state -> string -> Cohttp.Code.meth -> Properties.t -> bool Lwt.t
+
+  val compute_etag : string -> string
+
+  val parent_acl : state -> Webdav_config.config -> Cohttp.Header.t -> Webdav_fs.file_or_dir -> (Webdav_xml.ace list, [> `Forbidden ]) result Lwt.t
+  val directory_as_html : state -> Webdav_fs.dir -> string Lwt.t
+  val directory_as_ics : state -> Webdav_fs.dir -> string Lwt.t
+  val verify_auth_header : state -> Webdav_config.config -> string -> (string, string) result Lwt.t
+  val properties_for_current_user : state -> Webdav_config.config -> Cohttp.Header.t -> Properties.t Lwt.t
+  val calendar_to_collection : string -> (string, [ `Bad_request ]) result
+  val parent_is_calendar : state -> Webdav_fs.file_or_dir -> bool Lwt.t
+
+  val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Webdav_config.config -> string -> string -> unit Lwt.t
+  val make_group : state -> Webdav_config.config -> string -> string -> string list -> unit Lwt.t
+  val initialize_fs : state -> Webdav_config.config -> unit Lwt.t
 end
 
 module Make (Fs: Webdav_fs.S) : S with type state = Fs.t

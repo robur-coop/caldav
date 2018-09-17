@@ -4,4 +4,4 @@
  ((name        caldav)
   (public_name caldav)
   (preprocess (pps (ppx_deriving.std)))
-  (libraries (lwt ptime ptime.clock.os cohttp mirage-fs-lwt xmlm tyxml icalendar rresult))))
+  (libraries (lwt ptime ptime.clock.os cohttp mirage-fs-lwt xmlm tyxml icalendar rresult nocrypto))))
