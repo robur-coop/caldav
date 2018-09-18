@@ -1182,18 +1182,15 @@ let state_testable =
 
 let err_testable =
   let module M = struct
-    type t = [ `Bad_request | `Conflict | `Forbidden of Xml.tree ]
+    type t = [ `Bad_request | `Conflict | `Forbidden of string ]
     let pp ppf = function
       | `Bad_request -> Fmt.string ppf "bad request"
       | `Conflict -> Fmt.string ppf "conflict"
-      | `Forbidden _ -> Fmt.string ppf "forbidden"
+      | `Forbidden s -> Fmt.pf ppf "forbidden %s" s 
     let equal a b = match a, b with
       | `Bad_request, `Bad_request -> true
       | `Conflict, `Conflict -> true
-      | `Forbidden x, `Forbidden y ->
-        let to_string a = Xml.tree_to_string a
-        in
-        String.equal (to_string x) (to_string y)
+      | `Forbidden x, `Forbidden y -> String.equal x y
       | _ -> false
   end in
   (module M : Alcotest.TESTABLE with type t = M.t)
@@ -1223,12 +1220,14 @@ let mkcol_success () =
         let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
         Properties.create_dir ~resourcetype config.default_acl now "Special Resource"
       in
-      Mirage_fs_mem.mkdir res_fs "home" >>= fun _ ->
+      let properties = Properties.create_dir config.default_acl now "home" in
+      Fs.mkdir res_fs (`Dir ["home"]) properties >>= fun _ ->
       Fs.mkdir res_fs (`Dir [ "home" ; "special" ]) props >>= fun _ ->
       Mirage_fs_mem.connect "" >>= fun fs ->
-      Mirage_fs_mem.mkdir fs "home" >>= fun _ ->
-      Dav.mkcol fs ~path:(Fs.dir_from_string "home/special/") config.default_acl now ~is_calendar:false (Some (tree body)) >|= fun r ->
-      (res_fs, r))
+      Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
+      Dav.mkcol fs config ~path:"home/special/" ~user:"testuser" (`Other "MKCOL") now ~data:body >|= function
+      | Error e -> (res_fs, Error e)
+      | Ok () -> (res_fs, Ok fs))
   in
   Alcotest.(check (result state_testable err_testable) __LOC__
               (Ok res_fs) r)

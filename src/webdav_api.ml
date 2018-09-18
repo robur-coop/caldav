@@ -7,9 +7,8 @@ module type S =
 sig
   type state
 
-  val mkcol : state -> path:Webdav_fs.dir -> Xml.ace list -> Ptime.t -> is_calendar: bool -> tree option ->
-    (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
-      result Lwt.t
+  val mkcol : state -> config -> path:string -> user:string -> Cohttp.Code.meth -> Ptime.t -> data:string ->
+    (unit, [ `Bad_request | `Conflict | `Forbidden of string ]) result Lwt.t
 
   val propfind : state -> config -> path:string -> user:string -> depth:string option -> data:string -> 
     (string, [> `Bad_request | `Forbidden of string | `Property_not_found ]) result Lwt.t
@@ -20,7 +19,7 @@ sig
   val report : state -> config -> path:string -> user:string -> data:string -> 
     (string, [> `Bad_request ]) result Lwt.t
 
-  val write_component : state -> Webdav_config.config -> path:string -> Ptime.t -> content_type:content_type -> user:string -> data:string ->
+  val write_component : state -> config -> path:string -> user:string -> Ptime.t -> content_type:content_type -> data:string ->
     (string, [> `Bad_request | `Conflict | `Forbidden | `Internal_server_error ]) result Lwt.t
 
   val delete : state -> path:Webdav_fs.file_or_dir -> Ptime.t -> state Lwt.t
@@ -31,12 +30,7 @@ sig
 
   val compute_etag : string -> string
 
-  val parent_acl : state -> config -> string -> Webdav_fs.file_or_dir -> (Xml.ace list, [> `Forbidden ]) result Lwt.t
-
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, string) result Lwt.t
-  val properties_for_current_user : state -> Webdav_config.config -> string -> Properties.t Lwt.t
-  val calendar_to_collection : string -> (string, [ `Bad_request ]) result
-  val parent_is_calendar : state -> Webdav_fs.file_or_dir -> bool Lwt.t
 
   val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> config -> string -> string -> unit Lwt.t
   val make_group : state -> config -> string -> string -> string list -> unit Lwt.t
@@ -61,9 +55,6 @@ module Make(Fs: Webdav_fs.S) = struct
        | _ -> false in
        List.exists calendar_node trees
  
-  let parent_is_calendar fs file =
-    is_calendar fs (Fs.parent (file :> Webdav_fs.file_or_dir) :> Webdav_fs.file_or_dir)
- 
   let properties_for_current_user fs config user =
     let user_path = `Dir [ config.principals ; user ] in
     Fs.get_property_map fs user_path
@@ -80,9 +71,6 @@ module Make(Fs: Webdav_fs.S) = struct
       | Some (_, aces) ->
         let aces' = List.map Xml.xml_to_ace aces in
         Ok (List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces')
-
-  let parent_acl fs config user path =
-    acl fs config user (Fs.parent (path :> Webdav_fs.file_or_dir) :> Webdav_fs.file_or_dir)
 
   let parse_calendar ~path data =
     match Icalendar.parse data with
@@ -117,7 +105,7 @@ module Make(Fs: Webdav_fs.S) = struct
           | Error e -> Error `Internal_server_error
           | Ok () -> Ok etag
 
-  let write_component fs config ~path timestamp ~content_type ~user ~data =
+  let write_component fs config ~path ~user timestamp ~content_type ~data =
     match parse_calendar ~path data with
     | Error e -> Lwt.return @@ Error e
     | Ok (ics, file) -> write_if_parent_exists fs config file timestamp content_type user ics
@@ -348,27 +336,50 @@ module Make(Fs: Webdav_fs.S) = struct
       | Error _ -> Error `Bad_request
       | Ok set_props -> Ok set_props
 
+  let calendar_to_collection data =
+    if data = "" then Ok "" else
+    match Xml.string_to_tree data with
+    | Some (Xml.Node (ns, "mkcalendar", a, c)) when ns = Xml.caldav_ns -> Ok (Xml.tyxml_to_body @@ Xml.tree_to_tyxml @@ Xml.node ~ns:Xml.dav_ns ~a "mkcol" c)
+    | _ -> Error `Bad_request
+
   (* assumption: path is a relative path! *)
-  let mkcol fs ~path:(`Dir d as dir) acl now ~is_calendar data =
-    (* TODO: move to caller *)
-    let parent = Fs.parent dir in
+  let mkcol fs config ~path ~user http_verb now ~data =
+    let dir = Fs.dir_from_string path in
+    let parent = Fs.parent (dir :> Webdav_fs.file_or_dir) in
+    let parent' = (parent :> Webdav_fs.file_or_dir) in
     Fs.dir_exists fs parent >>= function
-    | false -> Lwt.return (Error `Conflict)
-    | true -> match data_to_proppatch data with
-      | Error e -> Lwt.return (Error e)
-      | Ok set_props ->
-        let resourcetype = if is_calendar then [Xml.node ~ns:Xml.caldav_ns "calendar" []] else [] in
-        let col_props = Properties.create_dir ~resourcetype acl now (Fs.to_string dir) in
-        match Properties.patch ~is_mkcol:true col_props set_props with
-        | None, errs ->
-          let propstats = List.map propstat_node errs in
-          let xml = Xml.dav_node "mkcol-response" propstats in
-          Printf.printf "forbidden from data_to_props!\n" ;
-          Lwt.return @@ Error (`Forbidden xml)
-        | Some map, _ ->
-          Fs.mkdir fs dir map >|= function
-          | Error _ -> Error `Conflict
-          | Ok () -> Ok fs
+    | false -> Lwt.return @@ Error `Conflict
+    | true -> 
+      let resource_is_calendar, resourcetype, collection_data = match http_verb with
+      | `Other "MKCALENDAR" -> true, [Xml.node ~ns:Xml.caldav_ns "calendar" []], calendar_to_collection data
+      | `Other "MKCOL" -> false, [], Ok data
+      | _ -> assert false in
+      match collection_data with
+      | Error _ -> Lwt.return @@ Error `Conflict
+      | Ok collection -> match Xml.string_to_tree collection with
+        | None when collection <> "" -> Lwt.return @@ Error `Conflict
+        | collection_tree -> match data_to_proppatch collection_tree with
+          | Error e -> Lwt.return @@ Error e
+          | Ok set_props ->
+            is_calendar fs parent' >>= fun parent_is_calendar ->
+            if resource_is_calendar && parent_is_calendar
+            then Lwt.return @@ Error `Conflict
+            else
+              acl fs config user parent' >>= function
+              | Error `Forbidden -> Lwt.return @@ Error (`Forbidden "TODO") 
+              | Ok parent_acl ->
+                let col_props = Properties.create_dir ~resourcetype parent_acl now (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
+                match Properties.patch ~is_mkcol:true col_props set_props with
+                | None, errs ->
+                  let propstats = List.map propstat_node errs in
+                  let xml = Xml.dav_node "mkcol-response" propstats in
+                  Printf.printf "forbidden from data_to_props!\n" ;
+                  let res = Xml.tree_to_string xml in
+                  Lwt.return @@ Error (`Forbidden res)
+                | Some map, _ ->
+                  Fs.mkdir fs dir map >|= function
+                  | Error _ -> Error `Conflict
+                  | Ok () -> Ok ()
 
   let check_in_bounds p s e = true
   let apply_to_params pfs p = true
@@ -952,12 +963,6 @@ let verify_auth_header fs config v =
           | _ -> Error "invalid user"
     end
   | _ -> Lwt.return @@ Error "bad header"
-
-let calendar_to_collection data =
-  if data = "" then Ok "" else
-  match Xml.string_to_tree data with
-  | Some (Xml.Node (ns, "mkcalendar", a, c)) when ns = Xml.caldav_ns -> Ok (Xml.tyxml_to_body (Xml.tree_to_tyxml (Xml.node ~ns:Xml.dav_ns ~a "mkcol" c)))
-  | _ -> Error `Bad_request
 
 let server_ns = "http://calendarserver.org/ns/"
 let carddav_ns = "urn:ietf:params:xml:ns:carddav"

@@ -148,7 +148,7 @@ class handler config fs = object(self)
     let user = Headers.get_user rd.req_headers in
     Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
     Dav.report fs config ~path ~user ~data:body >>= function
-    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    | Error (`Bad_request as e) -> Wm.respond (to_status e) rd
     | Ok body -> 
       let rd' = with_resp_headers (Headers.replace_content_type "application/xml") rd in
       Wm.continue `Multistatus { rd' with resp_body = `String body }
@@ -161,31 +161,15 @@ class handler config fs = object(self)
     Wm.continue () rd'
 
   method create_collection rd =
+    let path = self#path rd in
+    let user = Headers.get_user rd.req_headers in
     Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
     Printf.printf "MKCOL/MKCALENDAR: %s\n%!" body;
-    let is_calendar, body' = match rd.meth with
-    | `Other "MKCALENDAR" -> true, Dav.calendar_to_collection body
-    | `Other "MKCOL" -> false, Ok body
-    | _ -> assert false in
-    match body' with
-    | Error _ -> Wm.continue `Conflict rd
-    | Ok body'' ->
-      match Xml.string_to_tree body'' with
-      | None when body'' <> "" -> Wm.continue `Conflict rd
-      | tree ->
-        let path = Fs.dir_from_string (self#path rd) in
-        Dav.parent_is_calendar fs (path :> file_or_dir) >>= fun parent_is_calendar ->
-        if is_calendar && parent_is_calendar
-        then Wm.continue `Conflict rd
-        else
-          Dav.parent_acl fs config (Headers.get_user rd.req_headers) (path :> file_or_dir) >>= function
-          | Error e -> Wm.continue e rd
-          | Ok acl ->
-            Dav.mkcol fs ~path acl (Ptime_clock.now ()) ~is_calendar tree >>= function
-            | Ok _ -> Wm.continue `Created rd
-            | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with resp_body = `String (Xml.tree_to_string t) }
-            | Error `Conflict -> Wm.continue `Conflict rd
-            | Error `Bad_request -> Wm.continue `Conflict rd
+    Dav.mkcol fs ~path config ~user rd.meth (Ptime_clock.now ()) ~data:body >>= function
+    | Error (`Bad_request as e) -> Wm.respond (to_status e) rd
+    | Error (`Forbidden body) -> Wm.continue `Forbidden { rd with resp_body = `String body }
+    | Error `Conflict -> Wm.continue `Conflict rd
+    | Ok _ -> Wm.continue `Created rd
 
   method delete_resource rd =
     Fs.from_string fs (self#path rd) >>= function

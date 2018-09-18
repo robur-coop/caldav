@@ -6,9 +6,8 @@ module type S =
 sig
   type state
 
-  val mkcol : state -> path:Webdav_fs.dir -> Webdav_xml.ace list -> Ptime.t -> is_calendar: bool -> tree option ->
-    (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
-      result Lwt.t
+  val mkcol : state -> config -> path:string -> user:string -> Cohttp.Code.meth -> Ptime.t -> data:string ->
+    (unit, [ `Bad_request | `Conflict | `Forbidden of string ]) result Lwt.t
 
   val propfind : state -> config -> path:string -> user:string -> depth:string option -> data:string -> 
     (string, [> `Bad_request | `Forbidden of string | `Property_not_found ]) result Lwt.t
@@ -19,7 +18,7 @@ sig
   val report : state -> config -> path:string -> user:string -> data:string -> 
     (string, [> `Bad_request ]) result Lwt.t
 
-  val write_component : state -> config -> path:string -> Ptime.t -> content_type:content_type -> user:string -> data:string ->
+  val write_component : state -> config -> path:string -> user:string -> Ptime.t -> content_type:content_type -> data:string ->
     (string, [> `Bad_request | `Conflict | `Forbidden | `Internal_server_error ]) result Lwt.t
 
   val delete : state -> path:Webdav_fs.file_or_dir -> Ptime.t -> state Lwt.t
@@ -30,11 +29,7 @@ sig
 
   val compute_etag : string -> string
 
-  val parent_acl : state -> config -> string -> Webdav_fs.file_or_dir -> (Webdav_xml.ace list, [> `Forbidden ]) result Lwt.t
   val verify_auth_header : state -> config -> string -> (string, string) result Lwt.t
-  val properties_for_current_user : state -> config -> string -> Properties.t Lwt.t
-  val calendar_to_collection : string -> (string, [ `Bad_request ]) result
-  val parent_is_calendar : state -> Webdav_fs.file_or_dir -> bool Lwt.t
 
   val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> config -> string -> string -> unit Lwt.t
   val make_group : state -> config -> string -> string -> string list -> unit Lwt.t
