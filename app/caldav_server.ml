@@ -67,6 +67,7 @@ class handler config fs = object(self)
     let path = self#path rd in
     let content_type = Headers.get_content_type rd.req_headers in
     let user = Headers.get_user rd.req_headers in
+    Logs.debug (fun m -> m "write_component path %s user %s body @.%s" path user body);
     Dav.write_component fs config ~path (Ptime_clock.now ()) ~content_type ~user ~data:body >>= function
     | Error e -> Wm.respond (to_status e) rd
     | Ok etag ->
@@ -77,6 +78,7 @@ class handler config fs = object(self)
   method private read_calendar rd =
     let path = self#path rd in
     let is_mozilla = Headers.is_user_agent_mozilla rd.req_headers in
+    Logs.debug (fun m -> m "read_calendar path %s is_mozilla %b" path is_mozilla);
     Dav.read fs ~path ~is_mozilla >>= function
     | Error e -> Wm.respond (to_status e) rd 
     | Ok (body, content_type) ->
@@ -115,7 +117,9 @@ class handler config fs = object(self)
     match Headers.get_authorization rd.req_headers with
      | None -> Wm.continue (`Basic "calendar") rd
      | Some v -> Dav.verify_auth_header fs config v >>= function
-       | Error msg -> Wm.continue (`Basic "invalid authorization") rd
+       | Error msg -> 
+         Logs.warn (fun m -> m "is_authorized failed with header value %s and message %s" v msg);
+         Wm.continue (`Basic "invalid authorization") rd
        | Ok user ->
          let rd' = with_req_headers (Headers.replace_authorization user) rd in
          Wm.continue `Authorized rd'
@@ -131,6 +135,7 @@ class handler config fs = object(self)
     let user = Headers.get_user rd.req_headers in
     let depth = Headers.get_depth rd.req_headers in
     Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
+    Logs.debug (fun m -> m "process_property verb %s path %s user %s body @.%s" (Cohttp.Code.string_of_method rd.meth) path user body);
     let dispatch_on_verb = match rd.meth with
     | `Other "PROPFIND" -> Dav.propfind fs config ~path ~user ~depth ~data:body
     | `Other "PROPPATCH" -> Dav.proppatch fs config ~path ~user ~data:body
@@ -147,6 +152,7 @@ class handler config fs = object(self)
     let path = self#path rd in
     let user = Headers.get_user rd.req_headers in
     Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
+    Logs.debug (fun m -> m "report path %s user %s body @.%s" path user body);
     Dav.report fs config ~path ~user ~data:body >>= function
     | Error (`Bad_request as e) -> Wm.respond (to_status e) rd
     | Ok body -> 
@@ -164,7 +170,7 @@ class handler config fs = object(self)
     let path = self#path rd in
     let user = Headers.get_user rd.req_headers in
     Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
-    Printf.printf "MKCOL/MKCALENDAR: %s\n%!" body;
+    Logs.debug (fun m -> m "create_collection verb %s path %s user %s body @.%s" (Cohttp.Code.string_of_method rd.meth) path user body);
     Dav.mkcol fs ~path config ~user rd.meth (Ptime_clock.now ()) ~data:body >>= function
     | Error (`Bad_request as e) -> Wm.respond (to_status e) rd
     | Error (`Forbidden body) -> Wm.continue `Forbidden { rd with resp_body = `String body }
@@ -173,6 +179,7 @@ class handler config fs = object(self)
 
   method delete_resource rd =
     let path = self#path rd in
+    Logs.debug (fun m -> m "delete_resource path %s" path);
     Dav.delete fs ~path (Ptime_clock.now ()) >>= fun deleted ->
     Wm.continue deleted rd
 
@@ -261,6 +268,8 @@ let init_users fs config user_password =
   Dav.make_group fs config "group" "group-password" ["root" ; "test"]
 
 let main () =
+  Logs.set_reporter (Logs_fmt.reporter ());
+  Logs.set_level (Some Logs.Debug);
   (* listen on port 8080 *)
   let port = 8080
   and scheme = "http"
@@ -300,10 +309,10 @@ let main () =
     (* Perform route dispatch. If [None] is returned, then the URI path did not
      * match any of the route patterns. In this case the server should return a
      * 404 [`Not_found]. *)
-    Printf.printf "REQUEST %s %s headers %s\n%!"
+    Logs.info (fun m -> m "REQUEST %s %s headers %s"
       (Code.string_of_method (Request.meth request))
       (Request.resource request)
-      (Header.to_string (Request.headers request)) ;
+      (Header.to_string (Request.headers request)) );
     Wm.dispatch' routes ~body ~request
     >|= begin function
       | None        -> (`Not_found, Header.init (), `String "Not found", [])
@@ -322,23 +331,23 @@ let main () =
         | _ -> Printf.sprintf " - %s" (String.concat ", " path)
         | exception Not_found   -> ""
       in
-      Printf.printf "\nRESPONSE %d - %s %s%s, body: %s\n\n%!"
+      Logs.info (fun m -> m "\nRESPONSE %d - %s %s%s, body: %s"
         (Code.code_of_status status)
         (Code.string_of_method (Request.meth request))
         (Uri.path (Request.uri request))
         path
-        (match body with `String s -> s | `Empty -> "empty" | _ -> "unknown") ;
+        (match body with `String s -> s | `Empty -> "empty" | _ -> "unknown") ) ;
       (* Finally, send the response to the client *)
       Server.respond ~headers ~body ~status ()
   in
   (* create the server and handle requests with the function defined above *)
   let conn_closed (ch, conn) =
-    Printf.printf "connection %s closed\n%!"
-      (Sexplib.Sexp.to_string_hum (Conduit_lwt_unix.sexp_of_flow ch))
+    Logs.info (fun m -> m "connection %s closed"
+      (Sexplib.Sexp.to_string_hum (Conduit_lwt_unix.sexp_of_flow ch)))
   in
   let config = Server.make ~callback ~conn_closed () in
   Server.create  ~mode:(`TCP(`Port port)) config
-  >>= (fun () -> Printf.eprintf "hello_lwt: listening on 0.0.0.0:%d%!" port;
+  >>= (fun () -> Logs.app (fun m -> m "caldav_server.exe: listening on 0.0.0.0:%d%!" port);
       Lwt.return_unit)
 
 let () =  Lwt_main.run (main ())
