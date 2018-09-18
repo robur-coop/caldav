@@ -9,14 +9,12 @@ module Properties = Caldav.Properties
 module Privileges = Caldav.Privileges
 type file_or_dir = Caldav.Webdav_fs.file_or_dir
 
-(* Apply the [Webmachine.Make] functor to the Lwt_unix-based IO module
- * exported by cohttp. For added convenience, include the [Rd] module
- * as well so you don't have to go reaching into multiple modules to
- * access request-related information. *)
 module Wm = struct
   module Rd = Webmachine.Rd
   include Webmachine.Make(Cohttp_lwt_unix__Io)
 end
+
+open Wm.Rd
 
 module Headers = struct
   let get_content_type headers =
@@ -65,10 +63,10 @@ class handler config fs = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
 
   method private write_component rd =
-    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
     Printf.printf "write_component: %s\n%!" body ;
     let path = self#path rd in
-    let content_type = Headers.get_content_type rd.Wm.Rd.req_headers in
+    let content_type = Headers.get_content_type rd.req_headers in
     match Icalendar.parse body with
     | Error e ->
       Printf.printf "error %s while parsing calendar\n" e ;
@@ -77,19 +75,19 @@ class handler config fs = object(self)
       let ics = Icalendar.to_ics cal in
       let etag = Dav.compute_etag ics in
       let file = Fs.file_from_string path in
-      Dav.parent_acl fs config (Headers.get_user rd.Wm.Rd.req_headers) (file :> file_or_dir) >>= function
+      Dav.parent_acl fs config (Headers.get_user rd.req_headers) (file :> file_or_dir) >>= function
       | Error e -> Wm.respond (to_status `Forbidden) rd
       | Ok acl ->
         Dav.write_component fs ~path:file ~etag ~content_type acl (Ptime_clock.now ()) ics >>= function
         | Error e -> Wm.respond (to_status e) rd
         | Ok _ ->
           Printf.printf "wrote component %s\n%!" path ;
-          let rd' = Wm.Rd.with_resp_headers (Headers.replace_etag_add_location etag (Uri.with_path config.host path)) rd in
+          let rd' = with_resp_headers (Headers.replace_etag_add_location etag (Uri.with_path config.host path)) rd in
           Wm.continue true rd'
 
   method private read_calendar rd =
     let file = self#path rd in
-    let mozilla = Headers.is_user_agent_mozilla rd.Wm.Rd.req_headers in
+    let mozilla = Headers.is_user_agent_mozilla rd.req_headers in
 
     let (>>==) a f = a >>= function
     | Error e ->
@@ -113,7 +111,7 @@ class handler config fs = object(self)
       let ct = match Properties.unsafe_find (Xml.dav_ns, "getcontenttype") props with
         | Some (_, [ Xml.Pcdata ct ]) -> ct
         | _ -> "text/calendar" in
-      let rd' = Wm.Rd.with_resp_headers (Headers.replace_content_type ct) rd in
+      let rd' = with_resp_headers (Headers.replace_content_type ct) rd in
       Wm.continue (`String (Cstruct.to_string data)) rd'
 
   method allowed_methods rd =
@@ -145,12 +143,12 @@ class handler config fs = object(self)
 
   method is_authorized rd =
     (* TODO implement digest authentication! *)
-    (match Headers.get_authorization rd.Wm.Rd.req_headers with
+    (match Headers.get_authorization rd.req_headers with
      | None -> Lwt.return (`Basic "calendar", rd)
      | Some v ->
        Dav.verify_auth_header fs config v >|= function
        | Ok user ->
-         let rd' = Wm.Rd.with_req_headers (Headers.replace_authorization user) rd in
+         let rd' = with_req_headers (Headers.replace_authorization user) rd in
          `Authorized, rd'
        | Error msg ->
          Printf.printf "ivalid authorization: %s\n" msg ;
@@ -159,46 +157,46 @@ class handler config fs = object(self)
 
   method forbidden rd =
     let path = self#path rd in
-    Dav.properties_for_current_user fs config (Headers.get_user rd.Wm.Rd.req_headers) >>= fun auth_user_props ->
-    Dav.access_granted_for_acl fs path rd.Wm.Rd.meth auth_user_props >>= fun granted ->
+    Dav.properties_for_current_user fs config (Headers.get_user rd.req_headers) >>= fun auth_user_props ->
+    Dav.access_granted_for_acl fs path rd.meth auth_user_props >>= fun granted ->
     Wm.continue (not granted) rd
 
   method private process_propfind rd auth_user_props path =
-    let depth = Headers.get_depth rd.Wm.Rd.req_headers in
-    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    let depth = Headers.get_depth rd.req_headers in
+    Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
     Printf.printf "PROPFIND: %s\n%!" body;
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
       Dav.propfind fs ~host:config.host ~path tree ~auth_user_props ~depth >>= function
-      | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
+      | Ok b -> Wm.continue `Multistatus { rd with resp_body = `String (Xml.tree_to_string b) }
       | Error `Property_not_found -> Wm.continue `Property_not_found rd
       | Error (`Forbidden b) -> Wm.respond ~body:(`String (Xml.tree_to_string b)) (to_status `Forbidden) rd
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
   method private process_proppatch rd auth_user_props path =
-    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
     Printf.printf "PROPPATCH: %s\n%!" body;
     match Xml.string_to_tree body with
     | None -> Wm.respond (to_status `Bad_request) rd
     | Some tree ->
       Dav.proppatch fs ~host:config.host ~path tree ~auth_user_props >>= function
-      | Ok (_, b) -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
+      | Ok (_, b) -> Wm.continue `Multistatus { rd with resp_body = `String (Xml.tree_to_string b) }
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
   method process_property rd =
-    let rd' = Wm.Rd.with_resp_headers (Headers.replace_content_type "application/xml") rd in
+    let rd' = with_resp_headers (Headers.replace_content_type "application/xml") rd in
     Fs.from_string fs (self#path rd) >>= function
     | Error _ -> Wm.respond (to_status `Bad_request) rd
     | Ok f_or_d ->
-      Dav.properties_for_current_user fs config (Headers.get_user rd.Wm.Rd.req_headers) >>= fun auth_user_props ->
-      match rd'.Wm.Rd.meth with
+      Dav.properties_for_current_user fs config (Headers.get_user rd.req_headers) >>= fun auth_user_props ->
+      match rd'.meth with
       | `Other "PROPFIND" -> self#process_propfind rd' auth_user_props f_or_d
       | `Other "PROPPATCH" -> self#process_proppatch rd' auth_user_props f_or_d
       | _ -> assert false
 
   method report rd =
-    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
     Printf.printf "REPORT: %s\n%!" body;
     Fs.from_string fs (self#path rd) >>= function
     | Error _ -> Wm.respond (to_status `Bad_request) rd
@@ -206,22 +204,22 @@ class handler config fs = object(self)
       match Xml.string_to_tree body with
       | None -> Wm.respond (to_status `Bad_request) rd
       | Some tree ->
-        Dav.properties_for_current_user fs config (Headers.get_user rd.Wm.Rd.req_headers) >>= fun auth_user_props ->
+        Dav.properties_for_current_user fs config (Headers.get_user rd.req_headers) >>= fun auth_user_props ->
         Dav.report fs ~host:config.host ~path:f_or_d tree ~auth_user_props >>= function
-        | Ok b -> Wm.continue `Multistatus { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string b) }
+        | Ok b -> Wm.continue `Multistatus { rd with resp_body = `String (Xml.tree_to_string b) }
         | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
 
   (* required by webmachine API *)
   method cannot_create rd =
     let xml = Xml.node ~ns:Xml.dav_ns "error" [Xml.node ~ns:Xml.dav_ns "resource-must-be-null" []] in
     let err = Xml.tree_to_string xml in
-    let rd' = { rd with Wm.Rd.resp_body = `String err } in
+    let rd' = { rd with resp_body = `String err } in
     Wm.continue () rd'
 
   method create_collection rd =
-    Cohttp_lwt.Body.to_string rd.Wm.Rd.req_body >>= fun body ->
+    Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
     Printf.printf "MKCOL/MKCALENDAR: %s\n%!" body;
-    let is_calendar, body' = match rd.Wm.Rd.meth with
+    let is_calendar, body' = match rd.meth with
     | `Other "MKCALENDAR" -> true, Dav.calendar_to_collection body
     | `Other "MKCOL" -> false, Ok body
     | _ -> assert false in
@@ -236,12 +234,12 @@ class handler config fs = object(self)
         if is_calendar && parent_is_calendar
         then Wm.continue `Conflict rd
         else
-          Dav.parent_acl fs config (Headers.get_user rd.Wm.Rd.req_headers) (path :> file_or_dir) >>= function
+          Dav.parent_acl fs config (Headers.get_user rd.req_headers) (path :> file_or_dir) >>= function
           | Error e -> Wm.continue e rd
           | Ok acl ->
             Dav.mkcol fs ~path acl (Ptime_clock.now ()) ~is_calendar tree >>= function
             | Ok _ -> Wm.continue `Created rd
-            | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with Wm.Rd.resp_body = `String (Xml.tree_to_string t) }
+            | Error (`Forbidden t) -> Wm.continue `Forbidden { rd with resp_body = `String (Xml.tree_to_string t) }
             | Error `Conflict -> Wm.continue `Conflict rd
             | Error `Bad_request -> Wm.continue `Conflict rd
 
@@ -273,7 +271,7 @@ class handler config fs = object(self)
         (* no special property, already checked for resource *)
         match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
         | Some (_, [ Xml.Pcdata lm ]) ->
-          Wm.Rd.with_resp_headers (Headers.replace_last_modified lm) rd
+          with_resp_headers (Headers.replace_last_modified lm) rd
         | _ -> rd
       in
       (* no special property, already checked for resource *)
@@ -286,7 +284,7 @@ class handler config fs = object(self)
       Wm.continue etag rd'
 
   method finish_request rd =
-    let rd' = if rd.Wm.Rd.meth = `OPTIONS then
+    let rd' = if rd.meth = `OPTIONS then
         (* access-control, access-control, calendar-access, calendar-schedule, calendar-auto-schedule,
            calendar-availability, inbox-availability, calendar-proxy, calendarserver-private-events,
            calendarserver-private-comments, calendarserver-sharing, calendarserver-sharing-no-scheduling,
@@ -294,13 +292,13 @@ class handler config fs = object(self)
            calendar-managed-attachments, calendarserver-partstat-changes, calendarserver-group-attendee,
            calendar-no-timezone, calendarserver-recurrence-split, addressbook, addressbook, extended-mkcol,
            calendarserver-principal-property-search, calendarserver-principal-search, calendarserver-home-sync *)
-      Wm.Rd.with_resp_headers (Headers.replace_dav "1, extended-mkcol, calendar-access") rd
+      with_resp_headers (Headers.replace_dav "1, extended-mkcol, calendar-access") rd
     else
       rd in
     Wm.continue () rd'
 
   method private path rd =
-    Uri.path (rd.Wm.Rd.uri)
+    Uri.path (rd.uri)
 end
 
 class redirect config = object(self)
@@ -318,7 +316,7 @@ class redirect config = object(self)
     Wm.continue [] rd
 
   method private redirect rd =
-    let rd' = Wm.Rd.redirect (Uri.to_string @@ Uri.with_path config.host config.calendars) rd in
+    let rd' = redirect (Uri.to_string @@ Uri.with_path config.host config.calendars) rd in
     Wm.respond 301 rd'
 end
 
@@ -335,7 +333,7 @@ class create_user config fs = object(self)
     Wm.continue [`PUT; `OPTIONS ] rd
 
   method private create_user rd =
-    let uri = rd.Wm.Rd.uri in
+    let uri = rd.uri in
     match Uri.get_query_param uri "user", Uri.get_query_param uri "password" with
     | None, _ | _, None -> Wm.respond (to_status `Bad_request) rd
     | Some name, Some pass ->
