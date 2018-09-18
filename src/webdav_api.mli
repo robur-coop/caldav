@@ -16,8 +16,8 @@ sig
   val proppatch : state -> config -> path:string -> user:string -> data:string -> 
     (string, [> `Bad_request ]) result Lwt.t
 
-  val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t ->
-    (tree, [`Bad_request]) result Lwt.t
+  val report : state -> config -> path:string -> user:string -> data:string -> 
+    (string, [> `Bad_request ]) result Lwt.t
 
   val write_component : state -> config -> path:string -> Ptime.t -> content_type:content_type -> user:string -> data:string ->
     (string, [> `Bad_request | `Conflict | `Forbidden | `Internal_server_error ]) result Lwt.t

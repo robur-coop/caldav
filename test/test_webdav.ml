@@ -534,7 +534,7 @@ let report_parse_tests = [
 let config = {
   principals = "principals" ;
   calendars = "calendars" ;
-  host = Uri.of_string "http://example.com" ;
+  host = Uri.of_string "http://cal.example.com" ;
   default_acl = [ (`All, `Grant [ `All ]) ]
 }
 
@@ -583,12 +583,11 @@ let t_tree =
   end in
   (module M : Alcotest.TESTABLE with type t = M.t)
 
-let report path request data =
-  let auth_user_props = Properties.empty in
+let report path body fs =
   let open Lwt.Infix in
   Lwt_main.run (
-    Dav.report data ~host:(Uri.of_string "http://cal.example.com") ~path request ~auth_user_props >|= function
-    | Ok t -> Ok (tree (Xml.tree_to_string t))
+    Dav.report fs config ~path ~user:"nobody" ~data:body >|= function
+    | Ok resp -> Ok (tree resp)
     | Error _ -> Error "failed")
 
 let test_report_1 () =
@@ -598,7 +597,7 @@ let test_report_1 () =
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+              (report "bernard/work" xml
                  (appendix_b_1_data config.default_acl)))
 
 let test_report_7_8_1 () =
@@ -700,7 +699,7 @@ END:VCALENDAR
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+              (report "bernard/work" xml
                  (appendix_b_data config.default_acl)))
 
 
@@ -808,7 +807,7 @@ END:VCALENDAR
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+              (report "bernard/work" xml
                  (appendix_b_data config.default_acl)))
 
 let test_report_7_8_3 () =
@@ -879,7 +878,7 @@ END:VCALENDAR
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+              (report "bernard/work" xml
                  (appendix_b_data config.default_acl)))
 
 let test_report_7_8_4 () =
@@ -914,7 +913,7 @@ END:VCALENDAR
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+              (report "bernard/work" xml
                  (appendix_b_data config.default_acl)))
 
 let test_report_7_8_5 () =
@@ -972,7 +971,7 @@ END:VCALENDAR
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+              (report "bernard/work" xml
                  (appendix_b_data config.default_acl)))
 
 let multiget_7_9_1 = header ^ {|
@@ -1058,7 +1057,7 @@ END:VCALENDAR
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+              (report "bernard/work" xml
                  (appendix_b_data config.default_acl)))
 
 let report_7_8_2_range =
@@ -1114,7 +1113,7 @@ let test_report_7_8_2_range () =
      ))  in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok expected)
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+              (report "bernard/work" xml
                  (appendix_b_data config.default_acl)))
 
 
@@ -1535,7 +1534,7 @@ let test_report_1_deny () =
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok expected)
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+              (report "bernard/work" xml
                  (appendix_b_1_data @@ snd deny_all)))
 
 let test_report_7_8_1_deny () =
@@ -1579,7 +1578,7 @@ let test_report_7_8_1_deny () =
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+              (report "bernard/work" xml
                  (appendix_b_data @@ snd deny_all)))
 
 let test_report_7_8_2_deny () =
@@ -1623,7 +1622,7 @@ let test_report_7_8_2_deny () =
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+              (report "bernard/work" xml
                  (appendix_b_data @@ snd deny_all)))
 
 let test_multiget_7_9_1_deny () =
@@ -1642,7 +1641,7 @@ let test_multiget_7_9_1_deny () =
   in
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
-              (report (`Dir [ "bernard" ; "work" ]) (tree xml)
+              (report "bernard/work" xml
                  (appendix_b_data @@ snd deny_all)))
 
 

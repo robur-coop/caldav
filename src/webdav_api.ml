@@ -17,8 +17,8 @@ sig
   val proppatch : state -> config -> path:string -> user:string -> data:string -> 
     (string, [> `Bad_request ]) result Lwt.t
 
-  val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t ->
-    (tree, [`Bad_request]) result Lwt.t
+  val report : state -> config -> path:string -> user:string -> data:string -> 
+    (string, [> `Bad_request ]) result Lwt.t
 
   val write_component : state -> Webdav_config.config -> path:string -> Ptime.t -> content_type:content_type -> user:string -> data:string ->
     (string, [> `Bad_request | `Conflict | `Forbidden | `Internal_server_error ]) result Lwt.t
@@ -838,22 +838,23 @@ module Make(Fs: Webdav_fs.S) = struct
     | `File f ->
       begin
         report_one calendar_query (`File f) >|= function
-        | Ok (Some node) -> Ok (multistatus [ node ])
-        | Ok None -> Ok (multistatus [])
+        | Ok (Some node) -> Ok (Xml.tree_to_string @@ multistatus [ node ])
+        | Ok None -> Ok (Xml.tree_to_string @@ multistatus [])
         | Error e -> Error e
       end
     | `Dir d ->
       Fs.listdir fs (`Dir d) >>= function
       | Error _ -> Lwt.return (Error `Bad_request)
       | Ok files ->
-        Lwt_list.map_p (report_one calendar_query) files >>= fun responses ->
+        Lwt_list.map_p (report_one calendar_query) files >|= fun responses ->
         (* TODO we remove individual file errors, should we report them back?
            be consistent in respect to other HTTP verbs taking directories (e.g. propfind) *)
         let responses' = List.fold_left (fun acc -> function
             | Ok (Some r) -> r :: acc
             | Ok None -> acc
             | Error _ -> acc) [] responses in
-        Lwt.return (Ok (multistatus responses'))
+        let resp_tree = multistatus responses' in
+        Ok (Xml.tree_to_string resp_tree)
 
   let handle_calendar_multiget_report (transformation, filenames) fs host path ~auth_user_props =
     let report_one (filename : string) =
@@ -889,18 +890,25 @@ module Make(Fs: Webdav_fs.S) = struct
             in
             Ok node
     in
-    Lwt_list.map_p report_one filenames >>= fun responses ->
+    Lwt_list.map_p report_one filenames >|= fun responses ->
     (* TODO we remove individual file parse errors, should we report them back? *)
     let responses' = List.fold_left (fun acc -> function
         | Ok r -> r :: acc
         | Error _ -> acc) [] responses in
-    Lwt.return (Ok (multistatus @@ List.rev responses'))
+    let resp_tree = multistatus @@ List.rev responses' in
+    Ok (Xml.tree_to_string resp_tree)
 
-  let report fs ~host ~path req ~auth_user_props =
-    match Xml.parse_calendar_query_xml req, Xml.parse_calendar_multiget_xml req with
-    | Ok calendar_query, _ -> handle_calendar_query_report calendar_query fs host path ~auth_user_props
-    | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget fs host path ~auth_user_props
-    | Error e, Error _ -> Lwt.return (Error `Bad_request)
+  let report fs config ~path ~user ~data =
+    Fs.from_string fs path >>= function
+    | Error _ -> Lwt.return @@ Error `Bad_request
+    | Ok f_or_d -> match Xml.string_to_tree data with
+      | None -> Lwt.return @@ Error `Bad_request
+      | Some req_tree ->
+        properties_for_current_user fs config user >>= fun auth_user_props ->
+        match Xml.parse_calendar_query_xml req_tree, Xml.parse_calendar_multiget_xml req_tree with
+        | Ok calendar_query, _ -> handle_calendar_query_report calendar_query fs config.host f_or_d ~auth_user_props
+        | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget fs config.host f_or_d ~auth_user_props
+        | Error e, Error _ -> Lwt.return (Error `Bad_request)
 
   let read_target_or_parent_properties fs path target_or_parent =
     (match target_or_parent with

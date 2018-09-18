@@ -115,10 +115,10 @@ class handler config fs = object(self)
     match Headers.get_authorization rd.req_headers with
      | None -> Wm.continue (`Basic "calendar") rd
      | Some v -> Dav.verify_auth_header fs config v >>= function
+       | Error msg -> Wm.continue (`Basic "invalid authorization") rd
        | Ok user ->
          let rd' = with_req_headers (Headers.replace_authorization user) rd in
          Wm.continue `Authorized rd'
-       | Error msg -> Wm.continue (`Basic "invalid authorization") rd
 
   method forbidden rd =
     let path = self#path rd in
@@ -144,18 +144,14 @@ class handler config fs = object(self)
       Wm.continue `Multistatus { rd' with resp_body = `String body }
 
   method report rd =
+    let path = self#path rd in
+    let user = Headers.get_user rd.req_headers in
     Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
-    Printf.printf "REPORT: %s\n%!" body;
-    Fs.from_string fs (self#path rd) >>= function
-    | Error _ -> Wm.respond (to_status `Bad_request) rd
-    | Ok f_or_d ->
-      match Xml.string_to_tree body with
-      | None -> Wm.respond (to_status `Bad_request) rd
-      | Some tree ->
-        Dav.properties_for_current_user fs config (Headers.get_user rd.req_headers) >>= fun auth_user_props ->
-        Dav.report fs ~host:config.host ~path:f_or_d tree ~auth_user_props >>= function
-        | Ok b -> Wm.continue `Multistatus { rd with resp_body = `String (Xml.tree_to_string b) }
-        | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    Dav.report fs config ~path ~user ~data:body >>= function
+    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    | Ok body -> 
+      let rd' = with_resp_headers (Headers.replace_content_type "application/xml") rd in
+      Wm.continue `Multistatus { rd' with resp_body = `String body }
 
   (* required by webmachine API *)
   method cannot_create rd =
