@@ -30,7 +30,7 @@ sig
 
   val last_modified : state -> path:string -> string option Lwt.t
 
-  val compute_etag : string -> string
+  val compute_etag : state -> path:string -> string option Lwt.t
 
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, string) result Lwt.t
 
@@ -977,6 +977,16 @@ let last_modified fs ~path =
     (* no special property, already checked for resource *)
     match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
     | Some (_, [ Xml.Pcdata lm]) -> Some lm
+    | _ -> None
+
+let compute_etag fs ~path =
+  Fs.from_string fs path >>= function
+  | Error _ -> Lwt.return None
+  | Ok f_or_d ->
+    Fs.get_property_map fs f_or_d >|= fun map ->
+    (* no special property, already checked for resource *)
+    match Properties.unsafe_find (Xml.dav_ns, "getetag") map with
+    | Some (_, [ Xml.Pcdata etag ]) -> Some etag
     | _ -> None
 
 let server_ns = "http://calendarserver.org/ns/"

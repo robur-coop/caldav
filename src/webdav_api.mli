@@ -29,7 +29,7 @@ sig
 
   val last_modified : state -> path:string -> string option Lwt.t
 
-  val compute_etag : string -> string
+  val compute_etag : state -> path:string -> string option Lwt.t
 
   val verify_auth_header : state -> config -> string -> (string, string) result Lwt.t
 
