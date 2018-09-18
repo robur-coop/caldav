@@ -64,26 +64,13 @@ class handler config fs = object(self)
 
   method private write_component rd =
     Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
-    Printf.printf "write_component: %s\n%!" body ;
     let path = self#path rd in
     let content_type = Headers.get_content_type rd.req_headers in
-    match Icalendar.parse body with
-    | Error e ->
-      Printf.printf "error %s while parsing calendar\n" e ;
-      Wm.continue false rd
-    | Ok cal ->
-      let ics = Icalendar.to_ics cal in
-      let etag = Dav.compute_etag ics in
-      let file = Fs.file_from_string path in
-      Dav.parent_acl fs config (Headers.get_user rd.req_headers) (file :> file_or_dir) >>= function
-      | Error e -> Wm.respond (to_status `Forbidden) rd
-      | Ok acl ->
-        Dav.write_component fs ~path:file ~etag ~content_type acl (Ptime_clock.now ()) ics >>= function
-        | Error e -> Wm.respond (to_status e) rd
-        | Ok _ ->
-          Printf.printf "wrote component %s\n%!" path ;
-          let rd' = with_resp_headers (Headers.replace_etag_add_location etag (Uri.with_path config.host path)) rd in
-          Wm.continue true rd'
+    Dav.write_component fs config ~path (Ptime_clock.now ()) ~content_type ~user:(Headers.get_user rd.req_headers) ~data:body >>= function
+    | Error e -> Wm.respond (to_status e) rd
+    | Ok etag ->
+      let rd' = with_resp_headers (Headers.replace_etag_add_location etag (Uri.with_path config.host path)) rd in
+      Wm.continue true rd'
 
   method private read_calendar rd =
     let file = self#path rd in

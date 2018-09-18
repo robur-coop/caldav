@@ -19,9 +19,8 @@ sig
   val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t ->
     (tree, [`Bad_request]) result Lwt.t
 
-  val write_component : state -> path:Webdav_fs.file -> Xml.ace list -> Ptime.t -> ?etag:string -> content_type:string ->
-    string ->
-    (state, [ `Conflict | `Internal_server_error | `Method_not_allowed ]) result Lwt.t
+  val write_component : state -> Webdav_config.config -> path:string -> Ptime.t -> content_type:string -> user:string -> data:string ->
+    (string, [> `Bad_request | `Conflict | `Forbidden | `Internal_server_error ]) result Lwt.t
 
   val delete : state -> path:Webdav_fs.file_or_dir -> Ptime.t -> state Lwt.t
 
@@ -63,24 +62,66 @@ module Make(Fs: Webdav_fs.S) = struct
 
   let compute_etag str = Digest.to_hex @@ Digest.string str
 
-  let write_component state ~path acl timestamp ?etag ~content_type data =
-    match path with
-    | `Dir _ -> Lwt.return (Error `Method_not_allowed)
-    | `File file ->
-      let parent = Fs.parent (`File file) in
-      Fs.dir_exists state parent >>= function
-      | false ->
-        Printf.printf "parent directory of %s does not exist\n" (Fs.to_string (`File file)) ;
-        Lwt.return (Error `Conflict)
-      | true ->
-        let props =
-          let etag = match etag with None -> compute_etag data | Some e -> e in
-          Properties.create ~content_type ~etag
-            acl timestamp (String.length data) (Fs.to_string (`File file))
+  let parent_is_calendar fs file =
+    Fs.get_property_map fs (Fs.parent (file :> Webdav_fs.file_or_dir) :> Webdav_fs.file_or_dir) >|= fun map ->
+    (* TODO access check missing *)
+    match Properties.unsafe_find (Xml.dav_ns, "resourcetype") map with
+    | None -> false
+    | Some (_, trees) ->
+       let calendar_node = function
+       | Xml.Node (ns, "calendar", _, _) when ns = Xml.caldav_ns -> true
+       | _ -> false in
+       List.exists calendar_node trees
+  
+  let properties_for_current_user fs config user =
+    let user_path = `Dir [ config.principals ; user ] in
+    Fs.get_property_map fs user_path
+
+  let parent_acl fs config user path =
+    properties_for_current_user fs config user >>= fun auth_user_props ->
+    Fs.get_property_map fs (Fs.parent (path :> Webdav_fs.file_or_dir) :> Webdav_fs.file_or_dir) >|= fun parent_resource_props ->
+    if not (Privileges.is_met ~requirement:`Read_acl @@
+            Properties.privileges ~auth_user_props parent_resource_props)
+    then Error `Forbidden
+    (* we check above that Read_acl is allowed, TODO express with find_many *)
+    else match Properties.unsafe_find (Xml.dav_ns, "acl") parent_resource_props with
+      | None -> Ok []
+      | Some (_, aces) ->
+        let aces' = List.map Xml.xml_to_ace aces in
+        Ok (List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces')
+
+  let parse_calendar ~path data =
+    match Icalendar.parse data with
+    | Error e ->
+      Printf.printf "error %s while parsing calendar\n" e ;
+      Error `Bad_request
+    | Ok cal ->
+      let ics = Icalendar.to_ics cal in
+      let file = Fs.file_from_string path in
+      Ok (ics, file)
+
+  let write_if_parent_exists state config (file : Webdav_fs.file) timestamp content_type user ics =
+    let parent = Fs.parent (file :> Webdav_fs.file_or_dir) in
+    Fs.dir_exists state parent >>= function
+    | false ->
+      Printf.printf "parent directory of %s does not exist\n" (Fs.to_string (file :> Webdav_fs.file_or_dir)) ;
+      Lwt.return (Error `Conflict)
+    | true ->
+      parent_acl state config user (file :> Webdav_fs.file_or_dir) >>= function
+      | Error e -> Lwt.return @@ Error `Forbidden
+      | Ok acl -> 
+        let etag = compute_etag ics in
+        let props = Properties.create ~content_type ~etag
+            acl timestamp (String.length ics) (Fs.to_string (file :> Webdav_fs.file_or_dir))
         in
-        Fs.write state (`File file) (Cstruct.of_string data) props >|= function
+        Fs.write state file (Cstruct.of_string ics) props >|= function
         | Error e -> Error `Internal_server_error
-        | Ok () -> Ok state
+        | Ok () -> Ok etag
+
+  let write_component state config ~path timestamp ~content_type ~user ~data =
+    match parse_calendar ~path data with
+    | Error e -> Lwt.return @@ Error e
+    | Ok (ics, file) -> write_if_parent_exists state config file timestamp content_type user ics
 
   let delete state ~path now =
     Fs.destroy state path >>= fun res ->
@@ -156,8 +197,8 @@ module Make(Fs: Webdav_fs.S) = struct
     in
     match depth, f_or_d with
     | `Infinity, _ ->
-      let body = error_xml "propfind-finite-depth" in
-      Lwt.return (Error (`Forbidden body))
+      let data = error_xml "propfind-finite-depth" in
+      Lwt.return (Error (`Forbidden data))
     | `Zero, _
     | _, `File _ ->
       begin
@@ -178,7 +219,7 @@ module Make(Fs: Webdav_fs.S) = struct
       | Error _ -> Lwt.return (Error `Property_not_found)
       | Ok req ->
         propfind state path host req auth_user_props depth >|= function
-        | Ok body -> Ok body
+        | Ok data -> Ok data
         | Error e -> Error e
 
   let update_properties fs f_or_d updates =
@@ -191,8 +232,8 @@ module Make(Fs: Webdav_fs.S) = struct
     | Error e -> Error e
     | Ok () -> Ok propstats
 
-  let proppatch state ~host ~path body ~auth_user_props =
-    match Xml.parse_propupdate_xml body with
+  let proppatch state ~host ~path data ~auth_user_props =
+    match Xml.parse_propupdate_xml data with
     | Error _ -> Lwt.return (Error `Bad_request)
     | Ok updates ->
       update_properties state path updates >|= function
@@ -205,19 +246,19 @@ module Make(Fs: Webdav_fs.S) = struct
         let status = multistatus [ nodes ] in
         Ok (state, status)
 
-  let body_to_proppatch = function
+  let data_to_proppatch = function
     | None -> Ok []
-    | Some body' -> match Xml.parse_mkcol_xml body' with
+    | Some data' -> match Xml.parse_mkcol_xml data' with
       | Error _ -> Error `Bad_request
       | Ok set_props -> Ok set_props
 
   (* assumption: path is a relative path! *)
-  let mkcol state ~path:(`Dir d as dir) acl now ~is_calendar body =
+  let mkcol state ~path:(`Dir d as dir) acl now ~is_calendar data =
     (* TODO: move to caller *)
     let parent = Fs.parent dir in
     Fs.dir_exists state parent >>= function
     | false -> Lwt.return (Error `Conflict)
-    | true -> match body_to_proppatch body with
+    | true -> match data_to_proppatch data with
       | Error e -> Lwt.return (Error e)
       | Ok set_props ->
         let resourcetype = if is_calendar then [Xml.node ~ns:Xml.caldav_ns "calendar" []] else [] in
@@ -226,7 +267,7 @@ module Make(Fs: Webdav_fs.S) = struct
         | None, errs ->
           let propstats = List.map propstat_node errs in
           let xml = Xml.dav_node "mkcol-response" propstats in
-          Printf.printf "forbidden from body_to_props!\n" ;
+          Printf.printf "forbidden from data_to_props!\n" ;
           Lwt.return @@ Error (`Forbidden xml)
         | Some map, _ ->
           Fs.mkdir state dir map >|= function
@@ -876,34 +917,6 @@ let calendar_to_collection data =
   match Xml.string_to_tree data with
   | Some (Xml.Node (ns, "mkcalendar", a, c)) when ns = Xml.caldav_ns -> Ok (Xml.tyxml_to_body (Xml.tree_to_tyxml (Xml.node ~ns:Xml.dav_ns ~a "mkcol" c)))
   | _ -> Error `Bad_request
-
-let parent_is_calendar fs file =
-  Fs.get_property_map fs (Fs.parent (file :> Webdav_fs.file_or_dir) :> Webdav_fs.file_or_dir) >|= fun map ->
-  (* TODO access check missing *)
-  match Properties.unsafe_find (Xml.dav_ns, "resourcetype") map with
-  | None -> false
-  | Some (_, trees) ->
-     let calendar_node = function
-     | Xml.Node (ns, "calendar", _, _) when ns = Xml.caldav_ns -> true
-     | _ -> false in
-     List.exists calendar_node trees
-
-let properties_for_current_user fs config user =
-  let user_path = `Dir [ config.principals ; user ] in
-  Fs.get_property_map fs user_path
-
-let parent_acl fs config user path =
-  properties_for_current_user fs config user >>= fun auth_user_props ->
-  Fs.get_property_map fs (Fs.parent (path :> Webdav_fs.file_or_dir) :> Webdav_fs.file_or_dir) >|= fun parent_resource_props ->
-  if not (Privileges.is_met ~requirement:`Read_acl @@
-          Properties.privileges ~auth_user_props parent_resource_props)
-  then Error `Forbidden
-  (* we check above that Read_acl is allowed, TODO express with find_many *)
-  else match Properties.unsafe_find (Xml.dav_ns, "acl") parent_resource_props with
-    | None -> Ok []
-    | Some (_, aces) ->
-      let aces' = List.map Xml.xml_to_ace aces in
-      Ok (List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces')
 
 let server_ns = "http://calendarserver.org/ns/"
 let carddav_ns = "urn:ietf:params:xml:ns:carddav"

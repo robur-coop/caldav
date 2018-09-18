@@ -16,9 +16,8 @@ sig
   val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t ->
     (tree, [`Bad_request]) result Lwt.t
 
-  val write_component : state -> path:Webdav_fs.file -> Webdav_xml.ace list -> Ptime.t -> ?etag:string -> content_type:string ->
-    string ->
-    (state, [ `Conflict | `Internal_server_error | `Method_not_allowed ]) result Lwt.t
+  val write_component : state -> Webdav_config.config -> path:string -> Ptime.t -> content_type:string -> user:string -> data:string ->
+    (string, [> `Bad_request | `Conflict | `Forbidden | `Internal_server_error ]) result Lwt.t
 
   val delete : state -> path:Webdav_fs.file_or_dir -> Ptime.t -> state Lwt.t
 
