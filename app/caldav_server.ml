@@ -112,17 +112,13 @@ class handler config fs = object(self)
 
   method is_authorized rd =
     (* TODO implement digest authentication! *)
-    (match Headers.get_authorization rd.req_headers with
-     | None -> Lwt.return (`Basic "calendar", rd)
-     | Some v ->
-       Dav.verify_auth_header fs config v >|= function
+    match Headers.get_authorization rd.req_headers with
+     | None -> Wm.continue (`Basic "calendar") rd
+     | Some v -> Dav.verify_auth_header fs config v >>= function
        | Ok user ->
          let rd' = with_req_headers (Headers.replace_authorization user) rd in
-         `Authorized, rd'
-       | Error msg ->
-         Printf.printf "ivalid authorization: %s\n" msg ;
-         `Basic "invalid authorization", rd) >>= fun (res, rd') ->
-    Wm.continue res rd'
+         Wm.continue `Authorized rd'
+       | Error msg -> Wm.continue (`Basic "invalid authorization") rd
 
   method forbidden rd =
     let path = self#path rd in
