@@ -126,39 +126,22 @@ class handler config fs = object(self)
     Dav.access_granted_for_acl fs config ~path rd.meth ~user >>= fun granted ->
     Wm.continue (not granted) rd
 
-  method private process_propfind rd auth_user_props path =
+  method process_property rd =
+    let path = self#path rd in
+    let user = Headers.get_user rd.req_headers in
     let depth = Headers.get_depth rd.req_headers in
     Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
-    Printf.printf "PROPFIND: %s\n%!" body;
-    match Xml.string_to_tree body with
-    | None -> Wm.respond (to_status `Bad_request) rd
-    | Some tree ->
-      Dav.propfind fs ~host:config.host ~path tree ~auth_user_props ~depth >>= function
-      | Ok b -> Wm.continue `Multistatus { rd with resp_body = `String (Xml.tree_to_string b) }
-      | Error `Property_not_found -> Wm.continue `Property_not_found rd
-      | Error (`Forbidden b) -> Wm.respond ~body:(`String (Xml.tree_to_string b)) (to_status `Forbidden) rd
-      | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
-
-  method private process_proppatch rd auth_user_props path =
-    Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
-    Printf.printf "PROPPATCH: %s\n%!" body;
-    match Xml.string_to_tree body with
-    | None -> Wm.respond (to_status `Bad_request) rd
-    | Some tree ->
-      Dav.proppatch fs ~host:config.host ~path tree ~auth_user_props >>= function
-      | Ok (_, b) -> Wm.continue `Multistatus { rd with resp_body = `String (Xml.tree_to_string b) }
-      | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
-
-  method process_property rd =
-    let rd' = with_resp_headers (Headers.replace_content_type "application/xml") rd in
-    Fs.from_string fs (self#path rd) >>= function
-    | Error _ -> Wm.respond (to_status `Bad_request) rd
-    | Ok f_or_d ->
-      Dav.properties_for_current_user fs config (Headers.get_user rd.req_headers) >>= fun auth_user_props ->
-      match rd'.meth with
-      | `Other "PROPFIND" -> self#process_propfind rd' auth_user_props f_or_d
-      | `Other "PROPPATCH" -> self#process_proppatch rd' auth_user_props f_or_d
-      | _ -> assert false
+    let dispatch_on_verb = match rd.meth with
+    | `Other "PROPFIND" -> Dav.propfind fs config ~path ~user ~depth ~data:body
+    | `Other "PROPPATCH" -> Dav.proppatch fs config ~path ~user ~data:body
+    | _ -> assert false in
+    dispatch_on_verb >>= function
+    | Error (`Forbidden body) -> Wm.respond ~body:(`String body) (to_status `Forbidden) rd
+    | Error (`Bad_request as e) -> Wm.respond (to_status e) rd
+    | Error `Property_not_found -> Wm.continue `Property_not_found rd
+    | Ok body -> 
+      let rd' = with_resp_headers (Headers.replace_content_type "application/xml") rd in
+      Wm.continue `Multistatus { rd' with resp_body = `String body }
 
   method report rd =
     Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->

@@ -10,11 +10,11 @@ sig
     (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
       result Lwt.t
 
-  val propfind : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t -> depth:string option ->
-    (tree, [ `Bad_request | `Forbidden of tree | `Property_not_found ]) result Lwt.t
+  val propfind : state -> config -> path:string -> user:string -> depth:string option -> data:string -> 
+    (string, [> `Bad_request | `Forbidden of string | `Property_not_found ]) result Lwt.t
 
-  val proppatch : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t ->
-    (state * tree, [ `Bad_request ]) result Lwt.t
+  val proppatch : state -> config -> path:string -> user:string -> data:string -> 
+    (string, [> `Bad_request ]) result Lwt.t
 
   val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t ->
     (tree, [`Bad_request]) result Lwt.t

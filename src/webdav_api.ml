@@ -11,11 +11,11 @@ sig
     (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
       result Lwt.t
 
-  val propfind : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t -> depth:string option ->
-    (tree, [ `Bad_request | `Forbidden of tree | `Property_not_found ]) result Lwt.t
+  val propfind : state -> config -> path:string -> user:string -> depth:string option -> data:string -> 
+    (string, [> `Bad_request | `Forbidden of string | `Property_not_found ]) result Lwt.t
 
-  val proppatch : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t ->
-    (state * tree, [ `Bad_request ]) result Lwt.t
+  val proppatch : state -> config -> path:string -> user:string -> data:string -> 
+    (string, [> `Bad_request ]) result Lwt.t
 
   val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t ->
     (tree, [`Bad_request]) result Lwt.t
@@ -284,7 +284,7 @@ module Make(Fs: Webdav_fs.S) = struct
     match depth, f_or_d with
     | `Infinity, _ ->
       let data = error_xml "propfind-finite-depth" in
-      Lwt.return (Error (`Forbidden data))
+      Lwt.return (Error (`Forbidden (Xml.tree_to_string data)))
     | `Zero, _
     | _, `File _ ->
       begin
@@ -297,16 +297,20 @@ module Make(Fs: Webdav_fs.S) = struct
       | Error _ -> assert false
       | Ok els -> process_files fs host (`Dir data) req els
 
-  let propfind fs ~host ~path tree ~auth_user_props ~depth =
-    match parse_depth depth with
-    | Error `Bad_request -> Lwt.return (Error `Bad_request)
-    | Ok depth ->
-      match Xml.parse_propfind_xml tree with
-      | Error _ -> Lwt.return (Error `Property_not_found)
-      | Ok req ->
-        propfind fs path host req auth_user_props depth >|= function
-        | Ok data -> Ok data
-        | Error e -> Error e
+  let propfind fs config ~path ~user ~depth ~data =
+    Fs.from_string fs path >>= function
+    | Error _ -> Lwt.return @@ Error `Bad_request
+    | Ok f_or_d ->
+      properties_for_current_user fs config user >>= fun auth_user_props ->
+      match Xml.string_to_tree data with
+      | None -> Lwt.return @@ Error `Bad_request
+      | Some req_tree -> match parse_depth depth with
+        | Error `Bad_request -> Lwt.return (Error `Bad_request)
+        | Ok depth -> match Xml.parse_propfind_xml req_tree with
+          | Error _ -> Lwt.return (Error `Property_not_found)
+          | Ok req -> propfind fs f_or_d config.host req auth_user_props depth >|= function
+            | Error e -> Error e
+            | Ok resp_tree -> Ok (Xml.tree_to_string resp_tree)
 
   let update_properties fs f_or_d updates =
     Fs.get_property_map fs f_or_d >>= fun map ->
@@ -318,19 +322,25 @@ module Make(Fs: Webdav_fs.S) = struct
     | Error e -> Error e
     | Ok () -> Ok propstats
 
-  let proppatch fs ~host ~path data ~auth_user_props =
-    match Xml.parse_propupdate_xml data with
-    | Error _ -> Lwt.return (Error `Bad_request)
-    | Ok updates ->
-      update_properties fs path updates >|= function
-      | Error _      -> Error `Bad_request
-      | Ok propstats ->
-        let nodes =
-          Xml.dav_node "response"
-            (Xml.dav_node "href" [ Xml.Pcdata (uri_string host path) ] :: propstats)
-        in
-        let status = multistatus [ nodes ] in
-        Ok (fs, status)
+  let proppatch fs config ~path ~user ~data =
+    Fs.from_string fs path >>= function
+    | Error _ -> Lwt.return @@ Error `Bad_request
+    | Ok f_or_d ->
+      properties_for_current_user fs config user >>= fun auth_user_props ->
+      match Xml.string_to_tree data with
+      | None -> Lwt.return @@ Error `Bad_request
+      | Some req_tree -> match Xml.parse_propupdate_xml req_tree with
+        | Error _ -> Lwt.return @@ Error `Bad_request
+        | Ok updates ->
+          update_properties fs f_or_d updates >|= function
+          | Error _      -> Error `Bad_request
+          | Ok propstats ->
+            let nodes =
+              Xml.dav_node "response"
+                (Xml.dav_node "href" [ Xml.Pcdata (uri_string config.host f_or_d) ] :: propstats)
+            in
+            let resp = multistatus [ nodes ] in
+            Ok (Xml.tree_to_string resp)
 
   let data_to_proppatch = function
     | None -> Ok []
