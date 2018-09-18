@@ -1266,11 +1266,13 @@ let webdav_api_tests = [
 
 let principal_url principal = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; principal ]))
 
-let test_fs_with_acl path acl = Lwt_main.run (
+let test_fs_with_acl path acl user user_props = Lwt_main.run (
   let open Lwt.Infix in
   Mirage_fs_mem.connect "" >>= fun fs ->
   let props = Properties.create_dir acl (Ptime_clock.now ()) path in
-  Fs.mkdir fs (`Dir [path]) props >|= fun _ -> fs)
+  Fs.mkdir fs (`Dir [path]) props >>= fun _ -> 
+  Fs.mkdir fs (`Dir [config.principals ; user] ) user_props >|= fun _ ->
+  fs)
 
 let deny_all = "deny all", [ (`All, `Deny [ `All ]) ]
 let grant_all ="grant all",  [ (`All, `Grant [ `All ]) ]
@@ -1438,17 +1440,17 @@ let acl_test_cases = [
   `Other "REPORT", "calendars", test_cases_for_get ;
 ]
 
-let request_calendars_for_acl http_verb request_path aces user_props res () =
+let request_calendars_for_acl http_verb request_path aces user user_props res () =
   let path = "calendars" in
-  let fs = test_fs_with_acl path aces in
-  Alcotest.(check bool __LOC__ res (Lwt_main.run @@ Dav.access_granted_for_acl fs request_path http_verb user_props))
+  let fs = test_fs_with_acl path aces user user_props in
+  Alcotest.(check bool __LOC__ res (Lwt_main.run @@ Dav.access_granted_for_acl fs config http_verb ~path:request_path ~user))
 
 let webdav_acl_tests (http_verb, request_path, acls_results) =
   let http_verb_str = Sexplib.Sexp.to_string_hum @@ Cohttp.Code.sexp_of_meth http_verb in
-  let test ((ace_str, aces), (principal_str, user_props), result) =
-    Printf.sprintf "%s %s %s, principal %s" http_verb_str request_path ace_str principal_str,
+  let test ((ace_str, aces), (user, user_props), result) =
+    Printf.sprintf "%s %s %s, principal %s" http_verb_str request_path ace_str user,
     `Quick,
-    request_calendars_for_acl http_verb request_path aces user_props result
+    request_calendars_for_acl http_verb request_path aces user user_props result
   in
   List.map test acls_results
 

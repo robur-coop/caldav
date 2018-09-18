@@ -126,8 +126,8 @@ class handler config fs = object(self)
 
   method forbidden rd =
     let path = self#path rd in
-    Dav.properties_for_current_user fs config (Headers.get_user rd.req_headers) >>= fun auth_user_props ->
-    Dav.access_granted_for_acl fs path rd.meth auth_user_props >>= fun granted ->
+    let user = Headers.get_user rd.req_headers in
+    Dav.access_granted_for_acl fs config ~path rd.meth ~user >>= fun granted ->
     Wm.continue (not granted) rd
 
   method private process_propfind rd auth_user_props path =

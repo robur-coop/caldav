@@ -27,7 +27,7 @@ sig
 
   val read : state -> path:string -> is_mozilla:bool -> (string * content_type, [> `Not_found ]) result Lwt.t
 
-  val access_granted_for_acl : state -> string -> Cohttp.Code.meth -> Properties.t -> bool Lwt.t
+  val access_granted_for_acl : state -> config -> Cohttp.Code.meth -> path:string -> user:string -> bool Lwt.t
 
   val compute_etag : string -> string
 
@@ -899,7 +899,8 @@ module Make(Fs: Webdav_fs.S) = struct
     | Error _ -> Lwt.return Properties.empty
     | Ok f_or_d -> Fs.get_property_map fs f_or_d
 
-  let access_granted_for_acl fs path http_verb auth_user_props =
+  let access_granted_for_acl fs config http_verb ~path ~user =
+    properties_for_current_user fs config user >>= fun auth_user_props ->
     Fs.exists fs path >>= fun target_exists ->
     let requirement, target_or_parent = Privileges.required http_verb ~target_exists in
     read_target_or_parent_properties fs path target_or_parent >|= fun propmap ->
