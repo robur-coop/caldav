@@ -251,7 +251,8 @@ class create_user config fs = object(self)
     | None, _ | _, None -> Wm.respond (to_status `Bad_request) rd
     | Some name, Some pass ->
       (* TODO may fail if user exists *)
-      Dav.make_user fs config name pass >>= fun () ->
+      let now = Ptime_clock.now () in
+      Dav.make_user fs now config name pass >>= fun () ->
       Wm.continue true rd
 
   method content_types_provided rd =
@@ -263,13 +264,14 @@ class create_user config fs = object(self)
     ] rd
 end
 
-let init_users fs config user_password =
-  Lwt_list.iter_p (fun (u, p) -> Dav.make_user fs config u p) user_password >>= fun () ->
-  Dav.make_group fs config "group" "group-password" ["root" ; "test"]
+let init_users fs now config user_password =
+  Lwt_list.iter_p (fun (u, p) -> Dav.make_user fs now config u p) user_password >>= fun () ->
+  Dav.make_group fs now config "group" "group-password" ["root" ; "test"]
 
 let main () =
   Logs.set_reporter (Logs_fmt.reporter ());
   Logs.set_level (Some Logs.Debug);
+  let now = Ptime_clock.now () in
   (* listen on port 8080 *)
   let port = 8080
   and scheme = "http"
@@ -287,14 +289,14 @@ let main () =
   (* create the file system *)
   FS_unix.connect "/tmp/calendar" >>= fun fs ->
   (* only for apple test suite *)
-  (* initialize_fs_for_apple_testsuite fs config >>= fun () -> *)
-  Dav.initialize_fs fs config >>= fun () ->
+  (* initialize_fs_for_apple_testsuite fs now config >>= fun () -> *)
+  Dav.initialize_fs fs now config >>= fun () ->
   let user_password = [
     ("test", "password") ;
     ("root", "toor") ;
     ("nobody", "1")
   ] in
-  init_users fs config user_password >>= fun () ->
+  init_users fs now config user_password >>= fun () ->
   (* the route table *)
   let routes = [
     ("/.well-known/caldav", fun () -> new redirect config) ;

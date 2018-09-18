@@ -33,9 +33,9 @@ sig
 
   val verify_auth_header : state -> config -> string -> (string, string) result Lwt.t
 
-  val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> config -> string -> string -> unit Lwt.t
-  val make_group : state -> config -> string -> string -> string list -> unit Lwt.t
-  val initialize_fs : state -> config -> unit Lwt.t
+  val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> string -> string -> unit Lwt.t
+  val make_group : state -> Ptime.t -> config -> string -> string -> string list -> unit Lwt.t
+  val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
 end
 
 module Make (Fs: Webdav_fs.S) : S with type state = Fs.t
