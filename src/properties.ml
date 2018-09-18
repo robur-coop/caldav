@@ -204,24 +204,24 @@ let authorized_properties_for_resource ~auth_user_props requested_props propmap_
   in
   (requested_allowed, requested_forbidden)
 
+let find ~auth_user_props ~resource_props property_fqname =
+  let privileges = privileges auth_user_props resource_props in
+  if Privileges.can_read_prop property_fqname privileges
+  then match get_prop auth_user_props resource_props property_fqname with
+    | None -> Error `Not_found
+    | Some v -> Ok v
+  else Error `Forbidden
+
 (* checks sufficient privileges for "current-user-privilege-set" and "read-acl" via can_read_prop *)
-let find_many ~auth_user_props property_names m =
-  let privileges = privileges auth_user_props m in
-  let props = List.map (fun fqname ->
-    if Privileges.can_read_prop fqname privileges
-    then match get_prop auth_user_props m fqname with
-      | None -> `Not_found
-      | Some v -> `Found v
-    else `Forbidden
-  ) property_names in
+let find_many ~auth_user_props ~resource_props property_names =
+  let props = List.map (find ~auth_user_props ~resource_props) property_names in
   let results = List.map2 (fun (ns, name) p -> p, match p with
-    | `Found (a, c) -> Xml.node ~ns ~a name c
-    | `Forbidden
-    | `Not_found    -> Xml.node ~ns name []) property_names props
+    | Ok (a, c) -> Xml.node ~ns ~a name c
+    | Error _   -> Xml.node ~ns name []) property_names props
   in
   (* group by return code *)
-  let found, rest = List.partition (function | `Found _, _ -> true | _ -> false) results in
-  let not_found, forbidden = List.partition (function | `Not_found, _ -> true | `Forbidden, _ -> false | `Found _, _ -> assert false) rest in
+  let found, rest = List.partition (function | Ok _, _ -> true | _ -> false) results in
+  let not_found, forbidden = List.partition (function | Error `Not_found, _ -> true | Error `Forbidden, _ -> false | Ok _, _ -> assert false) rest in
   let apply_tag tag l = if l = [] then [] else [ tag, List.map snd l ] in
   apply_tag `OK found @ apply_tag `Not_found not_found @ apply_tag `Forbidden forbidden
 

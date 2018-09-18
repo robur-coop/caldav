@@ -1465,7 +1465,7 @@ let find_many_acl_props_empty_forbidden () =
   and fqname = [ (Xml.dav_ns, "acl") ]
   and properties = Properties.empty
   and expected = [ (`Forbidden, [ Xml.dav_node "acl" [] ]) ] in
-  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops fqname properties))
+  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops properties fqname))
 
 let find_many_acl aces () =
   let userprops = snd @@ user "read-acl"
@@ -1473,7 +1473,7 @@ let find_many_acl aces () =
   and aces_xml = List.map Xml.ace_to_xml (snd aces) in
   let properties = make_properties fqname ([], aces_xml) in
   let expected = [ (`OK, [ Xml.dav_node "acl" aces_xml ]) ] in
-  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops [fqname] properties))
+  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops properties [fqname]))
 
 let find_many_acl_forbidden principal aces () =
   let userprops = snd @@ user principal
@@ -1481,14 +1481,14 @@ let find_many_acl_forbidden principal aces () =
   and aces_xml = List.map Xml.ace_to_xml (snd aces) in
   let properties = make_properties fqname ([], aces_xml) in
   let expected = [ (`Forbidden, [ Xml.dav_node "acl" [] ]) ] in
-  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops [fqname] properties))
+  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops properties [fqname]))
 
 let find_many_current_user_privset_empty_forbidden () =
   let userprops = Properties.empty
   and fqname = [ (Xml.dav_ns, "current-user-privilege-set") ]
   and properties = Properties.empty
   and expected = [ (`Forbidden, [ Xml.dav_node "current-user-privilege-set" [] ]) ] in
-  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops fqname properties))
+  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops properties fqname))
 
 let find_many_current_user_privset_forbidden principal aces () =
   let userprops = snd @@ user principal
@@ -1496,7 +1496,7 @@ let find_many_current_user_privset_forbidden principal aces () =
   and aces_xml = List.map Xml.ace_to_xml (snd aces) in
   let properties = make_properties (Xml.dav_ns, "acl") ([], aces_xml) in
   let expected = [ (`Forbidden, [ Xml.dav_node "current-user-privilege-set" [] ]) ] in
-  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops fqname properties))
+  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops properties fqname))
 
 let find_many_current_user_privset principal aces privilege () =
   let userprops = snd @@ user principal
@@ -1505,7 +1505,7 @@ let find_many_current_user_privset principal aces privilege () =
   let properties = make_properties (Xml.dav_ns, "acl") ([], aces_xml) in
   let privilege_set = [ Xml.dav_node "privilege" [ Xml.priv_to_xml privilege ]] in
   let expected = [ (`OK, [ Xml.dav_node "current-user-privilege-set" privilege_set ]) ] in
-  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops [fqname] properties))
+  Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops properties [fqname]))
 
 
 let properties_find_many_tests = [

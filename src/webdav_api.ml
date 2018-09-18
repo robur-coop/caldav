@@ -48,7 +48,7 @@ module Make(Fs: Webdav_fs.S) = struct
 
   let is_calendar fs file =
     Fs.get_property_map fs file >|= fun map ->
-    (* TODO access check missing *)
+    (* unsafe is ok, used internally for decision *)
     match Properties.unsafe_find (Xml.dav_ns, "resourcetype") map with
     | None -> false
     | Some (_, trees) ->
@@ -242,15 +242,15 @@ module Make(Fs: Webdav_fs.S) = struct
     Uri.to_string @@ Uri.with_path host (Fs.to_string f_or_d)
 
   let property_selector fs host propfind_request auth_user_props f_or_d =
-    Fs.get_property_map fs f_or_d >|= fun map ->
-    if map = Properties.empty
+    Fs.get_property_map fs f_or_d >|= fun resource_props ->
+    if resource_props = Properties.empty
     then `Not_found
     else
       (* results for props, grouped by code *)
       let propstats = match propfind_request with
-        | `Propname -> [`OK, Properties.names map]
-        | `All_prop includes -> [`OK, Properties.all map] (* TODO: finish this *)
-        | `Props ps -> Properties.find_many ~auth_user_props ps map
+        | `Propname -> [`OK, Properties.names resource_props]
+        | `All_prop includes -> [`OK, Properties.all resource_props] (* TODO: finish this *)
+        | `Props ps -> Properties.find_many ~auth_user_props ~resource_props ps
       in
       let ps = List.map propstat_node propstats in
       let selected_properties =
@@ -290,20 +290,25 @@ module Make(Fs: Webdav_fs.S) = struct
       | Error _ -> assert false
       | Ok els -> process_files fs host (`Dir data) req els
 
-  let propfind fs config ~path ~user ~depth ~data =
+  let build_req_tree fs config path user data =
     Fs.from_string fs path >>= function
     | Error _ -> Lwt.return @@ Error `Bad_request
     | Ok f_or_d ->
-      properties_for_current_user fs config user >>= fun auth_user_props ->
+      properties_for_current_user fs config user >|= fun auth_user_props ->
       match Xml.string_to_tree data with
-      | None -> Lwt.return @@ Error `Bad_request
-      | Some req_tree -> match parse_depth depth with
-        | Error `Bad_request -> Lwt.return (Error `Bad_request)
-        | Ok depth -> match Xml.parse_propfind_xml req_tree with
-          | Error _ -> Lwt.return (Error `Property_not_found)
-          | Ok req -> propfind fs f_or_d config.host req auth_user_props depth >|= function
-            | Error e -> Error e
-            | Ok resp_tree -> Ok (Xml.tree_to_string resp_tree)
+      | None -> Error `Bad_request
+      | Some req_tree -> Ok (f_or_d, auth_user_props, req_tree)
+
+  let propfind fs config ~path ~user ~depth ~data =
+    build_req_tree fs config path user data >>= function
+    | Error e -> Lwt.return @@ Error e
+    | Ok (f_or_d, auth_user_props, req_tree) -> match parse_depth depth with
+      | Error `Bad_request -> Lwt.return (Error `Bad_request)
+      | Ok depth -> match Xml.parse_propfind_xml req_tree with
+        | Error _ -> Lwt.return (Error `Property_not_found)
+        | Ok req -> propfind fs f_or_d config.host req auth_user_props depth >|= function
+          | Error e -> Error e
+          | Ok resp_tree -> Ok (Xml.tree_to_string resp_tree)
 
   let update_properties fs f_or_d updates =
     Fs.get_property_map fs f_or_d >>= fun map ->
@@ -316,36 +321,38 @@ module Make(Fs: Webdav_fs.S) = struct
     | Ok () -> Ok propstats
 
   let proppatch fs config ~path ~user ~data =
-    Fs.from_string fs path >>= function
-    | Error _ -> Lwt.return @@ Error `Bad_request
-    | Ok f_or_d ->
-      properties_for_current_user fs config user >>= fun auth_user_props ->
-      match Xml.string_to_tree data with
-      | None -> Lwt.return @@ Error `Bad_request
-      | Some req_tree -> match Xml.parse_propupdate_xml req_tree with
-        | Error _ -> Lwt.return @@ Error `Bad_request
-        | Ok updates ->
-          update_properties fs f_or_d updates >|= function
-          | Error _      -> Error `Bad_request
-          | Ok propstats ->
-            let nodes =
-              Xml.dav_node "response"
-                (Xml.dav_node "href" [ Xml.Pcdata (uri_string config.host f_or_d) ] :: propstats)
-            in
-            let resp = multistatus [ nodes ] in
-            Ok (Xml.tree_to_string resp)
+    build_req_tree fs config path user data >>= function
+    | Error e -> Lwt.return @@ Error e
+    | Ok (f_or_d, auth_user_props, req_tree) -> match Xml.parse_propupdate_xml req_tree with
+      | Error _ -> Lwt.return @@ Error `Bad_request
+      | Ok updates -> update_properties fs f_or_d updates >|= function
+        | Error _      -> Error `Bad_request
+        | Ok propstats ->
+          let nodes =
+            Xml.dav_node "response"
+              (Xml.dav_node "href" [ Xml.Pcdata (uri_string config.host f_or_d) ] :: propstats)
+          in
+          let resp = multistatus [ nodes ] in
+          Ok (Xml.tree_to_string resp)
 
-  let data_to_proppatch = function
+  let mkcol_tree_to_proppatch = function
     | None -> Ok []
     | Some data' -> match Xml.parse_mkcol_xml data' with
       | Error _ -> Error `Bad_request
       | Ok set_props -> Ok set_props
 
-  let calendar_to_collection data =
-    if data = "" then Ok "" else
-    match Xml.string_to_tree data with
-    | Some (Xml.Node (ns, "mkcalendar", a, c)) when ns = Xml.caldav_ns -> Ok (Xml.tyxml_to_body @@ Xml.tree_to_tyxml @@ Xml.node ~ns:Xml.dav_ns ~a "mkcol" c)
-    | _ -> Error `Bad_request
+  let create_collection_dir fs parent_acl set_props now resourcetype dir =
+    let col_props = Properties.create_dir ~resourcetype parent_acl now (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
+    match Properties.patch ~is_mkcol:true col_props set_props with
+    | None, errs ->
+      let propstats = List.map propstat_node errs in
+      let xml = Xml.dav_node "mkcol-response" propstats in
+      let res = Xml.tree_to_string xml in
+      Lwt.return @@ Error (`Forbidden res)
+    | Some map, _ ->
+      Fs.mkdir fs dir map >|= function
+      | Error _ -> Error `Conflict
+      | Ok () -> Ok ()
 
   (* assumption: path is a relative path! *)
   let mkcol fs config ~path ~user http_verb now ~data =
@@ -355,36 +362,21 @@ module Make(Fs: Webdav_fs.S) = struct
     Fs.dir_exists fs parent >>= function
     | false -> Lwt.return @@ Error `Conflict
     | true -> 
-      let resource_is_calendar, resourcetype, collection_data = match http_verb with
-      | `Other "MKCALENDAR" -> true, [Xml.node ~ns:Xml.caldav_ns "calendar" []], calendar_to_collection data
-      | `Other "MKCOL" -> false, [], Ok data
+      let resource_is_calendar, resourcetype = match http_verb with
+      | `Other "MKCALENDAR" -> true, [Xml.node ~ns:Xml.caldav_ns "calendar" []]
+      | `Other "MKCOL" -> false, []
       | _ -> assert false in
-      match collection_data with
-      | Error _ -> Lwt.return @@ Error `Conflict
-      | Ok collection -> match Xml.string_to_tree collection with
-        | None when collection <> "" -> Lwt.return @@ Error `Conflict
-        | collection_tree -> match data_to_proppatch collection_tree with
-          | Error e -> Lwt.return @@ Error e
-          | Ok set_props ->
-            is_calendar fs parent' >>= fun parent_is_calendar ->
-            if resource_is_calendar && parent_is_calendar
-            then Lwt.return @@ Error `Conflict
-            else
-              acl fs config user parent' >>= function
-              | Error `Forbidden -> Lwt.return @@ Error (`Forbidden "TODO") 
-              | Ok parent_acl ->
-                let col_props = Properties.create_dir ~resourcetype parent_acl now (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
-                match Properties.patch ~is_mkcol:true col_props set_props with
-                | None, errs ->
-                  let propstats = List.map propstat_node errs in
-                  let xml = Xml.dav_node "mkcol-response" propstats in
-                  Printf.printf "forbidden from data_to_props!\n" ;
-                  let res = Xml.tree_to_string xml in
-                  Lwt.return @@ Error (`Forbidden res)
-                | Some map, _ ->
-                  Fs.mkdir fs dir map >|= function
-                  | Error _ -> Error `Conflict
-                  | Ok () -> Ok ()
+      match Xml.string_to_tree data with
+      | None when data <> "" -> Lwt.return @@ Error `Conflict
+      | mkcol_tree -> match mkcol_tree_to_proppatch mkcol_tree with
+        | Error e -> Lwt.return @@ Error e
+        | Ok set_props ->
+          is_calendar fs parent' >>= fun parent_is_calendar ->
+          if resource_is_calendar && parent_is_calendar
+          then Lwt.return @@ Error `Conflict
+          else acl fs config user parent' >>= function
+            | Error `Forbidden -> Lwt.return @@ Error (`Forbidden "TODO") 
+            | Ok parent_acl -> create_collection_dir fs parent_acl set_props now resourcetype dir
 
   let check_in_bounds p s e = true
   let apply_to_params pfs p = true
@@ -789,10 +781,10 @@ module Make(Fs: Webdav_fs.S) = struct
       matches_timerange && matches_cfs && matches_pfs
     | _ -> false
 
-  let apply_transformation (t : Xml.report_prop option) d map ~auth_user_props = match t with
+  let apply_transformation (t : Xml.report_prop option) d resource_props ~auth_user_props = match t with
     | None -> [`OK, [Xml.node ~ns:Xml.caldav_ns "calendar-data" [Xml.pcdata (Icalendar.to_ics ~cr:false d)]]]
-    | Some `All_props -> [`OK, Properties.all map]
-    | Some `Propname -> [`OK, Properties.names map]
+    | Some `All_props -> [`OK, Properties.all resource_props]
+    | Some `Propname -> [`OK, Properties.names resource_props]
     | Some `Proplist ps ->
       let props, calendar_data_transform = List.partition (function `Prop _ -> true | _ -> false) ps in
       let calendar_data_transform' = match calendar_data_transform with
@@ -805,7 +797,7 @@ module Make(Fs: Webdav_fs.S) = struct
         | None -> d, None
         | Some ((filter, _, _) as tr) -> select_calendar_data d tr, filter
       in
-      let found_props = Properties.find_many ~auth_user_props props' map in
+      let found_props = Properties.find_many ~auth_user_props ~resource_props props' in
       let ok_props, rest_props = List.partition (fun (st, _) -> st = `OK) found_props in
       let ok_props' = List.flatten (List.map snd ok_props) in
       match snd output with (* kill whole calendar if comps are empty *)
@@ -915,16 +907,13 @@ module Make(Fs: Webdav_fs.S) = struct
     Ok (Xml.tree_to_string resp_tree)
 
   let report fs config ~path ~user ~data =
-    Fs.from_string fs path >>= function
-    | Error _ -> Lwt.return @@ Error `Bad_request
-    | Ok f_or_d -> match Xml.string_to_tree data with
-      | None -> Lwt.return @@ Error `Bad_request
-      | Some req_tree ->
-        properties_for_current_user fs config user >>= fun auth_user_props ->
-        match Xml.parse_calendar_query_xml req_tree, Xml.parse_calendar_multiget_xml req_tree with
-        | Ok calendar_query, _ -> handle_calendar_query_report calendar_query fs config.host f_or_d ~auth_user_props
-        | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget fs config.host f_or_d ~auth_user_props
-        | Error e, Error _ -> Lwt.return (Error `Bad_request)
+    build_req_tree fs config path user data >>= function
+    | Error e -> Lwt.return @@ Error e
+    | Ok (f_or_d, auth_user_props, req_tree) -> 
+      match Xml.parse_calendar_query_xml req_tree, Xml.parse_calendar_multiget_xml req_tree with
+      | Ok calendar_query, _ -> handle_calendar_query_report calendar_query fs config.host f_or_d ~auth_user_props
+      | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget fs config.host f_or_d ~auth_user_props
+      | Error e, Error _ -> Lwt.return (Error `Bad_request)
 
   let read_target_or_parent_properties fs path target_or_parent =
     (match target_or_parent with

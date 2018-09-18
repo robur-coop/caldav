@@ -747,7 +747,7 @@ let parse_mkcol_xml tree =
   let mkcol =
     tree_lift
       (fun _ lol -> Ok (List.flatten lol))
-      (name_ns "mkcol" dav_ns)
+      ((name_ns "mkcol" dav_ns) ||| (name_ns "mkcalendar" caldav_ns))
       set_parser
   in
   run mkcol tree

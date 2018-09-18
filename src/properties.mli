@@ -35,7 +35,10 @@ val create : ?initial_props:(Xml.fqname * property) list ->
 val create_dir : ?initial_props:(Xml.fqname * property) list ->
   ?resourcetype:Xml.tree list -> Xml.ace list -> Ptime.t -> string -> t
 
-val find_many : auth_user_props:t -> Xml.fqname list -> t ->
+val find : auth_user_props:t -> resource_props:t -> Xml.fqname -> 
+  (property, [> `Forbidden | `Not_found]) result
+
+val find_many : auth_user_props:t -> resource_props:t -> Xml.fqname list -> 
   (Cohttp.Code.status_code * Xml.tree list) list
 
 val all : t -> Xml.tree list
