@@ -64,15 +64,12 @@ module Make(Fs: Webdav_fs.S) = struct
   let acl fs config user path =
     properties_for_current_user fs config user >>= fun auth_user_props ->
     Fs.get_property_map fs path >|= fun resource_props ->
-    if not (Privileges.is_met ~requirement:`Read_acl @@
-            Properties.privileges ~auth_user_props resource_props)
-    then Error `Forbidden
-    (* we check above that Read_acl is allowed, TODO express with find_many *)
-    else match Properties.unsafe_find (Xml.dav_ns, "acl") resource_props with
-      | None -> Ok []
-      | Some (_, aces) ->
-        let aces' = List.map Xml.xml_to_ace aces in
-        Ok (List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces')
+    match Properties.find ~auth_user_props ~resource_props (Xml.dav_ns, "acl") with
+    | Error `Forbidden as e -> e
+    | Error `Not_found -> Ok []
+    | Ok (_, aces) ->
+      let aces' = List.map Xml.xml_to_ace aces in
+      Ok (List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces')
 
   let parse_calendar ~path data =
     match Icalendar.parse data with
