@@ -177,15 +177,9 @@ class handler config fs = object(self)
     Wm.continue deleted rd
 
   method last_modified rd =
-    Fs.from_string fs (self#path rd) >>= function
-    | Error _ -> Wm.continue None rd
-    | Ok f_or_d ->
-      Fs.get_property_map fs f_or_d >|= (fun map ->
-          (* no special property, already checked for resource *)
-        match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
-          | Some (_, [ Xml.Pcdata lm]) -> Some lm
-          | _ -> None) >>= fun res ->
-      Wm.continue res rd
+    let path = self#path rd in
+    Dav.last_modified fs ~path >>= fun lm ->
+    Wm.continue lm rd 
 
   method generate_etag rd =
     Fs.from_string fs (self#path rd) >>= function

@@ -27,6 +27,8 @@ sig
 
   val access_granted_for_acl : state -> config -> Cohttp.Code.meth -> path:string -> user:string -> bool Lwt.t
 
+  val last_modified : state -> path:string -> string option Lwt.t
+
   val compute_etag : string -> string
 
   val verify_auth_header : state -> config -> string -> (string, string) result Lwt.t

@@ -28,6 +28,8 @@ sig
 
   val access_granted_for_acl : state -> config -> Cohttp.Code.meth -> path:string -> user:string -> bool Lwt.t
 
+  val last_modified : state -> path:string -> string option Lwt.t
+
   val compute_etag : string -> string
 
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, string) result Lwt.t
@@ -966,6 +968,16 @@ let verify_auth_header fs config v =
           | _ -> Error "invalid user"
     end
   | _ -> Lwt.return @@ Error "bad header"
+
+let last_modified fs ~path =
+  Fs.from_string fs path >>= function
+  | Error _ -> Lwt.return None
+  | Ok f_or_d ->
+    Fs.get_property_map fs f_or_d >|= fun map ->
+    (* no special property, already checked for resource *)
+    match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
+    | Some (_, [ Xml.Pcdata lm]) -> Some lm
+    | _ -> None
 
 let server_ns = "http://calendarserver.org/ns/"
 let carddav_ns = "urn:ietf:params:xml:ns:carddav"
