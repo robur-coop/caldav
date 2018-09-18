@@ -22,7 +22,7 @@ sig
   val write_component : state -> config -> path:string -> user:string -> Ptime.t -> content_type:content_type -> data:string ->
     (string, [> `Bad_request | `Conflict | `Forbidden | `Internal_server_error ]) result Lwt.t
 
-  val delete : state -> path:Webdav_fs.file_or_dir -> Ptime.t -> state Lwt.t
+  val delete : state -> path:string -> Ptime.t -> bool Lwt.t
 
   val read : state -> path:string -> is_mozilla:bool -> (string * content_type, [> `Not_found ]) result Lwt.t
 
@@ -198,23 +198,26 @@ module Make(Fs: Webdav_fs.S) = struct
 
 
   let delete fs ~path now =
-    Fs.destroy fs path >>= fun res ->
-    let now = Ptime.to_rfc3339 now in
-    (* TODO for a collection/directory, the last modified is defined as maximum last modified of
-       all present files or directories.  If the directory is empty, its creationdate is used.
-       if we delete the last file in a directory, we need to update the getlastmodified property *)
-    let rec update_parent f_or_d =
-      let (`Dir parent) = Fs.parent f_or_d in
-      Fs.get_property_map fs (`Dir parent) >>= fun map ->
-      let map' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
-      Fs.write_property_map fs (`Dir parent) map' >>= function
-      | Error e -> assert false
-      | Ok () -> match parent with
-        | [] -> Lwt.return_unit
-        | dir -> update_parent (`Dir dir)
-    in
-    update_parent path >|= fun () ->
-    fs
+    Fs.from_string fs path >>= function
+    | Error _ -> Lwt.return false
+    | Ok f_or_d -> 
+      Fs.destroy fs f_or_d >>= fun res ->
+      let now = Ptime.to_rfc3339 now in
+      (* TODO for a collection/directory, the last modified is defined as maximum last modified of
+         all present files or directories.  If the directory is empty, its creationdate is used.
+         if we delete the last file in a directory, we need to update the getlastmodified property *)
+      let rec update_parent f_or_d =
+        let (`Dir parent) = Fs.parent f_or_d in
+        Fs.get_property_map fs (`Dir parent) >>= fun map ->
+        let map' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
+        Fs.write_property_map fs (`Dir parent) map' >>= function
+        | Error e -> assert false
+        | Ok () -> match parent with
+          | [] -> Lwt.return_unit
+          | dir -> update_parent (`Dir dir)
+      in
+      update_parent f_or_d >|= fun () ->
+      true
 
   let statuscode_to_string res =
     Format.sprintf "%s %s"

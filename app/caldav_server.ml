@@ -172,12 +172,9 @@ class handler config fs = object(self)
     | Ok _ -> Wm.continue `Created rd
 
   method delete_resource rd =
-    Fs.from_string fs (self#path rd) >>= function
-    | Error _ ->
-      Wm.continue false rd
-    | Ok f_or_d ->
-      Dav.delete fs ~path:f_or_d (Ptime_clock.now ()) >>= fun _ ->
-      Wm.continue true rd
+    let path = self#path rd in
+    Dav.delete fs ~path (Ptime_clock.now ()) >>= fun deleted ->
+    Wm.continue deleted rd
 
   method last_modified rd =
     Fs.from_string fs (self#path rd) >>= function

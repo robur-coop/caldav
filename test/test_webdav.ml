@@ -1252,8 +1252,8 @@ let delete_test () =
       in
       Mirage_fs_mem.write fs ".prop.xml" 0
         (Cstruct.of_string content') >>= fun _ ->
-      Dav.delete res_fs ~path:(`Dir [ "home" ]) now >|= fun r ->
-      (fs, r))
+      Dav.delete res_fs ~path:"home" now >|= fun deleted ->
+      (fs, res_fs))
   in
   Alcotest.(check state_testable __LOC__ res_fs r)
 

@@ -21,7 +21,7 @@ sig
   val write_component : state -> config -> path:string -> user:string -> Ptime.t -> content_type:content_type -> data:string ->
     (string, [> `Bad_request | `Conflict | `Forbidden | `Internal_server_error ]) result Lwt.t
 
-  val delete : state -> path:Webdav_fs.file_or_dir -> Ptime.t -> state Lwt.t
+  val delete : state -> path:string -> Ptime.t -> bool Lwt.t
 
   val read : state -> path:string -> is_mozilla:bool -> (string * content_type, [> `Not_found ]) result Lwt.t
 
