@@ -1,7 +1,9 @@
+type tree = Webdav_xml.tree
+type content_type = string
+
 module type S =
 sig
   type state
-  type tree = Webdav_xml.tree
 
   val mkcol : state -> path:Webdav_fs.dir -> Webdav_xml.ace list -> Ptime.t -> is_calendar: bool -> tree option ->
     (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
@@ -16,30 +18,18 @@ sig
   val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t ->
     (tree, [`Bad_request]) result Lwt.t
 
-  val write_component : state -> Webdav_config.config -> path:string -> Ptime.t -> content_type:string -> user:string -> data:string ->
+  val write_component : state -> Webdav_config.config -> path:string -> Ptime.t -> content_type:content_type -> user:string -> data:string ->
     (string, [> `Bad_request | `Conflict | `Forbidden | `Internal_server_error ]) result Lwt.t
 
   val delete : state -> path:Webdav_fs.file_or_dir -> Ptime.t -> state Lwt.t
 
-  (*
-  val get : state -> string ->
-
-  val head : state -> string ->
-
-  val post : state -> string -> ?? -> state
-
-  val put : state -> string ->
-
-  val read : state -> string ->
-  *)
+  val read : state -> path:string -> is_mozilla:bool -> (string * content_type, [> `Not_found ]) result Lwt.t
 
   val access_granted_for_acl : state -> string -> Cohttp.Code.meth -> Properties.t -> bool Lwt.t
 
   val compute_etag : string -> string
 
   val parent_acl : state -> Webdav_config.config -> string -> Webdav_fs.file_or_dir -> (Webdav_xml.ace list, [> `Forbidden ]) result Lwt.t
-  val directory_as_html : state -> Webdav_fs.dir -> string Lwt.t
-  val directory_as_ics : state -> Webdav_fs.dir -> string Lwt.t
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, string) result Lwt.t
   val properties_for_current_user : state -> Webdav_config.config -> string -> Properties.t Lwt.t
   val calendar_to_collection : string -> (string, [ `Bad_request ]) result

@@ -1,10 +1,11 @@
 module Xml = Webdav_xml
 open Webdav_config
+type tree = Xml.tree
+type content_type = string
 
 module type S =
 sig
   type state
-  type tree = Xml.tree
 
   val mkcol : state -> path:Webdav_fs.dir -> Xml.ace list -> Ptime.t -> is_calendar: bool -> tree option ->
     (state, [ `Bad_request | `Conflict | `Forbidden of tree ])
@@ -19,22 +20,12 @@ sig
   val report : state -> host:Uri.t -> path:Webdav_fs.file_or_dir -> tree -> auth_user_props:Properties.t ->
     (tree, [`Bad_request]) result Lwt.t
 
-  val write_component : state -> Webdav_config.config -> path:string -> Ptime.t -> content_type:string -> user:string -> data:string ->
+  val write_component : state -> Webdav_config.config -> path:string -> Ptime.t -> content_type:content_type -> user:string -> data:string ->
     (string, [> `Bad_request | `Conflict | `Forbidden | `Internal_server_error ]) result Lwt.t
 
   val delete : state -> path:Webdav_fs.file_or_dir -> Ptime.t -> state Lwt.t
 
-  (*
-  val get : state -> string ->
-
-  val head : state -> string ->
-
-  val post : state -> string -> ?? -> state
-
-  val put : state -> string ->
-
-  val read : state -> string ->
-  *)
+  val read : state -> path:string -> is_mozilla:bool -> (string * content_type, [> `Not_found ]) result Lwt.t
 
   val access_granted_for_acl : state -> string -> Cohttp.Code.meth -> Properties.t -> bool Lwt.t
 
@@ -42,8 +33,6 @@ sig
 
   val parent_acl : state -> config -> string -> Webdav_fs.file_or_dir -> (Xml.ace list, [> `Forbidden ]) result Lwt.t
 
-  val directory_as_html : state -> Webdav_fs.dir -> string Lwt.t
-  val directory_as_ics : state -> Webdav_fs.dir -> string Lwt.t
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, string) result Lwt.t
   val properties_for_current_user : state -> Webdav_config.config -> string -> Properties.t Lwt.t
   val calendar_to_collection : string -> (string, [ `Bad_request ]) result
@@ -58,7 +47,6 @@ module Make(Fs: Webdav_fs.S) = struct
   open Lwt.Infix
 
   type state = Fs.t
-  type tree = Webdav_xml.tree
 
   let compute_etag str = Digest.to_hex @@ Digest.string str
 
@@ -106,52 +94,139 @@ module Make(Fs: Webdav_fs.S) = struct
       let file = Fs.file_from_string path in
       Ok (ics, file)
 
-  let write_if_parent_exists state config (file : Webdav_fs.file) timestamp content_type user ics =
+  let write_if_parent_exists fs config (file : Webdav_fs.file) timestamp content_type user ics =
     let file' = (file :> Webdav_fs.file_or_dir) in
     let parent = Fs.parent file' in
     let parent' = (parent :> Webdav_fs.file_or_dir) in
-    Fs.dir_exists state parent >>= function
+    Fs.dir_exists fs parent >>= function
     | false ->
       Printf.printf "parent directory of %s does not exist\n" (Fs.to_string file') ;
       Lwt.return (Error `Conflict)
     | true ->
-      acl state config user parent' >>= function
+      acl fs config user parent' >>= function
       | Error e -> Lwt.return @@ Error `Forbidden
       | Ok acl -> 
-        is_calendar state parent' >>= function
+        is_calendar fs parent' >>= function
         | false -> Lwt.return @@ Error `Bad_request
         | true ->
           let etag = compute_etag ics in
           let props = Properties.create ~content_type ~etag
               acl timestamp (String.length ics) (Fs.to_string file')
           in
-          Fs.write state file (Cstruct.of_string ics) props >|= function
+          Fs.write fs file (Cstruct.of_string ics) props >|= function
           | Error e -> Error `Internal_server_error
           | Ok () -> Ok etag
 
-  let write_component state config ~path timestamp ~content_type ~user ~data =
+  let write_component fs config ~path timestamp ~content_type ~user ~data =
     match parse_calendar ~path data with
     | Error e -> Lwt.return @@ Error e
-    | Ok (ics, file) -> write_if_parent_exists state config file timestamp content_type user ics
+    | Ok (ics, file) -> write_if_parent_exists fs config file timestamp content_type user ics
 
-  let delete state ~path now =
-    Fs.destroy state path >>= fun res ->
+  (* out: ( name * typ * last_modified ) list - non-recursive *)
+  let list_dir fs (`Dir dir) =
+    let list_file f_or_d =
+      (* maybe implement a Fs.get_property? *)
+      Fs.get_property_map fs f_or_d >|= fun m ->
+      (* restore last modified from properties as a workaround because the file system does not provide it *)
+      let last_modified = match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") m with
+        | Some (_, [ Xml.Pcdata lm ]) -> lm
+        | _ -> assert false
+      in
+      let is_dir = match f_or_d with
+        | `File _ -> false | `Dir _ -> true
+      in
+      (Fs.to_string f_or_d, is_dir, last_modified)
+    in
+    Fs.listdir fs (`Dir dir) >>= function
+    | Error e -> assert false
+    | Ok files -> Lwt_list.map_p list_file files
+
+  let directory_as_html fs (`Dir dir) =
+    list_dir fs (`Dir dir) >|= fun files ->
+    let print_file (file, is_dir, last_modified) =
+      Printf.sprintf "<tr><td><a href=\"%s\">%s</a></td><td>%s</td><td>%s</td></tr>"
+        file file (if is_dir then "directory" else "text/calendar") last_modified in
+    let data = String.concat "\n" (List.map print_file files) in
+    (data, "text/html")
+  
+  let directory_etag fs (`Dir dir) =
+    directory_as_html fs (`Dir dir) >|= fun (data, ct) ->
+    compute_etag data
+  
+  let directory_as_ics fs (`Dir dir) =
+    let calendar_components = function
+      | `Dir d ->
+        Printf.printf "calendar components of directory %s\n%!" (Fs.to_string (`Dir d)) ;
+        Lwt.return []
+        (* assert false (* CalDAV forbids nested calendars *) *)
+      | `File f ->
+        Fs.read fs (`File f) >|= function
+        | Error _ -> Printf.printf "error while reading file!\n" ; []
+        | Ok (data, _props) ->
+          match Icalendar.parse (Cstruct.to_string data) with
+          | Ok calendar -> snd calendar
+          | Error e -> Printf.printf "error %s while parsing ics\n" e ; []
+    in
+    Fs.listdir fs (`Dir dir) >>= function
+    | Error _ -> assert false (* previously checked that directory exists *)
+    | Ok files ->
+      (* TODO: hardcoded calprops, put them elsewhere *)
+      Fs.get_property_map fs (`Dir dir) >>= fun props ->
+      let empty = Icalendar.Params.empty in
+      let name =
+        (* instantiate the calendar name from the displayname property *)
+        match Properties.unsafe_find (Xml.dav_ns, "displayname") props with
+        | Some (_, [ Xml.Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), empty, name) ]
+        | _ -> []
+      in
+      let calprops = [
+        `Prodid (empty, "-//ROBUR.IO//EN") ;
+        `Version (empty, "2.0")
+      ] @ name in
+      Lwt_list.map_p calendar_components files >|= fun components ->
+      let data = Icalendar.to_ics (calprops, List.flatten components) in
+      (data, "text/calendar")
+
+  let read fs ~path ~is_mozilla =
+    Fs.from_string fs path >>= function
+    | Error _ -> Lwt.return @@ Error `Not_found
+    | Ok (`Dir dir) ->
+      (if is_mozilla then
+        directory_as_html fs (`Dir dir)
+      else
+        (* TODO: check wheter CalDAV:calendar property is set as resourcetype!
+           otherwise: standard WebDAV directory listing *)
+        directory_as_ics fs (`Dir dir)) >|= fun res ->
+      Ok res 
+    | Ok (`File f) ->
+      Fs.read fs (`File f) >|= function
+      | Error _ -> Error `Not_found
+      | Ok (data, props) ->
+      (* this property only needs read, which has been checked on the resource already *)
+      let ct = match Properties.unsafe_find (Xml.dav_ns, "getcontenttype") props with
+        | Some (_, [ Xml.Pcdata ct ]) -> ct
+        | _ -> "text/calendar" in
+      Ok (ct, Cstruct.to_string data)
+
+
+  let delete fs ~path now =
+    Fs.destroy fs path >>= fun res ->
     let now = Ptime.to_rfc3339 now in
     (* TODO for a collection/directory, the last modified is defined as maximum last modified of
        all present files or directories.  If the directory is empty, its creationdate is used.
        if we delete the last file in a directory, we need to update the getlastmodified property *)
     let rec update_parent f_or_d =
       let (`Dir parent) = Fs.parent f_or_d in
-      Fs.get_property_map state (`Dir parent) >>= fun map ->
+      Fs.get_property_map fs (`Dir parent) >>= fun map ->
       let map' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
-      Fs.write_property_map state (`Dir parent) map' >>= function
+      Fs.write_property_map fs (`Dir parent) map' >>= function
       | Error e -> assert false
       | Ok () -> match parent with
         | [] -> Lwt.return_unit
         | dir -> update_parent (`Dir dir)
     in
     update_parent path >|= fun () ->
-    state
+    fs
 
   let statuscode_to_string res =
     Format.sprintf "%s %s"
@@ -222,14 +297,14 @@ module Make(Fs: Webdav_fs.S) = struct
       | Error _ -> assert false
       | Ok els -> process_files fs host (`Dir data) req els
 
-  let propfind state ~host ~path tree ~auth_user_props ~depth =
+  let propfind fs ~host ~path tree ~auth_user_props ~depth =
     match parse_depth depth with
     | Error `Bad_request -> Lwt.return (Error `Bad_request)
     | Ok depth ->
       match Xml.parse_propfind_xml tree with
       | Error _ -> Lwt.return (Error `Property_not_found)
       | Ok req ->
-        propfind state path host req auth_user_props depth >|= function
+        propfind fs path host req auth_user_props depth >|= function
         | Ok data -> Ok data
         | Error e -> Error e
 
@@ -243,11 +318,11 @@ module Make(Fs: Webdav_fs.S) = struct
     | Error e -> Error e
     | Ok () -> Ok propstats
 
-  let proppatch state ~host ~path data ~auth_user_props =
+  let proppatch fs ~host ~path data ~auth_user_props =
     match Xml.parse_propupdate_xml data with
     | Error _ -> Lwt.return (Error `Bad_request)
     | Ok updates ->
-      update_properties state path updates >|= function
+      update_properties fs path updates >|= function
       | Error _      -> Error `Bad_request
       | Ok propstats ->
         let nodes =
@@ -255,7 +330,7 @@ module Make(Fs: Webdav_fs.S) = struct
             (Xml.dav_node "href" [ Xml.Pcdata (uri_string host path) ] :: propstats)
         in
         let status = multistatus [ nodes ] in
-        Ok (state, status)
+        Ok (fs, status)
 
   let data_to_proppatch = function
     | None -> Ok []
@@ -264,10 +339,10 @@ module Make(Fs: Webdav_fs.S) = struct
       | Ok set_props -> Ok set_props
 
   (* assumption: path is a relative path! *)
-  let mkcol state ~path:(`Dir d as dir) acl now ~is_calendar data =
+  let mkcol fs ~path:(`Dir d as dir) acl now ~is_calendar data =
     (* TODO: move to caller *)
     let parent = Fs.parent dir in
-    Fs.dir_exists state parent >>= function
+    Fs.dir_exists fs parent >>= function
     | false -> Lwt.return (Error `Conflict)
     | true -> match data_to_proppatch data with
       | Error e -> Lwt.return (Error e)
@@ -281,9 +356,9 @@ module Make(Fs: Webdav_fs.S) = struct
           Printf.printf "forbidden from data_to_props!\n" ;
           Lwt.return @@ Error (`Forbidden xml)
         | Some map, _ ->
-          Fs.mkdir state dir map >|= function
+          Fs.mkdir fs dir map >|= function
           | Error _ -> Error `Conflict
-          | Ok () -> Ok state
+          | Ok () -> Ok fs
 
   let check_in_bounds p s e = true
   let apply_to_params pfs p = true
@@ -720,11 +795,11 @@ module Make(Fs: Webdav_fs.S) = struct
     else
       []
 
-  let handle_calendar_query_report calendar_query state host path ~auth_user_props =
+  let handle_calendar_query_report calendar_query fs host path ~auth_user_props =
     let report_one query = function
       | `Dir _ -> Lwt.return (Error `Bad_request)
       | `File f ->
-        Fs.read state (`File f) >|= function
+        Fs.read fs (`File f) >|= function
         | Error _ -> Error `Bad_request
         | Ok (data, props) ->
           let privileges = Properties.privileges ~auth_user_props props in
@@ -758,7 +833,7 @@ module Make(Fs: Webdav_fs.S) = struct
         | Error e -> Error e
       end
     | `Dir d ->
-      Fs.listdir state (`Dir d) >>= function
+      Fs.listdir fs (`Dir d) >>= function
       | Error _ -> Lwt.return (Error `Bad_request)
       | Ok files ->
         Lwt_list.map_p (report_one calendar_query) files >>= fun responses ->
@@ -770,11 +845,11 @@ module Make(Fs: Webdav_fs.S) = struct
             | Error _ -> acc) [] responses in
         Lwt.return (Ok (multistatus responses'))
 
-  let handle_calendar_multiget_report (transformation, filenames) state host path ~auth_user_props =
+  let handle_calendar_multiget_report (transformation, filenames) fs host path ~auth_user_props =
     let report_one (filename : string) =
       Printf.printf "calendar_multiget: filename %s\n%!" filename ;
       let file = Fs.file_from_string filename in
-      Fs.read state file >|= function
+      Fs.read fs file >|= function
       | Error _ ->
         let node =
           Xml.dav_node "response"
@@ -811,10 +886,10 @@ module Make(Fs: Webdav_fs.S) = struct
         | Error _ -> acc) [] responses in
     Lwt.return (Ok (multistatus @@ List.rev responses'))
 
-  let report state ~host ~path req ~auth_user_props =
+  let report fs ~host ~path req ~auth_user_props =
     match Xml.parse_calendar_query_xml req, Xml.parse_calendar_multiget_xml req with
-    | Ok calendar_query, _ -> handle_calendar_query_report calendar_query state host path ~auth_user_props
-    | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget state host path ~auth_user_props
+    | Ok calendar_query, _ -> handle_calendar_query_report calendar_query fs host path ~auth_user_props
+    | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget fs host path ~auth_user_props
     | Error e, Error _ -> Lwt.return (Error `Bad_request)
 
   let read_target_or_parent_properties fs path target_or_parent =
@@ -833,70 +908,6 @@ module Make(Fs: Webdav_fs.S) = struct
     Privileges.is_met ~requirement privileges
 
   (* moved from Caldav_server *)
-
-  (* assumption: path is a directory - otherwise we return none *)
-(* out: ( name * typ * last_modified ) list - non-recursive *)
-let list_dir fs (`Dir dir) =
-  let list_file f_or_d =
-    (* maybe implement a Fs.get_property? *)
-    Fs.get_property_map fs f_or_d >|= fun m ->
-    (* restore last modified from properties as a workaround because the file system does not provide it *)
-    let last_modified = match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") m with
-      | Some (_, [ Xml.Pcdata lm ]) -> lm
-      | _ -> assert false
-    in
-    let is_dir = match f_or_d with
-      | `File _ -> false | `Dir _ -> true
-    in
-    (Fs.to_string f_or_d, is_dir, last_modified)
-  in
-  Fs.listdir fs (`Dir dir) >>= function
-  | Error e -> assert false
-  | Ok files -> Lwt_list.map_p list_file files
-
-let directory_as_html fs (`Dir dir) =
-  list_dir fs (`Dir dir) >|= fun files ->
-  let print_file (file, is_dir, last_modified) =
-    Printf.sprintf "<tr><td><a href=\"%s\">%s</a></td><td>%s</td><td>%s</td></tr>"
-      file file (if is_dir then "directory" else "text/calendar") last_modified in
-  String.concat "\n" (List.map print_file files)
-
-let directory_etag fs (`Dir dir) =
-  directory_as_html fs (`Dir dir) >|= fun data ->
-  compute_etag data
-
-let directory_as_ics fs (`Dir dir) =
-  let calendar_components = function
-    | `Dir d ->
-      Printf.printf "calendar components of directory %s\n%!" (Fs.to_string (`Dir d)) ;
-      Lwt.return []
-      (* assert false (* CalDAV forbids nested calendars *) *)
-    | `File f ->
-      Fs.read fs (`File f) >|= function
-      | Error _ -> Printf.printf "error while reading file!\n" ; []
-      | Ok (data, _props) ->
-        match Icalendar.parse (Cstruct.to_string data) with
-        | Ok calendar -> snd calendar
-        | Error e -> Printf.printf "error %s while parsing ics\n" e ; []
-  in
-  Fs.listdir fs (`Dir dir) >>= function
-  | Error _ -> assert false (* previously checked that directory exists *)
-  | Ok files ->
-    (* TODO: hardcoded calprops, put them elsewhere *)
-    Fs.get_property_map fs (`Dir dir) >>= fun props ->
-    let empty = Icalendar.Params.empty in
-    let name =
-      (* instantiate the calendar name from the displayname property *)
-      match Properties.unsafe_find (Xml.dav_ns, "displayname") props with
-      | Some (_, [ Xml.Pcdata name ]) -> [ `Xprop (("WR", "CALNAME"), empty, name) ]
-      | _ -> []
-    in
-    let calprops = [
-      `Prodid (empty, "-//ROBUR.IO//EN") ;
-      `Version (empty, "2.0")
-    ] @ name in
-    Lwt_list.map_p calendar_components files >|= fun components ->
-    Icalendar.to_ics (calprops, List.flatten components)
 
 let hash_password password =
   let server_secret = "server_secret--" in

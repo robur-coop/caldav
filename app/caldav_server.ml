@@ -66,40 +66,22 @@ class handler config fs = object(self)
     Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
     let path = self#path rd in
     let content_type = Headers.get_content_type rd.req_headers in
-    Dav.write_component fs config ~path (Ptime_clock.now ()) ~content_type ~user:(Headers.get_user rd.req_headers) ~data:body >>= function
+    let user = Headers.get_user rd.req_headers in
+    Dav.write_component fs config ~path (Ptime_clock.now ()) ~content_type ~user ~data:body >>= function
     | Error e -> Wm.respond (to_status e) rd
     | Ok etag ->
-      let rd' = with_resp_headers (Headers.replace_etag_add_location etag (Uri.with_path config.host path)) rd in
+      let location = Uri.with_path config.host path in
+      let rd' = with_resp_headers (Headers.replace_etag_add_location etag location) rd in
       Wm.continue true rd'
 
   method private read_calendar rd =
-    let file = self#path rd in
-    let mozilla = Headers.is_user_agent_mozilla rd.req_headers in
-
-    let (>>==) a f = a >>= function
-    | Error e ->
-      Format.printf "Error %s: %a\n" file Fs.pp_error e ;
-      Wm.continue `Empty rd
-    | Ok res  -> f res in
-
-    Fs.from_string fs file >>== function
-    | `Dir dir ->
-      if mozilla then
-        Dav.directory_as_html fs (`Dir dir) >>= fun listing ->
-        Wm.continue (`String listing) rd
-      else
-        (* TODO: check wheter CalDAV:calendar property is set as resourcetype!
-           otherwise: standard WebDAV directory listing *)
-        Dav.directory_as_ics fs (`Dir dir) >>= fun data ->
-        Wm.continue (`String data) rd
-    | `File f ->
-      Fs.read fs (`File f) >>== fun (data, props) ->
-      (* this property only needs read, which has been checked on the resource already *)
-      let ct = match Properties.unsafe_find (Xml.dav_ns, "getcontenttype") props with
-        | Some (_, [ Xml.Pcdata ct ]) -> ct
-        | _ -> "text/calendar" in
-      let rd' = with_resp_headers (Headers.replace_content_type ct) rd in
-      Wm.continue (`String (Cstruct.to_string data)) rd'
+    let path = self#path rd in
+    let is_mozilla = Headers.is_user_agent_mozilla rd.req_headers in
+    Dav.read fs ~path ~is_mozilla >>= function
+    | Error e -> Wm.respond (to_status e) rd 
+    | Ok (body, content_type) ->
+      let rd' = with_resp_headers (Headers.replace_content_type content_type) rd in
+      Wm.continue (`String body) rd'
 
   method allowed_methods rd =
     Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "MKCOL"; `Other "MKCALENDAR" ; `Other "REPORT" ; `Other "ACL" ] rd
