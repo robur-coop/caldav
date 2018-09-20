@@ -273,7 +273,7 @@ class create_user config fs = object(self)
     | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
     | Ok name ->
       Dav.delete_user fs config name >>= function
-      | Error `Internal_server_error -> Wm.respond (to_status `Internal_server_error) rd
+      | Error e -> Wm.respond (to_status e) rd
       | Ok () -> Wm.continue true rd
 
   method is_conflict rd =
