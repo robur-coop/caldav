@@ -251,6 +251,11 @@ class create_user config fs = object(self)
     | None -> Error `Bad_request
     | Some x -> if not (sane x) then Error `Bad_request else Ok x
 
+  method private requested_password rd =
+    match Uri.get_query_param rd.uri "password" with
+    | None -> Error `Bad_request
+    | Some x -> Ok x
+
   method allowed_methods rd =
     Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
 
@@ -258,9 +263,9 @@ class create_user config fs = object(self)
     Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
 
   method private create_user rd =
-    match self#requested_user rd, Uri.get_query_param rd.uri "password" with
-    | Error _, _ | _, None -> Wm.respond (to_status `Bad_request) rd
-    | Ok name, Some pass ->
+    match self#requested_user rd, self#requested_password rd with
+    | Error _, _ | _, Error _ -> Wm.respond (to_status `Bad_request) rd
+    | Ok name, Ok pass ->
       let now = now () in
       Dav.make_user fs now config name pass >>= fun principal_url ->
       let rd' = with_resp_headers (Headers.replace_location principal_url) rd in
@@ -281,7 +286,15 @@ class create_user config fs = object(self)
     | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
     | Ok name ->
       Fs.dir_exists fs (`Dir [config.principals ; name ]) >>= fun user_exists ->
-      Wm.continue user_exists rd
+      (* TODO this is a hack to overload PUT /user for creation of new users and password changes *)
+      match user_exists, self#requested_password rd with
+      | true, Ok new_pass ->
+        begin
+          Dav.change_password fs config name new_pass >>= function
+          | Ok () -> Wm.respond (to_status `OK) rd
+          | Error e -> Wm.respond (to_status e) rd
+        end
+      | _, _ -> Wm.continue user_exists rd
 
   method content_types_provided rd =
     Wm.continue [ ("*/*", Wm.continue `Empty) ] rd
@@ -332,8 +345,10 @@ let main () =
     principals ;
     calendars = "calendars" ;
     host ;
-    admin_only_acl = [ (`Href (Uri.with_path host @@ "/" ^ principals ^ "/root/"),
-                        `Grant [ `All ]) ; (`All, `Grant [`Read]) ]
+    admin_only_acl = [
+      (`Href (Uri.with_path host @@ "/" ^ principals ^ "/root/"), `Grant [ `All ]) ;
+      (`All, `Grant [ `Read ])
+    ]
   } in
   (* create the file system *)
   FS_unix.connect "/tmp/calendar" >>= fun fs ->

@@ -40,6 +40,9 @@ sig
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val make_group : state -> Ptime.t -> config -> string -> string -> string list -> unit Lwt.t
+
+  val change_password : state -> config -> string -> string -> (unit, [> `Internal_server_error ]) result Lwt.t
+
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
 end
 
@@ -1057,6 +1060,20 @@ let initialize_fs fs now config =
   make_dir_if_not_present fs now config.admin_only_acl (`Dir [config.calendars]) >>= fun _ ->
   Lwt.return_unit
 
+let change_password fs config name password =
+  let principal_dir = `Dir [ config.principals ; name ] in
+  Fs.get_property_map fs principal_dir >>= fun auth_user_props ->
+  let auth_user_props' =
+    Properties.unsafe_add (Xml.robur_ns, "password")
+      ([], [Xml.pcdata @@ hash_password password]) auth_user_props
+  in
+  Fs.write_property_map fs principal_dir auth_user_props' >|= function
+  | Error e ->
+    Log.err (fun m -> m "error %a while writing properties" Fs.pp_write_error e) ;
+    Error `Internal_server_error
+  | Ok () -> Ok ()
+
+
 let make_user ?(props = []) fs now config name password =
   let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
   let get_url dir = Uri.with_path config.host (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
@@ -1074,9 +1091,10 @@ let make_user ?(props = []) fs now config name password =
     :: props
   in
   let acl = [ (`Href principal_url, `Grant [ `All ]) ; (`All, `Grant [ `Read ]) ] in
-  (* TODO should root have access to principals/user? *)
-  make_dir_if_not_present fs now acl ~resourcetype ~props:props' principal_dir >>= fun _ ->
-  make_dir_if_not_present fs now acl home_set_dir >>= fun _ ->
+  let acl' = config.admin_only_acl @ acl in
+  (* maybe only allow root to write principal_dir (for password reset) *)
+  make_dir_if_not_present fs now acl' ~resourcetype ~props:props' principal_dir >>= fun _ ->
+  make_dir_if_not_present fs now acl' home_set_dir >>= fun _ ->
   create_calendar fs now acl (`Dir [config.calendars ; name ; "calendar"]) >|= fun _ ->
   principal_url
 

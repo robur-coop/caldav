@@ -39,6 +39,9 @@ sig
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val make_group : state -> Ptime.t -> config -> string -> string -> string list -> unit Lwt.t
+
+  val change_password : state -> config -> string -> string -> (unit, [> `Internal_server_error ]) result Lwt.t
+
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
 end
 
