@@ -1102,7 +1102,9 @@ let make_group fs now config name password members =
       (* TODO should use find_many *)
       let props' = match Properties.unsafe_find group_key props with
         | None -> Properties.unsafe_add group_key ([], [ group_node ]) props
-        | Some (attrs, groups) -> Properties.unsafe_add group_key (attrs, group_node :: groups) props
+        | Some (attrs, groups) ->
+          let groups' = if List.mem group_node groups then groups else group_node :: groups in
+          Properties.unsafe_add group_key (attrs, groups') props
       in
       Fs.write_property_map fs f_or_d props' >>= fun _ ->
       Lwt.return_unit)
