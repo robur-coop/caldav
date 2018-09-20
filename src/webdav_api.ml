@@ -10,13 +10,13 @@ sig
   val mkcol : state -> config -> path:string -> user:string -> Cohttp.Code.meth -> Ptime.t -> data:string ->
     (unit, [ `Bad_request | `Conflict | `Forbidden of string ]) result Lwt.t
 
-  val propfind : state -> config -> path:string -> user:string -> depth:string option -> data:string -> 
+  val propfind : state -> config -> path:string -> user:string -> depth:string option -> data:string ->
     (string, [> `Bad_request | `Forbidden of string | `Property_not_found ]) result Lwt.t
 
-  val proppatch : state -> config -> path:string -> user:string -> data:string -> 
+  val proppatch : state -> config -> path:string -> user:string -> data:string ->
     (string, [> `Bad_request ]) result Lwt.t
 
-  val report : state -> config -> path:string -> user:string -> data:string -> 
+  val report : state -> config -> path:string -> user:string -> data:string ->
     (string, [> `Bad_request ]) result Lwt.t
 
   val write_component : state -> config -> path:string -> user:string -> Ptime.t -> content_type:content_type -> data:string ->
@@ -34,7 +34,9 @@ sig
 
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, string) result Lwt.t
 
-  val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> string -> string -> unit Lwt.t
+  val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> string -> string ->
+    Uri.t Lwt.t
+
   val make_group : state -> Ptime.t -> config -> string -> string -> string list -> unit Lwt.t
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
 end
@@ -59,7 +61,7 @@ module Make(Fs: Webdav_fs.S) = struct
        | Xml.Node (ns, "calendar", _, _) when ns = Xml.caldav_ns -> true
        | _ -> false in
        List.exists calendar_node trees
- 
+
   let properties_for_current_user fs config user =
     let user_path = `Dir [ config.principals ; user ] in
     Fs.get_property_map fs user_path
@@ -95,7 +97,7 @@ module Make(Fs: Webdav_fs.S) = struct
     | true ->
       acl fs config user parent' >>= function
       | Error e -> Lwt.return @@ Error `Forbidden
-      | Ok acl -> 
+      | Ok acl ->
         is_calendar fs parent' >>= function
         | false -> Lwt.return @@ Error `Bad_request
         | true ->
@@ -138,11 +140,11 @@ module Make(Fs: Webdav_fs.S) = struct
         file file (if is_dir then "directory" else "text/calendar") last_modified in
     let data = String.concat "\n" (List.map print_file files) in
     (data, "text/html")
-  
+
   let directory_etag fs (`Dir dir) =
     directory_as_html fs (`Dir dir) >|= fun (data, ct) ->
     compute_etag data
-  
+
   let directory_as_ics fs (`Dir dir) =
     let calendar_components = function
       | `Dir d ->
@@ -187,7 +189,7 @@ module Make(Fs: Webdav_fs.S) = struct
         (* TODO: check wheter CalDAV:calendar property is set as resourcetype!
            otherwise: standard WebDAV directory listing *)
         directory_as_ics fs (`Dir dir)) >|= fun res ->
-      Ok res 
+      Ok res
     | Ok (`File f) ->
       Fs.read fs (`File f) >|= function
       | Error _ -> Error `Not_found
@@ -202,7 +204,7 @@ module Make(Fs: Webdav_fs.S) = struct
   let delete fs ~path now =
     Fs.from_string fs path >>= function
     | Error _ -> Lwt.return false
-    | Ok f_or_d -> 
+    | Ok f_or_d ->
       Fs.destroy fs f_or_d >>= fun res ->
       let now = Ptime.to_rfc3339 now in
       (* TODO for a collection/directory, the last modified is defined as maximum last modified of
@@ -361,7 +363,7 @@ module Make(Fs: Webdav_fs.S) = struct
     let parent' = (parent :> Webdav_fs.file_or_dir) in
     Fs.dir_exists fs parent >>= function
     | false -> Lwt.return @@ Error `Conflict
-    | true -> 
+    | true ->
       let resource_is_calendar, resourcetype = match http_verb with
       | `Other "MKCALENDAR" -> true, [Xml.node ~ns:Xml.caldav_ns "calendar" []]
       | `Other "MKCOL" -> false, []
@@ -375,7 +377,7 @@ module Make(Fs: Webdav_fs.S) = struct
           if resource_is_calendar && parent_is_calendar
           then Lwt.return @@ Error `Conflict
           else acl fs config user parent' >>= function
-            | Error `Forbidden -> Lwt.return @@ Error (`Forbidden "TODO") 
+            | Error `Forbidden -> Lwt.return @@ Error (`Forbidden "TODO")
             | Ok parent_acl -> create_collection_dir fs parent_acl set_props now resourcetype dir
 
   let check_in_bounds p s e = true
@@ -909,7 +911,7 @@ module Make(Fs: Webdav_fs.S) = struct
   let report fs config ~path ~user ~data =
     build_req_tree fs config path user data >>= function
     | Error e -> Lwt.return @@ Error e
-    | Ok (f_or_d, auth_user_props, req_tree) -> 
+    | Ok (f_or_d, auth_user_props, req_tree) ->
       match Xml.parse_calendar_query_xml req_tree, Xml.parse_calendar_multiget_xml req_tree with
       | Ok calendar_query, _ -> handle_calendar_query_report calendar_query fs config.host f_or_d ~auth_user_props
       | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget fs config.host f_or_d ~auth_user_props
@@ -1039,7 +1041,7 @@ let initialize_fs_for_apple_testsuite fs now config =
     (Xml.caldav_ns, "calendar-home-set"),
     ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata (Uri.to_string url) ]])
   ] in
-  let acl = config.default_acl in
+  let acl = config.admin_only_acl in
   make_dir_if_not_present fs now acl ~props:calendars_properties (`Dir [config.calendars]) >>= fun _ ->
   make_dir_if_not_present fs now acl (`Dir [config.calendars ; "users"]) >>= fun _ ->
   make_dir_if_not_present fs now acl (`Dir [config.calendars ; "__uids__"]) >>= fun _ ->
@@ -1049,8 +1051,8 @@ let initialize_fs_for_apple_testsuite fs now config =
   Lwt.return_unit
 
 let initialize_fs fs now config =
-  make_dir_if_not_present fs now config.default_acl (`Dir [config.principals]) >>= fun _ ->
-  make_dir_if_not_present fs now config.default_acl (`Dir [config.calendars]) >>= fun _ ->
+  make_dir_if_not_present fs now config.admin_only_acl (`Dir [config.principals]) >>= fun _ ->
+  make_dir_if_not_present fs now config.admin_only_acl (`Dir [config.calendars]) >>= fun _ ->
   Lwt.return_unit
 
 let make_user ?(props = []) fs now config name password =
@@ -1073,8 +1075,8 @@ let make_user ?(props = []) fs now config name password =
   (* TODO should root have access to principals/user? *)
   make_dir_if_not_present fs now acl ~resourcetype ~props:props' principal_dir >>= fun _ ->
   make_dir_if_not_present fs now acl home_set_dir >>= fun _ ->
-  create_calendar fs now acl (`Dir [config.calendars ; name ; "calendar"]) >>= fun _ ->
-  Lwt.return_unit
+  create_calendar fs now acl (`Dir [config.calendars ; name ; "calendar"]) >|= fun _ ->
+  principal_url
 
 let make_group fs now config name password members =
   let principal_path user = Fs.to_string (`Dir [ config.principals ; user ]) in
@@ -1088,7 +1090,7 @@ let make_group fs now config name password members =
     (Xml.dav_ns, "group-member-set"),
     ([], List.map (fun u -> Xml.dav_node "href" [ Xml.pcdata u ]) new_member_urls)
   ] in
-  make_user ~props:group_props fs now config name password >>= fun () ->
+  make_user ~props:group_props fs now config name password >>= fun _ ->
   let group_node =
     Xml.dav_node "href"
       [ Xml.pcdata (Uri.to_string @@ Uri.with_path config.host (principal_path name)) ]

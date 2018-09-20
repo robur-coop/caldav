@@ -9,3 +9,6 @@ run: all
 
 utop:
 	dune utop src --profile=release
+
+user:
+	curl -v -X PUT "http://root:toor@127.0.0.1:8080/user?user=user1&password=1"

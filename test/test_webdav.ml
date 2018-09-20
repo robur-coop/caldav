@@ -535,7 +535,7 @@ let config = {
   principals = "principals" ;
   calendars = "calendars" ;
   host = Uri.of_string "http://cal.example.com" ;
-  default_acl = [ (`All, `Grant [ `All ]) ]
+  admin_only_acl = [ (`All, `Grant [ `All ]) ]
 }
 
 let appendix_b_data acl =
@@ -598,7 +598,7 @@ let test_report_1 () =
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
               (report "bernard/work" xml
-                 (appendix_b_1_data config.default_acl)))
+                 (appendix_b_1_data config.admin_only_acl)))
 
 let test_report_7_8_1 () =
   let xml = report_7_8_1
@@ -700,7 +700,7 @@ END:VCALENDAR
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
               (report "bernard/work" xml
-                 (appendix_b_data config.default_acl)))
+                 (appendix_b_data config.admin_only_acl)))
 
 
 let test_report_7_8_2 () =
@@ -808,7 +808,7 @@ END:VCALENDAR
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
               (report "bernard/work" xml
-                 (appendix_b_data config.default_acl)))
+                 (appendix_b_data config.admin_only_acl)))
 
 let test_report_7_8_3 () =
   let xml = report_7_8_3
@@ -879,7 +879,7 @@ END:VCALENDAR
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
               (report "bernard/work" xml
-                 (appendix_b_data config.default_acl)))
+                 (appendix_b_data config.admin_only_acl)))
 
 let test_report_7_8_4 () =
   let xml = report_7_8_4
@@ -914,7 +914,7 @@ END:VCALENDAR
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
               (report "bernard/work" xml
-                 (appendix_b_data config.default_acl)))
+                 (appendix_b_data config.admin_only_acl)))
 
 let test_report_7_8_5 () =
   let xml = report_7_8_5
@@ -972,7 +972,7 @@ END:VCALENDAR
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
               (report "bernard/work" xml
-                 (appendix_b_data config.default_acl)))
+                 (appendix_b_data config.admin_only_acl)))
 
 let multiget_7_9_1 = header ^ {|
    <C:calendar-multiget xmlns:D="DAV:"
@@ -1058,7 +1058,7 @@ END:VCALENDAR
   Alcotest.(check (result t_tree string) __LOC__
               (Ok (tree expected))
               (report "bernard/work" xml
-                 (appendix_b_data config.default_acl)))
+                 (appendix_b_data config.admin_only_acl)))
 
 let report_7_8_2_range =
   header ^ {|<C:calendar-query xmlns:D="DAV:"
@@ -1114,7 +1114,7 @@ let test_report_7_8_2_range () =
   Alcotest.(check (result t_tree string) __LOC__
               (Ok expected)
               (report "bernard/work" xml
-                 (appendix_b_data config.default_acl)))
+                 (appendix_b_data config.admin_only_acl)))
 
 
 let report_tests = [
@@ -1218,9 +1218,9 @@ let mkcol_success () =
       Mirage_fs_mem.connect "" >>= fun res_fs ->
       let props =
         let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
-        Properties.create_dir ~resourcetype config.default_acl now "Special Resource"
+        Properties.create_dir ~resourcetype config.admin_only_acl now "Special Resource"
       in
-      let properties = Properties.create_dir config.default_acl now "home" in
+      let properties = Properties.create_dir config.admin_only_acl now "home" in
       Fs.mkdir res_fs (`Dir ["home"]) properties >>= fun _ ->
       Fs.mkdir res_fs (`Dir [ "home" ; "special" ]) props >>= fun _ ->
       Mirage_fs_mem.connect "" >>= fun fs ->

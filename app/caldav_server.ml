@@ -16,6 +16,8 @@ end
 
 open Wm.Rd
 
+let now = Ptime_clock.now
+
 module Headers = struct
   let get_content_type headers =
     match Cohttp.Header.get headers "Content-Type" with
@@ -37,6 +39,9 @@ module Headers = struct
       (* Apple seems to use the regular expression 'Mozilla/.*Gecko.*' *)
       Astring.String.is_prefix ~affix:"Mozilla/" x &&
       Astring.String.is_infix ~affix:"Gecko" x
+
+  let replace_location location headers =
+    Cohttp.Header.replace headers "Location" (Uri.to_string @@ location)
 
   let replace_etag_add_location etag location headers =
     let headers' = Cohttp.Header.replace headers "Etag" etag in
@@ -68,7 +73,7 @@ class handler config fs = object(self)
     let content_type = Headers.get_content_type rd.req_headers in
     let user = Headers.get_user rd.req_headers in
     Logs.debug (fun m -> m "write_component path %s user %s body @.%s" path user body);
-    Dav.write_component fs config ~path (Ptime_clock.now ()) ~content_type ~user ~data:body >>= function
+    Dav.write_component fs config ~path (now ()) ~content_type ~user ~data:body >>= function
     | Error e -> Wm.respond (to_status e) rd
     | Ok etag ->
       let location = Uri.with_path config.host path in
@@ -80,7 +85,7 @@ class handler config fs = object(self)
     let is_mozilla = Headers.is_user_agent_mozilla rd.req_headers in
     Logs.debug (fun m -> m "read_calendar path %s is_mozilla %b" path is_mozilla);
     Dav.read fs ~path ~is_mozilla >>= function
-    | Error e -> Wm.respond (to_status e) rd 
+    | Error e -> Wm.respond (to_status e) rd
     | Ok (body, content_type) ->
       let rd' = with_resp_headers (Headers.replace_content_type content_type) rd in
       Wm.continue (`String body) rd'
@@ -117,7 +122,7 @@ class handler config fs = object(self)
     match Headers.get_authorization rd.req_headers with
      | None -> Wm.continue (`Basic "calendar") rd
      | Some v -> Dav.verify_auth_header fs config v >>= function
-       | Error msg -> 
+       | Error msg ->
          Logs.warn (fun m -> m "is_authorized failed with header value %s and message %s" v msg);
          Wm.continue (`Basic "invalid authorization") rd
        | Ok user ->
@@ -144,7 +149,7 @@ class handler config fs = object(self)
     | Error (`Forbidden body) -> Wm.respond ~body:(`String body) (to_status `Forbidden) rd
     | Error (`Bad_request as e) -> Wm.respond (to_status e) rd
     | Error `Property_not_found -> Wm.continue `Property_not_found rd
-    | Ok body -> 
+    | Ok body ->
       let rd' = with_resp_headers (Headers.replace_content_type "application/xml") rd in
       Wm.continue `Multistatus { rd' with resp_body = `String body }
 
@@ -155,7 +160,7 @@ class handler config fs = object(self)
     Logs.debug (fun m -> m "report path %s user %s body @.%s" path user body);
     Dav.report fs config ~path ~user ~data:body >>= function
     | Error (`Bad_request as e) -> Wm.respond (to_status e) rd
-    | Ok body -> 
+    | Ok body ->
       let rd' = with_resp_headers (Headers.replace_content_type "application/xml") rd in
       Wm.continue `Multistatus { rd' with resp_body = `String body }
 
@@ -171,7 +176,7 @@ class handler config fs = object(self)
     let user = Headers.get_user rd.req_headers in
     Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
     Logs.debug (fun m -> m "create_collection verb %s path %s user %s body @.%s" (Cohttp.Code.string_of_method rd.meth) path user body);
-    Dav.mkcol fs ~path config ~user rd.meth (Ptime_clock.now ()) ~data:body >>= function
+    Dav.mkcol fs ~path config ~user rd.meth (now ()) ~data:body >>= function
     | Error (`Bad_request as e) -> Wm.respond (to_status e) rd
     | Error (`Forbidden body) -> Wm.continue `Forbidden { rd with resp_body = `String body }
     | Error `Conflict -> Wm.continue `Conflict rd
@@ -180,13 +185,13 @@ class handler config fs = object(self)
   method delete_resource rd =
     let path = self#path rd in
     Logs.debug (fun m -> m "delete_resource path %s" path);
-    Dav.delete fs ~path (Ptime_clock.now ()) >>= fun deleted ->
+    Dav.delete fs ~path (now ()) >>= fun deleted ->
     Wm.continue deleted rd
 
   method last_modified rd =
     let path = self#path rd in
     Dav.last_modified fs ~path >>= fun lm ->
-    Wm.continue lm rd 
+    Wm.continue lm rd
 
   method generate_etag rd =
     let path = self#path rd in
@@ -233,7 +238,6 @@ class redirect config = object(self)
     Wm.respond 301 rd'
 end
 
-(* TODO access control for /user *)
 (* TODO delete user, delete all existing references (in acls, calendars) *)
 (* TODO force create user, uses delete user *)
 class create_user config fs = object(self)
@@ -250,10 +254,18 @@ class create_user config fs = object(self)
     match Uri.get_query_param uri "user", Uri.get_query_param uri "password" with
     | None, _ | _, None -> Wm.respond (to_status `Bad_request) rd
     | Some name, Some pass ->
-      (* TODO may fail if user exists *)
-      let now = Ptime_clock.now () in
-      Dav.make_user fs now config name pass >>= fun () ->
-      Wm.continue true rd
+      let now = now () in
+      Dav.make_user fs now config name pass >>= fun principal_url ->
+      let rd' = with_resp_headers (Headers.replace_location principal_url) rd in
+      Wm.continue true rd'
+
+  method is_conflict rd =
+    let uri = rd.uri in
+    match Uri.get_query_param uri "user" with
+    | None -> assert false
+    | Some user ->
+      Fs.dir_exists fs (`Dir [config.principals ; user ]) >>= fun user_exists ->
+      Wm.continue user_exists rd
 
   method content_types_provided rd =
     Wm.continue [ ("*/*", Wm.continue `Empty) ] rd
@@ -262,16 +274,34 @@ class create_user config fs = object(self)
     Wm.continue [
       ("application/octet-stream", self#create_user)
     ] rd
+
+  method is_authorized rd =
+    (* TODO implement digest authentication! *)
+    match Headers.get_authorization rd.req_headers with
+     | None -> Wm.continue (`Basic "calendar") rd
+     | Some v -> Dav.verify_auth_header fs config v >>= function
+       | Error msg ->
+         Logs.warn (fun m -> m "is_authorized failed with header value %s and message %s" v msg);
+         Wm.continue (`Basic "invalid authorization") rd
+       | Ok user ->
+         let rd' = with_req_headers (Headers.replace_authorization user) rd in
+         Wm.continue `Authorized rd'
+
+  method forbidden rd =
+    let user = Headers.get_user rd.req_headers in
+    Dav.access_granted_for_acl fs config ~path:config.principals rd.meth ~user >>= fun principals_granted ->
+    Dav.access_granted_for_acl fs config ~path:config.calendars rd.meth ~user >>= fun calendars_granted ->
+    Wm.continue (not (principals_granted && calendars_granted)) rd
 end
 
 let init_users fs now config user_password =
-  Lwt_list.iter_p (fun (u, p) -> Dav.make_user fs now config u p) user_password >>= fun () ->
+  Lwt_list.iter_p (fun (u, p) -> Dav.make_user fs now config u p >|= fun _ -> ()) user_password >>= fun () ->
   Dav.make_group fs now config "group" "group-password" ["root" ; "test"]
 
 let main () =
   Logs.set_reporter (Logs_fmt.reporter ());
   Logs.set_level (Some Logs.Debug);
-  let now = Ptime_clock.now () in
+  let now = now () in
   (* listen on port 8080 *)
   let port = 8080
   and scheme = "http"
@@ -283,8 +313,8 @@ let main () =
     principals ;
     calendars = "calendars" ;
     host ;
-    default_acl = [ (`Href (Uri.with_path host @@ "/" ^ principals ^ "/root/"),
-                     `Grant [ `All ]) ; (`All, `Grant [`Read]) ]
+    admin_only_acl = [ (`Href (Uri.with_path host @@ "/" ^ principals ^ "/root/"),
+                        `Grant [ `All ]) ; (`All, `Grant [`Read]) ]
   } in
   (* create the file system *)
   FS_unix.connect "/tmp/calendar" >>= fun fs ->
