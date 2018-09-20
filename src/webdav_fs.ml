@@ -187,7 +187,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
   let get_raw_property_map fs f_or_d =
     get_properties fs f_or_d >|= function
     | Error e ->
-      Format.printf "error while getting properties %a\n%!" Fs.pp_error e ;
+      Format.printf "error while getting properties for %s %a\n%!" (to_string f_or_d) Fs.pp_error e ;
       None
     | Ok data ->
       let str = Cstruct.(to_string @@ concat data) in

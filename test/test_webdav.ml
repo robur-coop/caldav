@@ -1268,7 +1268,8 @@ let test_fs_with_acl path acl user user_props = Lwt_main.run (
   let open Lwt.Infix in
   Mirage_fs_mem.connect "" >>= fun fs ->
   let props = Properties.create_dir acl (Ptime_clock.now ()) path in
-  Fs.mkdir fs (`Dir [path]) props >>= fun _ -> 
+  Fs.mkdir fs (`Dir [path]) props >>= fun _ ->
+  Mirage_fs_mem.mkdir fs config.principals >>= fun _ ->
   Fs.mkdir fs (`Dir [config.principals ; user] ) user_props >|= fun _ ->
   fs)
 
