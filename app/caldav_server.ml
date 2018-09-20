@@ -241,7 +241,6 @@ end
 let sane username =
   username <> "" && Astring.String.for_all Astring.Char.Ascii.is_alphanum username
 
-
 (* TODO delete user, delete all existing references (in acls, calendars) *)
 (* TODO force create user, uses delete user *)
 class create_user config fs = object(self)

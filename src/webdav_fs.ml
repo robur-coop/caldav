@@ -308,21 +308,23 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
 
   (* TODO maybe push the recursive remove to FS *)
   let rec destroy ?(recursive = false) fs f_or_d =
-    if not recursive
-    then destroy_file_or_empty_dir fs f_or_d
-    else match f_or_d with
-      | `File _ -> destroy_file_or_empty_dir fs f_or_d
-      | `Dir d ->
-        listdir fs (`Dir d) >>= function
-        | Error `Is_a_directory -> Lwt.return @@ Error `Is_a_directory
-        | Error `No_directory_entry -> Lwt.return @@ Error `No_directory_entry
-        | Error `Not_a_directory -> Lwt.return @@ Error `Not_a_directory
-        | Error _ -> assert false
-        | Ok f_or_ds ->
-          Lwt_list.fold_left_s (fun result f_or_d ->
-              match result with
-              | Error e -> Lwt.return @@ Error e
-              | Ok () -> destroy ~recursive fs f_or_d) (Ok ()) f_or_ds
+    (if recursive then
+       match f_or_d with
+       | `File _ -> Lwt.return @@ Ok ()
+       | `Dir d ->
+         listdir fs (`Dir d) >>= function
+         | Error `Is_a_directory -> Lwt.return @@ Error `Is_a_directory
+         | Error `No_directory_entry -> Lwt.return @@ Error `No_directory_entry
+         | Error `Not_a_directory -> Lwt.return @@ Error `Not_a_directory
+         | Error _ -> assert false
+         | Ok f_or_ds ->
+           Lwt_list.fold_left_s (fun result f_or_d ->
+               match result with
+               | Error e -> Lwt.return @@ Error e
+               | Ok () -> destroy ~recursive fs f_or_d) (Ok ()) f_or_ds
+     else Lwt.return @@ Ok ()) >>= function
+    | Error e -> Lwt.return @@ Error e
+    | Ok () -> destroy_file_or_empty_dir fs f_or_d
 
   let pp_error = Fs.pp_error
   let pp_write_error = Fs.pp_write_error

@@ -1122,10 +1122,11 @@ let delete_home_and_calendars fs principal_dir user_calendar_dir =
 let delete_user fs config name =
   let principal_dir = `Dir [config.principals ; name] in
   let user_calendar_dir = `Dir [config.calendars ; name] in
-  (* delete home directory and calendars *)
-  (* delete user from all acls *)
-  (* events in other people calendars? *)
+  (* TODO delete user from all acls *)
+  (* TODO events in other people calendars? *)
+  Log.debug (fun m -> m "removing group memberships for %s" name) ;
   delete_group_memberships fs principal_dir >>= fun () ->
+  Log.debug (fun m -> m "removing home and calendars for %s" name) ;
   delete_home_and_calendars fs principal_dir user_calendar_dir >|= function
   | Error e ->
     Log.err (fun m -> m "error %a while removing home and calendars" Fs.pp_write_error e) ;
