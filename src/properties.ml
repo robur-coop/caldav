@@ -53,6 +53,7 @@ let not_returned_by_allprop = [
   (Xml.caldav_ns, "max-attendees-per-instance");
   (Xml.caldav_ns, "calendar-home-set");
   (Xml.caldav_ns, "supported-collation-set");
+  (Xml.robur_ns, "password");
 ]
 
 let write_protected = [

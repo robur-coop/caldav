@@ -30,8 +30,8 @@ DONE:
 
 -- 31st August 2018:
 
+- implement ACL for writing acls, forbid to write acl in PROPPATCH / MKCOL / MKCALENDAR
 - a private calendar which should turn into a public one: how to adjust all the event ACLs? maybe DAV:inherited ACL?
-
 - Fs.to_string should return a leading /
 - curl commands to make calendar public/private/read-only/protected (freebusy only)
 - access control XML content when forbidden
