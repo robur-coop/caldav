@@ -36,12 +36,12 @@ sig
 
   val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> string -> string ->
     Uri.t Lwt.t
-
+  val change_user_password : state -> config -> string -> string -> (unit, [> `Internal_server_error ]) result Lwt.t
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
-  val make_group : state -> Ptime.t -> config -> string -> string -> string list -> unit Lwt.t
-
-  val change_password : state -> config -> string -> string -> (unit, [> `Internal_server_error ]) result Lwt.t
+  val make_group : state -> Ptime.t -> config -> string -> string list -> Uri.t Lwt.t
+  val change_group_members : state -> config -> string -> string list -> (unit, [> `Internal_server_error ]) result Lwt.t
+  val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
 end
@@ -960,8 +960,8 @@ let verify_auth_header fs config v =
           | Some (_, [ Xml.Pcdata stored ]) ->
             if String.equal hashed stored
             then Ok user
-            else Error "wrong password"
-          | _ -> Error "invalid user"
+            else Error "wrong user or password"
+          | _ -> Error "wrong user or password"
     end
   | _ -> Lwt.return @@ Error "bad header"
 
@@ -1060,7 +1060,7 @@ let initialize_fs fs now config =
   make_dir_if_not_present fs now config.admin_only_acl (`Dir [config.calendars]) >>= fun _ ->
   Lwt.return_unit
 
-let change_password fs config name password =
+let change_user_password fs config name password =
   let principal_dir = `Dir [ config.principals ; name ] in
   Fs.get_property_map fs principal_dir >>= fun auth_user_props ->
   let auth_user_props' =
@@ -1073,21 +1073,15 @@ let change_password fs config name password =
     Error `Internal_server_error
   | Ok () -> Ok ()
 
-
-let make_user ?(props = []) fs now config name password =
+let make_principal props fs now config name =
   let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
   let get_url dir = Uri.with_path config.host (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
   let principal_dir = `Dir [ config.principals ; name ] in
   let principal_url = get_url principal_dir in
   let home_set_dir = `Dir [ config.calendars ; name ] in
-  let home_set_url = get_url home_set_dir in
   let props' =
     ((Xml.dav_ns, "principal-URL"),
      ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata @@ Uri.to_string principal_url ] ]))
-    :: ((Xml.caldav_ns, "calendar-home-set"),
-        ([], [Xml.dav_node "href" [Xml.pcdata @@ Uri.to_string home_set_url ]]))
-    :: ((Xml.robur_ns, "password"),
-        ([], [Xml.pcdata @@ hash_password password]))
     :: props
   in
   let acl = [ (`Href principal_url, `Grant [ `All ]) ; (`All, `Grant [ `Read ]) ] in
@@ -1098,11 +1092,18 @@ let make_user ?(props = []) fs now config name password =
   create_calendar fs now acl (`Dir [config.calendars ; name ; "calendar"]) >|= fun _ ->
   principal_url
 
-let leave principal_dir tree = match Xml.href_parser tree with
-  | Error _ -> true
-  | Ok url ->
-    let path = Uri.path @@ Uri.of_string url in
-    not (String.equal path ("/" ^ Fs.to_string principal_dir))
+let make_user ?(props = []) fs now config name password =
+  let get_url dir = Uri.with_path config.host (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
+  let home_set_dir = `Dir [ config.calendars ; name ] in
+  let home_set_url = get_url home_set_dir in
+  let props' =
+    ((Xml.caldav_ns, "calendar-home-set"),
+     ([], [Xml.dav_node "href" [Xml.pcdata @@ Uri.to_string home_set_url ]]))
+    :: ((Xml.robur_ns, "password"),
+        ([], [Xml.pcdata @@ hash_password password]))
+    :: props
+  in
+  make_principal props' fs now config name
 
 let collect_principals fs principal_dir label =
   Fs.get_property_map fs principal_dir >|= fun auth_user_props ->
@@ -1116,6 +1117,12 @@ let collect_principals fs principal_dir label =
         assert false) principals
 
 let resign fs to_exclude label principal =
+  let leave tree = match Xml.href_parser tree with
+    | Error _ -> true
+    | Ok url ->
+      let path = Uri.path @@ Uri.of_string url in
+      not (String.equal path ("/" ^ Fs.to_string to_exclude))
+  in
   let principal_dir = Uri.path @@ Uri.of_string principal in
   Fs.from_string fs principal_dir >>= function
   | Error err -> Log.err (fun m -> m "from_string failed for %s" principal_dir) ; assert false
@@ -1124,7 +1131,7 @@ let resign fs to_exclude label principal =
     match Properties.unsafe_find (Xml.dav_ns, label) principal_props with
     | None -> Lwt.return_unit
     | Some (attrs, all_principals) ->
-      let all_principals' = attrs, List.filter (leave to_exclude) all_principals in
+      let all_principals' = attrs, List.filter leave all_principals in
       let principal_props' = Properties.unsafe_add (Xml.dav_ns, label) all_principals' principal_props in
       Fs.write_property_map fs f_or_d principal_props' >|= function
       | Error we -> Log.err (fun m -> m "failed to write group properties %s: %a" principal_dir Fs.pp_write_error we)
@@ -1163,7 +1170,54 @@ let delete_group fs config name =
   delete_group_members fs principal_dir >>= fun () ->
   delete_user fs config name
 
-let make_group fs now config name password members =
+let enroll fs to_include principal =
+  Log.debug (fun m -> m "enrolling %a to principal %s" Xml.pp_tree to_include principal) ;
+  let principal_dir = Uri.path @@ Uri.of_string principal in
+  Fs.from_string fs principal_dir >>= function
+  | Error err -> Log.err (fun m -> m "from_string failed for %s" principal_dir) ; assert false
+  | Ok f_or_d ->
+    Fs.get_property_map fs f_or_d >>= fun principal_props ->
+    let memberships =
+      match Properties.unsafe_find (Xml.dav_ns, "group-membership") principal_props with
+      | None -> ([], [to_include])
+      | Some (attrs, all_principals) ->
+        if List.mem to_include all_principals
+        then (attrs, all_principals)
+        else (attrs, to_include :: all_principals)
+    in
+    let principal_props' = Properties.unsafe_add (Xml.dav_ns, "group-membership") memberships principal_props in
+    Fs.write_property_map fs f_or_d principal_props' >|= function
+    | Error we -> Log.err (fun m -> m "failed to write group properties %s: %a" principal_dir Fs.pp_write_error we)
+    | Ok () -> ()
+
+let change_group_members fs config name new_members =
+  let principal_path user = Fs.to_string (`Dir [ config.principals ; user ]) in
+  let new_member_paths = List.map principal_path new_members in
+  let new_member_urls =
+    List.map
+      (fun path -> Uri.to_string @@ Uri.with_path config.host path)
+      new_member_paths
+  in
+  let principal_dir = `Dir [ config.principals ; name ] in
+  delete_group_members fs principal_dir >>= fun () ->
+  let group_node =
+    Xml.dav_node "href"
+      [ Xml.pcdata (Uri.to_string @@ Uri.with_path config.host (principal_path name)) ]
+  in
+  Lwt_list.iter_p (enroll fs group_node) new_member_paths >>= fun () ->
+  Fs.get_property_map fs principal_dir >>= fun props ->
+  let props' =
+    Properties.unsafe_add
+      (Xml.dav_ns, "group-member-set")
+      ([], List.map (fun u -> Xml.dav_node "href" [ Xml.pcdata u ]) new_member_urls)
+      props
+  in
+  Fs.write_property_map fs principal_dir props' >|= function
+  | Error e -> Log.err (fun m -> m "write error %a while writing group properties in change_group_members" Fs.pp_write_error e) ; Error `Internal_server_error
+  | Ok () -> Ok ()
+
+(* TODO find out whether we should modify calendar-home-set of group or members *)
+let make_group fs now config name members =
   let principal_path user = Fs.to_string (`Dir [ config.principals ; user ]) in
   let new_member_paths = List.map principal_path members in
   let new_member_urls =
@@ -1175,24 +1229,12 @@ let make_group fs now config name password members =
     (Xml.dav_ns, "group-member-set"),
     ([], List.map (fun u -> Xml.dav_node "href" [ Xml.pcdata u ]) new_member_urls)
   ] in
-  make_user ~props:group_props fs now config name password >>= fun _ ->
+  make_principal group_props fs now config name >>= fun principal_uri ->
   let group_node =
     Xml.dav_node "href"
       [ Xml.pcdata (Uri.to_string @@ Uri.with_path config.host (principal_path name)) ]
   in
-  let group_key = (Xml.dav_ns, "group-membership") in
-  Lwt_list.iter_p (fun path ->
-      let f_or_d = (Fs.dir_from_string path :> Webdav_fs.file_or_dir) in
-      Fs.get_property_map fs f_or_d >>= fun props ->
-      (* TODO should use find_many *)
-      let props' = match Properties.unsafe_find group_key props with
-        | None -> Properties.unsafe_add group_key ([], [ group_node ]) props
-        | Some (attrs, groups) ->
-          let groups' = if List.mem group_node groups then groups else group_node :: groups in
-          Properties.unsafe_add group_key (attrs, groups') props
-      in
-      Fs.write_property_map fs f_or_d props' >>= fun _ ->
-      Lwt.return_unit)
-    new_member_paths
+  Lwt_list.iter_p (enroll fs group_node) new_member_paths >|= fun () ->
+  principal_uri
 
 end

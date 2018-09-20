@@ -241,13 +241,12 @@ end
 let sane username =
   username <> "" && Astring.String.for_all Astring.Char.Ascii.is_alphanum username
 
-(* TODO delete user, delete all existing references (in acls, calendars) *)
 (* TODO force create user, uses delete user *)
-class create_user config fs = object(self)
+class user config fs = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
 
   method private requested_user rd =
-    match Uri.get_query_param rd.uri "user" with
+    match Uri.get_query_param rd.uri "name" with
     | None -> Error `Bad_request
     | Some x -> if not (sane x) then Error `Bad_request else Ok x
 
@@ -290,7 +289,7 @@ class create_user config fs = object(self)
       match user_exists, self#requested_password rd with
       | true, Ok new_pass ->
         begin
-          Dav.change_password fs config name new_pass >>= function
+          Dav.change_user_password fs config name new_pass >>= function
           | Ok () -> Wm.respond (to_status `OK) rd
           | Error e -> Wm.respond (to_status e) rd
         end
@@ -326,9 +325,94 @@ class create_user config fs = object(self)
       Wm.continue (not (principals_granted && calendars_granted)) rd
 end
 
+class group config fs = object(self)
+  inherit [Cohttp_lwt.Body.t] Wm.resource
+
+  method private requested_group rd =
+    match Uri.get_query_param rd.uri "name" with
+    | None -> Error `Bad_request
+    | Some x -> if not (sane x) then Error `Bad_request else Ok x
+
+  method private requested_members rd =
+    match Uri.get_query_param rd.uri "members" with
+    | None -> Error `Bad_request
+    | Some x ->
+      let members = Astring.String.cuts ~sep:"," x in
+      if List.for_all sane members
+      then Ok members
+      else Error `Bad_request
+
+  method allowed_methods rd =
+    Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
+
+  method known_methods rd =
+    Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
+
+  method private create_group rd =
+    match self#requested_group rd, self#requested_members rd with
+    | Error _, _ | _, Error _ -> Wm.respond (to_status `Bad_request) rd
+    | Ok name, Ok members ->
+      let now = now () in
+      Dav.make_group fs now config name members >>= fun principal_url ->
+      let rd' = with_resp_headers (Headers.replace_location principal_url) rd in
+      Wm.continue true rd'
+
+  method delete_resource rd =
+    match self#requested_group rd with
+    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    | Ok name ->
+      Dav.delete_group fs config name >>= function
+      | Error e -> Wm.respond (to_status e) rd
+      | Ok () -> Wm.continue true rd
+
+  method is_conflict rd =
+    match self#requested_group rd with
+    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    | Ok name ->
+      Fs.dir_exists fs (`Dir [config.principals ; name ]) >>= fun group_exists ->
+      match group_exists, self#requested_members rd with
+      | true, Ok members ->
+        begin
+          Dav.change_group_members fs config name members >>= function
+          | Ok () -> Wm.respond (to_status `OK) rd
+          | Error e -> Wm.respond (to_status e) rd
+        end
+      | _ -> Wm.continue group_exists rd
+
+  method content_types_provided rd =
+    Wm.continue [ ("*/*", Wm.continue `Empty) ] rd
+
+  method content_types_accepted rd =
+    Wm.continue [
+      ("application/octet-stream", self#create_group)
+    ] rd
+
+  method is_authorized rd =
+    (* TODO implement digest authentication! *)
+    match Headers.get_authorization rd.req_headers with
+     | None -> Wm.continue (`Basic "calendar") rd
+     | Some v -> Dav.verify_auth_header fs config v >>= function
+       | Error msg ->
+         Logs.warn (fun m -> m "is_authorized failed with header value %s and message %s" v msg);
+         Wm.continue (`Basic "invalid authorization") rd
+       | Ok user ->
+         let rd' = with_req_headers (Headers.replace_authorization user) rd in
+         Wm.continue `Authorized rd'
+
+  method forbidden rd =
+    let user = Headers.get_user rd.req_headers in
+    match self#requested_group rd with
+    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    | Ok requested_group ->
+      Dav.access_granted_for_acl fs config ~path:(config.principals ^ "/" ^ requested_group) rd.meth ~user >>= fun principals_granted ->
+      Dav.access_granted_for_acl fs config ~path:(config.calendars ^ "/" ^ requested_group) rd.meth ~user >>= fun calendars_granted ->
+      Wm.continue (not (principals_granted && calendars_granted)) rd
+end
+
+
 let init_users fs now config user_password =
   Lwt_list.iter_p (fun (u, p) -> Dav.make_user fs now config u p >|= fun _ -> ()) user_password >>= fun () ->
-  Dav.make_group fs now config "group" "group-password" ["root" ; "test"]
+  Dav.make_group fs now config "group" ["root" ; "test"]
 
 let main () =
   Logs.set_reporter (Logs_fmt.reporter ());
@@ -360,11 +444,12 @@ let main () =
     ("root", "toor") ;
     ("nobody", "1")
   ] in
-  init_users fs now config user_password >>= fun () ->
+  init_users fs now config user_password >>= fun _ ->
   (* the route table *)
   let routes = [
     ("/.well-known/caldav", fun () -> new redirect config) ;
-    ("/user", fun () -> new create_user config fs) ;
+    ("/user", fun () -> new user config fs) ;
+    ("/group", fun () -> new group config fs) ;
     ("/" ^ config.principals, fun () -> new handler config fs) ;
     ("/" ^ config.principals ^ "/*", fun () -> new handler config fs) ;
     ("/" ^ config.calendars, fun () -> new handler config fs) ;

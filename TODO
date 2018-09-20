@@ -25,7 +25,8 @@ DONE:
 - readonly xml props (sind live properties) - there may still be more (in caldav/acl)
 - access control into separate module
 - move stuff to webdav_api
-- curl command to add a user, delete a user, access control
+- curl command to add a user, delete a user, access control, change password
+- curl command to add group, add group members, delete group members, delete group
 
 -- 31st August 2018:
 
@@ -33,8 +34,6 @@ DONE:
 
 - Fs.to_string should return a leading /
 - curl commands to make calendar public/private/read-only/protected (freebusy only)
-- curl command to add group, add group members, delete group members, delete group
-  - add group calendar, remove group calendar
 - access control XML content when forbidden
 - client interoperability: android! create new todo lists and new calendars, use different users
 - research scope of implementing calendar sharing
@@ -56,6 +55,7 @@ DONE:
 - recurrence < daily
 - freebusy in timerange / todo in timerange
 - automatic discovery of calendar url
+- add group calendar, remove group calendar
 
 - persistent storage (irmin/git?) (mirage-fs-unix works for us!)
 - http request with query parameter that is empty leads to an empty reply:
