@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<D:propertyupdate xmlns:D="DAV:">
+  <D:set>
+    <D:prop>
+      <D:acl>
+        <D:ace>
+          <D:principal><D:all/></D:principal>
+          <D:deny><D:privilege><D:all/></D:privilege></D:deny>
+        </D:ace>
+      </D:acl>
+    </D:prop>
+  </D:set>
+</D:propertyupdate>

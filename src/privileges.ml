@@ -34,14 +34,11 @@ let is_met ~requirement privileges =
 
 (* checks privileges for "current-user-privilege-set" (`Read_current_user_privilege_set) and "acl" (`Read_acl) *)
 let can_read_prop fqname privileges =
-  let requirement = match fqname with
-    | ns, "current-user-privilege-set" when ns = Xml.dav_ns -> Some `Read_current_user_privilege_set
-    | ns, "acl" when ns = Xml.dav_ns -> Some `Read_acl
-    | _ -> None
-  in
-  match requirement with
-  | Some requirement -> is_met ~requirement privileges
-  | None -> true
+  match fqname with
+  | ns, "current-user-privilege-set" when ns = Xml.dav_ns -> is_met ~requirement:`Read_current_user_privilege_set privileges
+  | ns, "acl" when ns = Xml.dav_ns -> is_met ~requirement:`Read_acl privileges
+  | ns, "password" when ns = Xml.robur_ns -> false
+  | _ -> true
 
 let required verb ~target_exists = match verb with
   | `GET -> `Read, `Target
