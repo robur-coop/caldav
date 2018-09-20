@@ -51,14 +51,11 @@ sig
 
   val write : t -> file -> Cstruct.t -> Properties.t -> (unit, write_error) result Lwt.t
 
-  val destroy : t -> file_or_dir -> (unit, write_error) result Lwt.t
+  val destroy : ?recursive:bool -> t -> file_or_dir -> (unit, write_error) result Lwt.t
 
   val pp_error : error Fmt.t
 
   val pp_write_error : write_error Fmt.t
-  (*
-  val connect : string -> t Lwt.t
-  *)
 end
 
 module Make (Fs:Mirage_fs_lwt.S) = struct
@@ -304,12 +301,28 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
     Fs.write fs filename 0 data >>== fun () ->
     write_property_map fs (`File file) propmap
 
-  let destroy fs f_or_d =
+  let destroy_file_or_empty_dir fs f_or_d =
     let propfile = propfilename f_or_d in
     Fs.destroy fs (to_string propfile) >>== fun () ->
     Fs.destroy fs (to_string f_or_d)
 
-  (*let connect = Fs.connect*)
+  (* TODO maybe push the recursive remove to FS *)
+  let rec destroy ?(recursive = false) fs f_or_d =
+    if not recursive
+    then destroy_file_or_empty_dir fs f_or_d
+    else match f_or_d with
+      | `File _ -> destroy_file_or_empty_dir fs f_or_d
+      | `Dir d ->
+        listdir fs (`Dir d) >>= function
+        | Error `Is_a_directory -> Lwt.return @@ Error `Is_a_directory
+        | Error `No_directory_entry -> Lwt.return @@ Error `No_directory_entry
+        | Error `Not_a_directory -> Lwt.return @@ Error `Not_a_directory
+        | Error _ -> assert false
+        | Ok f_or_ds ->
+          Lwt_list.fold_left_s (fun result f_or_d ->
+              match result with
+              | Error e -> Lwt.return @@ Error e
+              | Ok () -> destroy ~recursive fs f_or_d) (Ok ()) f_or_ds
 
   let pp_error = Fs.pp_error
   let pp_write_error = Fs.pp_write_error

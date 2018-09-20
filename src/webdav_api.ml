@@ -37,6 +37,8 @@ sig
   val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> string -> string ->
     Uri.t Lwt.t
 
+  val delete_user : state -> config -> string -> (unit, [> `Internal_server_error ]) result Lwt.t
+
   val make_group : state -> Ptime.t -> config -> string -> string -> string list -> unit Lwt.t
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
 end
@@ -1077,6 +1079,58 @@ let make_user ?(props = []) fs now config name password =
   make_dir_if_not_present fs now acl home_set_dir >>= fun _ ->
   create_calendar fs now acl (`Dir [config.calendars ; name ; "calendar"]) >|= fun _ ->
   principal_url
+
+let delete_group_memberships fs principal_dir =
+  Fs.get_property_map fs principal_dir >>= fun auth_user_props ->
+  let groups = match Properties.unsafe_find (Xml.dav_ns, "group-membership") auth_user_props with
+    | None -> []
+    | Some (_, groups) -> List.map (fun tree -> match Xml.href_parser tree with
+        | Ok url -> url
+        | Error msg ->
+          Log.err (fun m -> m "failed to parse group-membership url %a" Xml.pp_tree tree);
+          assert false) groups
+  in
+  Lwt_list.iter_p (fun group ->
+      let group_dir = Uri.path @@ Uri.of_string group in
+      Fs.from_string fs group_dir >>= function
+      | Error err -> Log.err (fun m -> m "from_string failed for %s" group_dir) ; assert false
+      | Ok f_or_d ->
+        Fs.get_property_map fs f_or_d >>= fun group_props ->
+        match Properties.unsafe_find (Xml.dav_ns, "group-member-set") group_props with
+        | None -> Lwt.return_unit
+        | Some (attrs, members) ->
+          let exclude_myself tree =
+            match Xml.href_parser tree with
+            | Error _ -> true
+            | Ok url ->
+              let path = Uri.path @@ Uri.of_string url in
+              not (String.equal path ("/" ^ Fs.to_string principal_dir))
+          in
+          let members' = attrs, List.filter exclude_myself members in
+          let group_props' = Properties.unsafe_add (Xml.dav_ns, "group-member-set") members' group_props in
+          Fs.write_property_map fs f_or_d group_props' >|= function
+          | Error we -> Log.err (fun m -> m "failed to write group properties %s: %a" group_dir Fs.pp_write_error we)
+          | Ok () -> ())
+    groups
+
+
+let delete_home_and_calendars fs principal_dir user_calendar_dir =
+  Fs.destroy ~recursive:true fs principal_dir >>= function
+  | Error e -> Lwt.return @@ Error e
+  | Ok () -> Fs.destroy ~recursive:true fs user_calendar_dir
+
+let delete_user fs config name =
+  let principal_dir = `Dir [config.principals ; name] in
+  let user_calendar_dir = `Dir [config.calendars ; name] in
+  (* delete home directory and calendars *)
+  (* delete user from all acls *)
+  (* events in other people calendars? *)
+  delete_group_memberships fs principal_dir >>= fun () ->
+  delete_home_and_calendars fs principal_dir user_calendar_dir >|= function
+  | Error e ->
+    Log.err (fun m -> m "error %a while removing home and calendars" Fs.pp_write_error e) ;
+    Error `Internal_server_error
+  | Ok () -> Ok ()
 
 let make_group fs now config name password members =
   let principal_path user = Fs.to_string (`Dir [ config.principals ; user ]) in

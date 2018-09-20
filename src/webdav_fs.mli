@@ -52,14 +52,11 @@ sig
 
   val write : t -> file -> Cstruct.t -> Properties.t -> (unit, write_error) result Lwt.t
 
-  val destroy : t -> file_or_dir -> (unit, write_error) result Lwt.t
+  val destroy : ?recursive:bool -> t -> file_or_dir -> (unit, write_error) result Lwt.t
 
   val pp_error : error Fmt.t
 
   val pp_write_error : write_error Fmt.t
-  (*
-  val connect : string -> t Lwt.t
-  *)
 end
 
 module Make (Fs: Mirage_fs_lwt.S) : S with type t = Fs.t and type error = Fs.error and type write_error = Fs.write_error

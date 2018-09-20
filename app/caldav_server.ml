@@ -238,33 +238,50 @@ class redirect config = object(self)
     Wm.respond 301 rd'
 end
 
+let sane username =
+  username <> "" && Astring.String.for_all Astring.Char.Ascii.is_alphanum username
+
+
 (* TODO delete user, delete all existing references (in acls, calendars) *)
 (* TODO force create user, uses delete user *)
 class create_user config fs = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
 
+  method private requested_user rd =
+    match Uri.get_query_param rd.uri "user" with
+    | None -> Error `Bad_request
+    | Some x -> if not (sane x) then Error `Bad_request else Ok x
+
   method allowed_methods rd =
-    Wm.continue [`PUT; `OPTIONS ] rd
+    Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
 
   method known_methods rd =
-    Wm.continue [`PUT; `OPTIONS ] rd
+    Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
 
   method private create_user rd =
-    let uri = rd.uri in
-    match Uri.get_query_param uri "user", Uri.get_query_param uri "password" with
-    | None, _ | _, None -> Wm.respond (to_status `Bad_request) rd
-    | Some name, Some pass ->
+    match self#requested_user rd, Uri.get_query_param rd.uri "password" with
+    | Error _, _ | _, None -> Wm.respond (to_status `Bad_request) rd
+    | Ok name, Some pass ->
       let now = now () in
       Dav.make_user fs now config name pass >>= fun principal_url ->
       let rd' = with_resp_headers (Headers.replace_location principal_url) rd in
       Wm.continue true rd'
 
+  (* TODO? allow a user to delete themselves *)
+  (* TODO? soft-delete: "mark as deleted" *)
+  method delete_resource rd =
+    match self#requested_user rd with
+    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    | Ok name ->
+      Dav.delete_user fs config name >>= function
+      | Error `Internal_server_error -> Wm.respond (to_status `Internal_server_error) rd
+      | Ok () -> Wm.continue true rd
+
   method is_conflict rd =
-    let uri = rd.uri in
-    match Uri.get_query_param uri "user" with
-    | None -> assert false
-    | Some user ->
-      Fs.dir_exists fs (`Dir [config.principals ; user ]) >>= fun user_exists ->
+    match self#requested_user rd with
+    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    | Ok name ->
+      Fs.dir_exists fs (`Dir [config.principals ; name ]) >>= fun user_exists ->
       Wm.continue user_exists rd
 
   method content_types_provided rd =
@@ -289,9 +306,12 @@ class create_user config fs = object(self)
 
   method forbidden rd =
     let user = Headers.get_user rd.req_headers in
-    Dav.access_granted_for_acl fs config ~path:config.principals rd.meth ~user >>= fun principals_granted ->
-    Dav.access_granted_for_acl fs config ~path:config.calendars rd.meth ~user >>= fun calendars_granted ->
-    Wm.continue (not (principals_granted && calendars_granted)) rd
+    match self#requested_user rd with
+    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    | Ok requested_user ->
+      Dav.access_granted_for_acl fs config ~path:(config.principals ^ "/" ^ requested_user) rd.meth ~user >>= fun principals_granted ->
+      Dav.access_granted_for_acl fs config ~path:(config.calendars ^ "/" ^ requested_user) rd.meth ~user >>= fun calendars_granted ->
+      Wm.continue (not (principals_granted && calendars_granted)) rd
 end
 
 let init_users fs now config user_password =

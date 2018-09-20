@@ -9,13 +9,13 @@ sig
   val mkcol : state -> config -> path:string -> user:string -> Cohttp.Code.meth -> Ptime.t -> data:string ->
     (unit, [ `Bad_request | `Conflict | `Forbidden of string ]) result Lwt.t
 
-  val propfind : state -> config -> path:string -> user:string -> depth:string option -> data:string -> 
+  val propfind : state -> config -> path:string -> user:string -> depth:string option -> data:string ->
     (string, [> `Bad_request | `Forbidden of string | `Property_not_found ]) result Lwt.t
 
-  val proppatch : state -> config -> path:string -> user:string -> data:string -> 
+  val proppatch : state -> config -> path:string -> user:string -> data:string ->
     (string, [> `Bad_request ]) result Lwt.t
 
-  val report : state -> config -> path:string -> user:string -> data:string -> 
+  val report : state -> config -> path:string -> user:string -> data:string ->
     (string, [> `Bad_request ]) result Lwt.t
 
   val write_component : state -> config -> path:string -> user:string -> Ptime.t -> content_type:content_type -> data:string ->
@@ -35,6 +35,8 @@ sig
 
   val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> string -> string ->
     Uri.t Lwt.t
+
+  val delete_user : state -> config -> string -> (unit, [> `Internal_server_error ]) result Lwt.t
 
   val make_group : state -> Ptime.t -> config -> string -> string -> string list -> unit Lwt.t
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
