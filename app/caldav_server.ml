@@ -86,7 +86,7 @@ class handler config fs = object(self)
     Logs.debug (fun m -> m "read_calendar path %s is_mozilla %b" path is_mozilla);
     Dav.read fs ~path ~is_mozilla >>= function
     | Error e -> Wm.respond (to_status e) rd
-    | Ok (body, content_type) ->
+    | Ok (content_type, body) ->
       let rd' = with_resp_headers (Headers.replace_content_type content_type) rd in
       Wm.continue (`String body) rd'
 
