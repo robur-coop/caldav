@@ -184,7 +184,13 @@ let privileges ~auth_user_props resource_props =
 let current_user_privilege_set ~auth_user_props map =
   let make_node p = Xml.dav_node "privilege" [ Xml.priv_to_xml p ] in
   let privileges = privileges auth_user_props map in
-  Some ([], (List.map make_node privileges))
+  let uniq =
+    (* workaround for Firefox OS which doesn't understand <privilege><all/></privilege> *)
+    if List.mem `All privileges
+    then [ `Read ; `Write ; `Read_current_user_privilege_set ; `Write_content ; `Write_properties ; `Bind ; `Unbind ; `All ]
+    else List.sort_uniq compare privileges
+  in
+  Some ([], (List.map make_node uniq))
 
 (* checks nothing, computes current-user-principal, helper function *)
 let current_user_principal props =
