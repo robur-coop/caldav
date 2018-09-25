@@ -4,8 +4,6 @@
 
 Hallo. Wir sind Steffi und Hannes von robur, und haben im Rahmen des Prototypefunds einen Kalenderserver geschrieben.
 
-TODO: slide ueber verabredungsprobleme
-
 JedeR kennt das Problem: Man moechte sich verabreden, und alle sind beschaeftigt.  Wie wird ein fuer alle passender Termin gefunden? Ein gemeinsamer Kalendar muss her!
 
 Dazu gibt es verschiedene Loesungen in der Cloud. Die Hardware ist abstrahiert und wird gemietet, um darauf zu rechnen und Daten zu speichern.
@@ -16,13 +14,25 @@ Loesungen zum Selbsthosting sind komplex und bestehen aus der Anwendung selbst, 
 
 Um die Gelegenheiten fuer Sicherheitsluecken und undurchsichtigen Code einzuschraenken, minimieren wir den Code des gesamten Systems in unserem Ansatz. Wir verzichten auf ein Allzweck-Betriebssystem und setzen auf einen Service, der massgeschneidert fuer genau einen Zweck ist. Bei uns ist dass das Erstellen und Verwalten von Kalendern.
 Bei uns gibt es ueber der abstrahierten Hardware nur eine einzige Schicht: der Service ist das Betriebssystem.
+Das Betriebssystem ist quasi garnicht da: MirageOS ist wie eine Fata Morgana.
 
+Bisher war MirageOS ein Forschungsprojekt, in dem nuetzliche Software-Bibliotheken entwickelt wurden, aber nur beispielhafte Anwendungen.
+Unser Kalenderprojekt ist eine der ersten praktischen Service-Anwendungen.
+Da unser Kalendarprojekt mit allen Standard-Clients der grossen Betriebssysteme funktioniert, ist er fuer alle nutzbar.
 Der Service ist aus modularen Software-Bibliotheken aufgebaut.
 Er benutzt nur Bibliotheken, die absolut notwendig sind wie z.B. eine Netzwerkbibliothek und eine Uhr zur Datumsberechnung.
 
-TODO: weitere motivation/vision:
-  Unikernels in der praxis - sehr praxisnaher / angewandter service. Von der Forschung in die reale Welt.
-  Techniken der sicheren programmierung "from the ground up" - programmiersprache, vermeiden von state
+In unserem Projekt haben wir von Anfang an Techniken der sicheren Programmierung verwendet.
+Hierzu zaehlt die funktionale Programmierung.
+Die Wahl der Programmiersprache OCaml ermoeglicht uns, Klassen von Fehlern auszuschliessen.
+OCaml hat ein sogenanntes Typsystem, mit dem ueberprueft werden kann, ob die eingegebenen Daten zur Anwendung passen.
+So darf z.B. kein Fliesstext eingegeben werden, wenn eine Startzeit vom Kalender erwartet wird.
+Daten von falscher Art fuehren zu einem Fehler, da nicht klar ist wie weiter gerechnet werden soll.
+Anhand der Datentypen ist klar ersichtlich, mit welchen Eingaben das Programm arbeitet, und ob alle Eingabefaelle abgedeckt sind.
+Eine haeufige Fehlerquelle ist, dass man bei einem laengeren Programm den Ueberblick verliert, was wo im Speicher abgelegt ist.
+In OCaml wird dieses Problem umgangen, indem Speicher im Normalfall unveraenderbar belegt wird.
+Z.B. kann man sich darauf verlassen, dass eine einmal belegte Variable immer auf den gleichen Wert verweist.
+Programme koennen ohne Probleme kombiniert werden, da alle Variablenbelegungen sich nur lokal auswirken und es zu keinen Zusammenstoessen kommt.
 
 # Hauptteil 4 min
 
@@ -50,7 +60,7 @@ Fuer CalDAV gibt es noch zusaetzliche HTTP-Verben zum Anlegen eines Kalenders un
 Hier sieht man eine Beispielanfrage nach Events im Zeitraum vom 3. bis 5. Oktober.
 Die Antwort enthaelt die passenden Events im Icalendar-Format.
 
-TODO Adventure stories: Bugs in Webmachine, RFC fehler, irmin story, tree kombinatoren / XML parser
+TODO Adventure stories loeschen
 
 TODO Beispielablauf (1.5m)
  * Erklaerung, dass wir jetzt gerade live testen in Marrakesh
