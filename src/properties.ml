@@ -73,27 +73,24 @@ let computed_properties = [
 
 (* assume that it is safe, should call can_write_prop *)
 (* TODO check `Write_acl if writing an ACL property *)
-(* TODO remove doesn't check write_protected list here *)
 let patch ?(is_mkcol = false) props_for_resource updates =
-  let set_prop k v props_for_resource =
-    if List.mem k write_protected && not (is_mkcol && k = (Xml.dav_ns, "resourcetype"))
-    then None, `Forbidden
-    else
-      (* set needs to be more expressive: forbidden, conflict, insufficient storage needs to be added *)
-      let map = unsafe_add k v props_for_resource in
-      Some map, `OK
-  in
   (* if an update did not apply, m will be None! *)
   let xml (ns, n) = [ Xml.node ~ns n [] ] in
   let apply (props_for_resource, propstats) update = match props_for_resource, update with
     | None, `Set (_, k, _) -> None, (`Failed_dependency, xml k) :: propstats
     | None, `Remove k   -> None, (`Failed_dependency, xml k) :: propstats
     | Some props_for_resource', `Set (a, k, v) ->
-      let props_for_resource'', p = set_prop k (a, v) props_for_resource' in
-      (props_for_resource'', (p, xml k) :: propstats)
+      if List.mem k write_protected && not (is_mkcol && k = (Xml.dav_ns, "resourcetype"))
+      then None, (`Forbidden, xml k)
+      else
+        let props_for_resource'' = unsafe_add k (a, v) props_for_resource' in
+        (props_for_resource'', (`OK, xml k) :: propstats)
     | Some props_for_resource', `Remove k ->
-      let props_for_resource'' = remove k props_for_resource' in
-      Some props_for_resource'', (`OK, xml k) :: propstats
+      if List.mem k write_protected
+      then None, (`Forbidden, xml k)
+      else
+        let props_for_resource'' = remove k props_for_resource' in
+        Some props_for_resource'', (`OK, xml k) :: propstats
   in
   match List.fold_left apply (Some props_for_resource, []) updates with
   | Some props_for_resource', xs -> Some props_for_resource', xs
