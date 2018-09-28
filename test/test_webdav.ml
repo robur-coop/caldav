@@ -1499,12 +1499,12 @@ let find_many_current_user_privset_forbidden principal aces () =
   let expected = [ (`Forbidden, [ Xml.dav_node "current-user-privilege-set" [] ]) ] in
   Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops properties fqname))
 
-let find_many_current_user_privset principal aces privilege () =
+let find_many_current_user_privset principal aces privileges () =
   let userprops = snd @@ user principal
   and fqname = (Xml.dav_ns, "current-user-privilege-set")
   and aces_xml = List.map Xml.ace_to_xml (snd aces) in
   let properties = make_properties (Xml.dav_ns, "acl") ([], aces_xml) in
-  let privilege_set = [ Xml.dav_node "privilege" [ Xml.priv_to_xml privilege ]] in
+  let privilege_set = List.map (fun p -> Xml.dav_node "privilege" [Xml.priv_to_xml p]) privileges in
   let expected = [ (`OK, [ Xml.dav_node "current-user-privilege-set" privilege_set ]) ] in
   Alcotest.(check (list (pair check_status (list t_tree))) __LOC__ expected (Properties.find_many userprops properties [fqname]))
 
@@ -1519,9 +1519,10 @@ let properties_find_many_tests = [
   "Find many for current-user-privilege-set, read can read - wants to read current user privset", `Quick, find_many_current_user_privset_forbidden "read" grant_read ;
   "Find many for current-user-privilege-set, read can read, invader can do nothing - wants to read current user privset", `Quick, find_many_current_user_privset_forbidden "invader" grant_read ;
   "Find many for current-user-privilege-set, forbidden", `Quick, find_many_current_user_privset_empty_forbidden ;
-  "Find many for current-user-privilege-set", `Quick, find_many_current_user_privset "read-current-user-privilege-set" grant_read_current_user_privilege_set `Read_current_user_privilege_set ;
-  "Find many for current-user-privilege-set, user: read-acl", `Quick, find_many_current_user_privset "read-acl" grant_read_acl `Read_acl;
-  "Find many for current-user-privilege-set, user: somebody", `Quick, find_many_current_user_privset "somebody" grant_all `All ;
+  "Find many for current-user-privilege-set", `Quick, find_many_current_user_privset "read-current-user-privilege-set" grant_read_current_user_privilege_set [`Read_current_user_privilege_set] ;
+  "Find many for current-user-privilege-set, user: read-acl", `Quick, find_many_current_user_privset "read-acl" grant_read_acl [`Read_acl];
+  "Find many for current-user-privilege-set, user: somebody", `Quick, find_many_current_user_privset "somebody" grant_all [
+    `Read ; `Write ; `Read_current_user_privilege_set ; `Write_content ; `Write_properties ; `Bind ; `Unbind ; `All ] ;
 ]
 
 let test_report_1_deny () =

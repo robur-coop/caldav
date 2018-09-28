@@ -81,13 +81,13 @@ let patch ?(is_mkcol = false) props_for_resource updates =
     | None, `Remove k   -> None, (`Failed_dependency, xml k) :: propstats
     | Some props_for_resource', `Set (a, k, v) ->
       if List.mem k write_protected && not (is_mkcol && k = (Xml.dav_ns, "resourcetype"))
-      then None, (`Forbidden, xml k)
+      then None, (`Forbidden, xml k) :: propstats
       else
         let props_for_resource'' = unsafe_add k (a, v) props_for_resource' in
-        (props_for_resource'', (`OK, xml k) :: propstats)
+        (Some props_for_resource'', (`OK, xml k) :: propstats)
     | Some props_for_resource', `Remove k ->
       if List.mem k write_protected
-      then None, (`Forbidden, xml k)
+      then None, (`Forbidden, xml k) :: propstats
       else
         let props_for_resource'' = remove k props_for_resource' in
         Some props_for_resource'', (`OK, xml k) :: propstats
