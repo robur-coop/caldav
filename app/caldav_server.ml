@@ -419,6 +419,13 @@ let init_users fs now config user_password =
   Dav.make_group fs now config "group" ["root" ; "test"]
 
 let main () =
+  (* avoid ECONNRESET, see https://github.com/mirage/ocaml-cohttp/issues/511 *)
+  Lwt.async_exception_hook := (function
+      | Unix.Unix_error (error, func, arg) ->
+        Logs.warn (fun m -> m  "Client connection error %s: %s(%S)"
+                      (Unix.error_message error) func arg)
+      | exn -> Logs.err (fun m -> m "Unhandled exception: %a" Fmt.exn exn)
+    );
   Logs.set_reporter (Logs_fmt.reporter ());
   Logs.set_level (Some Logs.Debug);
   let now = now () in
@@ -427,7 +434,15 @@ let main () =
   and scheme = "http"
   and hostname = "127.0.0.1"
   in
-  let host = Uri.make ~port ~scheme ~host:hostname () in
+  let host =
+    (* strip port if default for scheme, this should be handled by the Uri library *)
+    let port = match scheme, port with
+      | "http", 80 -> None
+      | "https", 443 -> None
+      | _ -> Some port
+    in
+    Uri.make ?port ~scheme ~host:hostname ()
+  in
   let principals = "principals" in
   let config = {
     principals ;
