@@ -225,13 +225,17 @@ class redirect config = object(self)
   method allowed_methods rd =
     Wm.continue [`GET ; `Other "PROPFIND"] rd
 
+  method known_methods = self#allowed_methods
+
   method content_types_provided rd =
-    Wm.continue [
-      ("*/*"       , self#redirect);
-    ] rd
+    Wm.continue [ ("*/*", self#redirect) ] rd
 
   method content_types_accepted rd =
     Wm.continue [] rd
+
+  method process_property rd =
+    let rd' = redirect (Uri.to_string @@ Uri.with_path config.host config.calendars) rd in
+    Wm.respond 301 rd'
 
   method private redirect rd =
     let rd' = redirect (Uri.to_string @@ Uri.with_path config.host config.calendars) rd in
