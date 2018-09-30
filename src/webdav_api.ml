@@ -660,6 +660,7 @@ module Make(Fs: Webdav_fs.S) = struct
     | `Email e -> e.Icalendar.trigger
     | `Audio a -> a.Icalendar.trigger
     | `Display d -> d.Icalendar.trigger
+    | `None d -> d.Icalendar.trigger
     in
     match snd trigger with
     | `Datetime ts -> ts_in_range ts range
