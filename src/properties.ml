@@ -54,6 +54,7 @@ let not_returned_by_allprop = [
   (Xml.caldav_ns, "calendar-home-set");
   (Xml.caldav_ns, "supported-collation-set");
   (Xml.robur_ns, "password");
+  (Xml.robur_ns, "salt");
 ]
 
 let write_protected = [

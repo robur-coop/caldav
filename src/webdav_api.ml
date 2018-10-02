@@ -34,9 +34,9 @@ sig
 
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, string) result Lwt.t
 
-  val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> string -> string ->
+  val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:string ->
     Uri.t Lwt.t
-  val change_user_password : state -> config -> string -> string -> (unit, [> `Internal_server_error ]) result Lwt.t
+  val change_user_password : state -> config -> name:string -> password:string -> salt:string -> (unit, [> `Internal_server_error ]) result Lwt.t
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val make_group : state -> Ptime.t -> config -> string -> string list -> Uri.t Lwt.t
@@ -941,10 +941,9 @@ module Make(Fs: Webdav_fs.S) = struct
 
   (* moved from Caldav_server *)
 
-let hash_password password =
-  let server_secret = "server_secret--" in
+let hash_password password salt =
   Cstruct.to_string @@ Nocrypto.Base64.encode @@
-  Nocrypto.Hash.SHA256.digest @@ Cstruct.of_string (server_secret ^ password)
+  Nocrypto.Hash.SHA256.digest @@ Cstruct.of_string (salt ^ "-" ^ password)
 
 let verify_auth_header fs config v =
   match Astring.String.cut ~sep:"Basic " v with
@@ -954,12 +953,15 @@ let verify_auth_header fs config v =
       | Some data -> match Astring.String.cut ~sep:":" (Cstruct.to_string data) with
         | None -> Lwt.return @@ Error "invalid user:password encoding"
         | Some (user, password) ->
-          let hashed = hash_password password in
           Fs.get_property_map fs (`Dir [config.principals ; user]) >|= fun props ->
           (* no user context yet *)
-          match Properties.unsafe_find (Xml.robur_ns, "password") props with
-          | Some (_, [ Xml.Pcdata stored ]) ->
-            if String.equal hashed stored
+          match
+            Properties.unsafe_find (Xml.robur_ns, "password") props,
+            Properties.unsafe_find (Xml.robur_ns, "salt") props
+          with
+          | Some (_, [ Xml.Pcdata stored_password ]), Some (_, [ Xml.Pcdata salt ]) ->
+            let computed_password = hash_password password salt in
+            if String.equal computed_password stored_password
             then Ok user
             else Error "wrong user or password"
           | _ -> Error "wrong user or password"
@@ -1061,12 +1063,14 @@ let initialize_fs fs now config =
   make_dir_if_not_present fs now config.admin_only_acl (`Dir [config.calendars]) >>= fun _ ->
   Lwt.return_unit
 
-let change_user_password fs config name password =
+let change_user_password fs config ~name ~password ~salt =
   let principal_dir = `Dir [ config.principals ; name ] in
   Fs.get_property_map fs principal_dir >>= fun auth_user_props ->
   let auth_user_props' =
-    Properties.unsafe_add (Xml.robur_ns, "password")
-      ([], [Xml.pcdata @@ hash_password password]) auth_user_props
+    Properties.unsafe_add (Xml.robur_ns, "salt")
+      ([], [Xml.pcdata @@ salt])
+      (Properties.unsafe_add (Xml.robur_ns, "password")
+         ([], [Xml.pcdata @@ hash_password password salt]) auth_user_props)
   in
   Fs.write_property_map fs principal_dir auth_user_props' >|= function
   | Error e ->
@@ -1093,7 +1097,7 @@ let make_principal props fs now config name =
   create_calendar fs now acl (`Dir [config.calendars ; name ; "calendar"]) >|= fun _ ->
   principal_url
 
-let make_user ?(props = []) fs now config name password =
+let make_user ?(props = []) fs now config ~name ~password ~salt =
   let get_url dir = Uri.with_path config.host (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
   let home_set_dir = `Dir [ config.calendars ; name ] in
   let home_set_url = get_url home_set_dir in
@@ -1101,7 +1105,9 @@ let make_user ?(props = []) fs now config name password =
     ((Xml.caldav_ns, "calendar-home-set"),
      ([], [Xml.dav_node "href" [Xml.pcdata @@ Uri.to_string home_set_url ]]))
     :: ((Xml.robur_ns, "password"),
-        ([], [Xml.pcdata @@ hash_password password]))
+        ([], [Xml.pcdata @@ hash_password password salt]))
+    :: ((Xml.robur_ns, "salt"),
+        ([], [Xml.pcdata salt]))
     :: props
   in
   make_principal props' fs now config name

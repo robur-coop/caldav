@@ -245,6 +245,9 @@ end
 let sane username =
   username <> "" && Astring.String.for_all Astring.Char.Ascii.is_alphanum username
 
+let generate_salt () =
+  Cstruct.to_string @@ Nocrypto.Base64.encode @@ Nocrypto.Rng.generate 16
+
 (* TODO force create user, uses delete user *)
 class user config fs = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
@@ -268,9 +271,10 @@ class user config fs = object(self)
   method private create_user rd =
     match self#requested_user rd, self#requested_password rd with
     | Error _, _ | _, Error _ -> Wm.respond (to_status `Bad_request) rd
-    | Ok name, Ok pass ->
+    | Ok name, Ok password ->
       let now = now () in
-      Dav.make_user fs now config name pass >>= fun principal_url ->
+      let salt = generate_salt () in
+      Dav.make_user fs now config ~name ~password ~salt >>= fun principal_url ->
       let rd' = with_resp_headers (Headers.replace_location principal_url) rd in
       Wm.continue true rd'
 
@@ -293,7 +297,8 @@ class user config fs = object(self)
       match user_exists, self#requested_password rd with
       | true, Ok new_pass ->
         begin
-          Dav.change_user_password fs config name new_pass >>= function
+          let salt = generate_salt () in
+          Dav.change_user_password fs config ~name ~password:new_pass ~salt >>= function
           | Ok () -> Wm.respond (to_status `OK) rd
           | Error e -> Wm.respond (to_status e) rd
         end
@@ -415,7 +420,10 @@ end
 
 
 let init_users fs now config user_password =
-  Lwt_list.iter_p (fun (u, p) -> Dav.make_user fs now config u p >|= fun _ -> ()) user_password >>= fun () ->
+  Lwt_list.iter_p (fun (name, password) ->
+      let salt = generate_salt () in
+      Dav.make_user fs now config ~name ~password ~salt >|= fun _ -> ())
+    user_password >>= fun () ->
   Dav.make_group fs now config "group" ["root" ; "test"]
 
 let main () =
