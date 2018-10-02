@@ -21,6 +21,12 @@ open Wm.Rd
 
 let now = Ptime_clock.now
 
+let sane username =
+  username <> "" && Astring.String.for_all Astring.Char.Ascii.is_alphanum username
+
+let generate_salt () =
+  Cstruct.to_string @@ Nocrypto.Base64.encode @@ Nocrypto.Rng.generate 15
+
 module Headers = struct
   let get_content_type headers =
     match Cohttp.Header.get headers "Content-Type" with
@@ -125,9 +131,25 @@ class handler config fs = object(self)
     match Headers.get_authorization rd.req_headers with
      | None -> Wm.continue (`Basic "calendar") rd
      | Some v -> Dav.verify_auth_header fs config v >>= function
-       | Error msg ->
+       | Error (`Msg msg) ->
          Logs.warn (fun m -> m "is_authorized failed with header value %s and message %s" v msg);
          Wm.continue (`Basic "invalid authorization") rd
+       | Error (`Unknown_user (name, password)) ->
+         if config.trust_on_first_use_mode then begin
+           if sane name then begin
+             let now = now () in
+             let salt = generate_salt () in
+             Dav.make_user fs now config ~name ~password ~salt >>= fun principal ->
+             let rd' = with_req_headers (Headers.replace_authorization name) rd in
+             Wm.continue `Authorized rd'
+           end else begin
+             Logs.warn (fun m -> m "is_authorized failed with unknown invalid username %s" name);
+             Wm.continue (`Basic "invalid authorization") rd
+           end
+         end else begin
+           Logs.warn (fun m -> m "is_authorized failed with unknown username %s" name);
+           Wm.continue (`Basic "invalid authorization") rd
+         end
        | Ok user ->
          let rd' = with_req_headers (Headers.replace_authorization user) rd in
          Wm.continue `Authorized rd'
@@ -245,12 +267,6 @@ class redirect config = object(self)
     Wm.respond 301 rd'
 end
 
-let sane username =
-  username <> "" && Astring.String.for_all Astring.Char.Ascii.is_alphanum username
-
-let generate_salt () =
-  Cstruct.to_string @@ Nocrypto.Base64.encode @@ Nocrypto.Rng.generate 16
-
 (* TODO force create user, uses delete user *)
 class user config fs = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
@@ -320,8 +336,11 @@ class user config fs = object(self)
     match Headers.get_authorization rd.req_headers with
      | None -> Wm.continue (`Basic "calendar") rd
      | Some v -> Dav.verify_auth_header fs config v >>= function
-       | Error msg ->
+       | Error (`Msg msg) ->
          Logs.warn (fun m -> m "is_authorized failed with header value %s and message %s" v msg);
+         Wm.continue (`Basic "invalid authorization") rd
+       | Error (`Unknown_user (name, _)) ->
+         Logs.warn (fun m -> m "is_authorized failed with unknown user %s" name);
          Wm.continue (`Basic "invalid authorization") rd
        | Ok user ->
          let rd' = with_req_headers (Headers.replace_authorization user) rd in
@@ -404,8 +423,11 @@ class group config fs = object(self)
     match Headers.get_authorization rd.req_headers with
      | None -> Wm.continue (`Basic "calendar") rd
      | Some v -> Dav.verify_auth_header fs config v >>= function
-       | Error msg ->
+       | Error (`Msg msg) ->
          Logs.warn (fun m -> m "is_authorized failed with header value %s and message %s" v msg);
+         Wm.continue (`Basic "invalid authorization") rd
+       | Error (`Unknown_user (name, _)) ->
+         Logs.warn (fun m -> m "is_authorized failed with unknown user %s" name);
          Wm.continue (`Basic "invalid authorization") rd
        | Ok user ->
          let rd' = with_req_headers (Headers.replace_authorization user) rd in
@@ -427,10 +449,10 @@ let init_users fs now config user_password =
       let salt = generate_salt () in
       Dav.make_user fs now config ~name ~password ~salt >|= fun _ -> ())
     user_password >>= fun () ->
-  Dav.make_group fs now config "group" ["root" ; "test"]
+  Dav.make_group fs now config "group" [ "root" ; "test" ]
 
 let main () =
-  (* avoid ECONNRESET, see https://github.com/mirage/ocaml-cohttp/issues/511 *)
+  (* avoids ECONNRESET, see https://github.com/mirage/ocaml-cohttp/issues/511 *)
   Lwt.async_exception_hook := (function
       | Unix.Unix_error (error, func, arg) ->
         Logs.warn (fun m -> m  "Client connection error %s: %s(%S)"
@@ -454,6 +476,10 @@ let main () =
     in
     Uri.make ?port ~scheme ~host:hostname ()
   in
+  let trust_on_first_use_mode = match Sys.getenv "CALDAV_TOFU" with
+    | "yes" | "YES" | "1" | "true" | "TRUE" -> true
+    | _ -> false
+  in
   let principals = "principals" in
   let config = {
     principals ;
@@ -462,7 +488,8 @@ let main () =
     admin_only_acl = [
       (`Href (Uri.with_path host @@ "/" ^ principals ^ "/root/"), `Grant [ `All ]) ;
       (`All, `Grant [ `Read ])
-    ]
+    ] ;
+    trust_on_first_use_mode
   } in
   (* create the file system *)
   FS_unix.connect "/tmp/calendar" >>= fun fs ->

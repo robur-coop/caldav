@@ -31,7 +31,7 @@ sig
 
   val compute_etag : state -> path:string -> string option Lwt.t
 
-  val verify_auth_header : state -> config -> string -> (string, string) result Lwt.t
+  val verify_auth_header : state -> config -> string -> (string,  [> `Msg of string | `Unknown_user of string * string ]) result Lwt.t
 
   val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:string ->
     Uri.t Lwt.t
@@ -39,6 +39,7 @@ sig
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val make_group : state -> Ptime.t -> config -> string -> string list -> Uri.t Lwt.t
+  val add_group_member : state -> config -> group:string -> member:string -> (unit, [> `Internal_server_error ]) result Lwt.t
   val change_group_members : state -> config -> string -> string list -> (unit, [> `Internal_server_error ]) result Lwt.t
   val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 

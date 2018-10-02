@@ -535,7 +535,8 @@ let config = {
   principals = "principals" ;
   calendars = "calendars" ;
   host = Uri.of_string "http://cal.example.com" ;
-  admin_only_acl = [ (`All, `Grant [ `All ]) ]
+  admin_only_acl = [ (`All, `Grant [ `All ]) ] ;
+  trust_on_first_use_mode = false ;
 }
 
 let appendix_b_data acl =

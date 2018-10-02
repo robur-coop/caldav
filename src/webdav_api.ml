@@ -32,7 +32,7 @@ sig
 
   val compute_etag : state -> path:string -> string option Lwt.t
 
-  val verify_auth_header : state -> Webdav_config.config -> string -> (string, string) result Lwt.t
+  val verify_auth_header : state -> Webdav_config.config -> string -> (string, [> `Msg of string | `Unknown_user of string * string ]) result Lwt.t
 
   val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:string ->
     Uri.t Lwt.t
@@ -40,6 +40,7 @@ sig
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val make_group : state -> Ptime.t -> config -> string -> string list -> Uri.t Lwt.t
+  val add_group_member : state -> config -> group:string -> member:string -> (unit, [> `Internal_server_error ]) result Lwt.t
   val change_group_members : state -> config -> string -> string list -> (unit, [> `Internal_server_error ]) result Lwt.t
   val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
@@ -949,9 +950,9 @@ let verify_auth_header fs config v =
   match Astring.String.cut ~sep:"Basic " v with
   | Some ("", b64) ->
     begin match Nocrypto.Base64.decode (Cstruct.of_string b64) with
-      | None -> Lwt.return @@ Error "invalid base64 encoding"
+      | None -> Lwt.return @@ Error (`Msg ("invalid base64 encoding " ^ b64))
       | Some data -> match Astring.String.cut ~sep:":" (Cstruct.to_string data) with
-        | None -> Lwt.return @@ Error "invalid user:password encoding"
+        | None -> Lwt.return @@ Error (`Msg ("invalid user:pass encoding" ^ Cstruct.to_string data))
         | Some (user, password) ->
           Fs.get_property_map fs (`Dir [config.principals ; user]) >|= fun props ->
           (* no user context yet *)
@@ -963,10 +964,10 @@ let verify_auth_header fs config v =
             let computed_password = hash_password password salt in
             if String.equal computed_password stored_password
             then Ok user
-            else Error "wrong user or password"
-          | _ -> Error "wrong user or password"
+            else Error (`Msg "password does not match")
+          | _ -> Error (`Unknown_user (user, password))
     end
-  | _ -> Lwt.return @@ Error "bad header"
+  | _ -> Lwt.return @@ Error (`Msg ("invalid auth header " ^ v))
 
 let last_modified fs ~path =
   Fs.from_string fs path >>= function
@@ -1220,6 +1221,27 @@ let change_group_members fs config name new_members =
       props
   in
   Fs.write_property_map fs principal_dir props' >|= function
+  | Error e -> Log.err (fun m -> m "write error %a while writing group properties in change_group_members" Fs.pp_write_error e) ; Error `Internal_server_error
+  | Ok () -> Ok ()
+
+let add_group_member fs config ~group ~member =
+  let principal_path user = `Dir [ config.principals ; user ] in
+  let url path = Uri.to_string @@ Uri.with_path config.host (Fs.to_string path) in
+  let new_member_path = principal_path member in
+  let group_path = principal_path group in
+  let group_node = Xml.dav_node "href" [Xml.pcdata (url group_path)] in
+  enroll fs group_node (Fs.to_string new_member_path) >>= fun () ->
+  Fs.get_property_map fs group_path >>= fun props ->
+  let props' =
+    let member_key = (Xml.dav_ns, "group-member-set") in
+    let new_node = Xml.dav_node "href" [Xml.pcdata (url new_member_path)] in
+    let new_members = match Properties.unsafe_find member_key props with
+      | None -> ([], [new_node])
+      | Some (a, members) -> (a, new_node :: members)
+    in
+    Properties.unsafe_add member_key new_members props
+  in
+  Fs.write_property_map fs group_path props' >|= function
   | Error e -> Log.err (fun m -> m "write error %a while writing group properties in change_group_members" Fs.pp_write_error e) ; Error `Internal_server_error
   | Ok () -> Ok ()
 
