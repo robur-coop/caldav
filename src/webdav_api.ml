@@ -1089,7 +1089,7 @@ let make_principal props fs now config name =
      ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata @@ Uri.to_string principal_url ] ]))
     :: props
   in
-  let acl = [ (`Href principal_url, `Grant [ `All ]) ; (`All, `Grant [ `Read ]) ] in
+  let acl = [ (`Href principal_url, `Grant [ `All ]) ] in
   let acl' = config.admin_only_acl @ acl in
   (* maybe only allow root to write principal_dir (for password reset) *)
   make_dir_if_not_present fs now acl' ~resourcetype ~props:props' principal_dir >>= fun _ ->
