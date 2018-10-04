@@ -163,12 +163,12 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
       Lwt.return (Error `Conflict)
     | true ->
       acl fs config user parent' >>= function
-      | Error e -> 
+      | Error e ->
         Log.err (fun m -> m "acl check for user %s returned forbidden while trying to write file %s" user (Fs.to_string file')) ;
         Lwt.return @@ Error `Forbidden
       | Ok acl ->
         is_calendar fs parent' >>= function
-        | false -> 
+        | false ->
           Log.err (fun m -> m "is_calendar was false when trying to write %s" (Fs.to_string file')) ;
           Lwt.return @@ Error `Bad_request
         | true ->
@@ -176,7 +176,7 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
           let props = Properties.create ~content_type ~etag
               acl timestamp (String.length ics) (Fs.to_string file')
           in
-          Fs.write fs file (Cstruct.of_string ics) props >>= function
+          Fs.write fs file ics props >>= function
           | Error e -> Lwt.return @@ Error `Internal_server_error
           | Ok () -> update_parent_after_child_write fs file' timestamp >|= fun () ->
                      Ok etag
@@ -196,7 +196,7 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         Fs.read fs (`File f) >|= function
         | Error e -> Log.err (fun m -> m "error %a while reading file" Fs.pp_error e) ; []
         | Ok (data, _props) ->
-          match Icalendar.parse (Cstruct.to_string data) with
+          match Icalendar.parse data with
           | Error e -> Log.err (fun m -> m "error %s while parsing ics" e ); []
           | Ok calendar -> snd calendar
     in
@@ -239,7 +239,7 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
       let ct = match Properties.unsafe_find (Xml.dav_ns, "getcontenttype") props with
         | Some (_, [ Xml.Pcdata ct ]) -> ct
         | _ -> "text/calendar" in
-      Ok (ct, Cstruct.to_string data)
+      Ok (ct, data)
 
   let delete fs ~path now =
     Fs.from_string fs path >>= function
@@ -859,9 +859,9 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
                   Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
             in
             Ok (Some node)
-          else match Icalendar.parse (Cstruct.to_string data) with
+          else match Icalendar.parse data with
             | Error e ->
-              Log.err (fun m -> m "Error %s while parsing %s" e (Cstruct.to_string data));
+              Log.err (fun m -> m "Error %s while parsing %s" e data);
               Error `Bad_request
             | Ok ics ->
               match apply_to_vcalendar query ics props ~auth_user_props with
@@ -917,9 +917,9 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
           in
           Ok node
         else
-          match Icalendar.parse (Cstruct.to_string data) with
+          match Icalendar.parse data with
           | Error e ->
-            Log.err (fun m -> m "Error %s while parsing %s" e (Cstruct.to_string data));
+            Log.err (fun m -> m "Error %s while parsing %s" e data);
             Error `Bad_request
           | Ok ics ->
             let xs = apply_transformation transformation ics props ~auth_user_props in
@@ -1212,9 +1212,9 @@ let make_user ?(props = []) fs now config ~name ~password ~salt =
   principal_url
 
 let delete_home_and_calendars fs principal_dir user_calendar_dir =
-  Fs.destroy ~recursive:true fs principal_dir >>= function
+  Fs.destroy fs principal_dir >>= function
   | Error e -> Lwt.return @@ Error e
-  | Ok () -> Fs.destroy ~recursive:true fs user_calendar_dir
+  | Ok () -> Fs.destroy fs user_calendar_dir
 
 let delete_user fs config name =
   let principal_dir = `Dir [config.principals ; name] in

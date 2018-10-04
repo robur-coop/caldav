@@ -37,9 +37,7 @@ sig
 
   val size : t -> file -> (int64, error) result Lwt.t
 
-  val read : t -> file -> (Cstruct.t * Properties.t, error) result Lwt.t
-
-  val stat : t -> file_or_dir -> (Mirage_fs.stat, error) result Lwt.t
+  val read : t -> file -> (string * Properties.t, error) result Lwt.t
 
   val exists : t -> string -> bool Lwt.t
 
@@ -49,9 +47,9 @@ sig
 
   val mkdir : t -> dir -> Properties.t -> (unit, write_error) result Lwt.t
 
-  val write : t -> file -> Cstruct.t -> Properties.t -> (unit, write_error) result Lwt.t
+  val write : t -> file -> string -> Properties.t -> (unit, write_error) result Lwt.t
 
-  val destroy : ?recursive:bool -> t -> file_or_dir -> (unit, write_error) result Lwt.t
+  val destroy : t -> file_or_dir -> (unit, write_error) result Lwt.t
 
   val pp_error : error Fmt.t
 
@@ -63,7 +61,7 @@ end
 let src = Logs.Src.create "webdav.fs" ~doc:"webdav fs logs"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module Make (Fs:Mirage_fs_lwt.S) = struct
+module Make (Fs:Mirage_kv_lwt.RW) = struct
 
   open Lwt.Infix
 
@@ -72,6 +70,8 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
   type t = Fs.t
   type error = Fs.error
   type write_error = Fs.write_error
+  let pp_error = Fs.pp_error
+  let pp_write_error = Fs.pp_write_error
 
   let (>>==) a f = a >>= function
     | Error e -> Lwt.return (Error e)
@@ -80,10 +80,6 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
   let (>>|=) a f = a >|= function
     | Error e -> Error e
     | Ok res  -> f res
-
-  let isdir fs name =
-    Fs.stat fs name >>|= fun stat ->
-    Ok stat.Mirage_fs.directory
 
   let basename = function
     | `File path | `Dir path ->
@@ -95,21 +91,32 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
     `File (data @ [name])
 
   (* TODO: no handling of .. done here yet *)
-  let data str = Astring.String.cuts ~empty:false ~sep:"/" str
+  let data_to_list str = Astring.String.cuts ~empty:false ~sep:"/" str
+  let data str = Mirage_kv.Key.v str
 
-  let dir_from_string str = `Dir (data str)
+  let dir_from_string str = `Dir (data_to_list str)
 
-  let file_from_string str = `File (data str)
-
-  let from_string fs str =
-    isdir fs str >>|= fun dir ->
-    Ok (if dir then `Dir (data str) else `File (data str))
+  let file_from_string str = `File (data_to_list str)
 
   let to_string =
     let a = Astring.String.concat ~sep:"/" in
     function
     | `File data -> "/" ^ a data
     | `Dir data -> "/" ^ a data ^ "/"
+
+  let isdir fs name =
+    (* TODO `File is wrong here, we're here to figure out whether it is a file or directory *)
+    let key = data @@ to_string (`File name) in
+    Fs.exists fs key >|= function
+    | Ok None -> Error (`Not_found key)
+    | Ok (Some `Value) -> Ok false
+    | Ok (Some `Dictionary) -> Ok true
+    | Error e -> Error e
+
+  let from_string fs str =
+    let key = data_to_list str in
+    isdir fs key >>|= fun dir ->
+    Ok (if dir then `Dir key else `File key)
 
   let parent f_or_d =
     let parent p =
@@ -121,18 +128,18 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
     | `Dir d -> parent d
     | `File f -> parent f
 
-  let propfilename =
+  let propfilename f_or_d =
     let ext = ".prop.xml" in
-    function
-    | `Dir data -> `File (data @ [ ext ])
+    let segments = match f_or_d with
+    | `Dir data -> data @ [ ext ]
     | `File data -> match List.rev data with
-      | filename :: path -> `File (List.rev path @ [ filename ^ ext ])
-      | [] -> assert false (* no file without a name *)
+      | filename :: path -> List.rev path @ [ filename ^ ext ]
+      | [] -> assert false (* no file without a name *) in
+    List.fold_left Mirage_kv.Key.add Mirage_kv.Key.empty segments
 
   let get_properties fs f_or_d =
-    let propfile = to_string (propfilename f_or_d) in
-    Fs.size fs propfile >>== fun size ->
-    Fs.read fs propfile 0 (Int64.to_int size)
+    let propfile = propfilename f_or_d in
+    Fs.get fs propfile
 
   (* TODO: check call sites, used to do:
       else match Xml.get_prop "resourcetype" map with
@@ -155,58 +162,59 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
         | Ok _ ->
           (*    let data = Properties.to_string map in *)
           let data = Sexplib.Sexp.to_string (Properties.to_sexp map) in
-          let filename = to_string (propfilename f_or_d) in
+          let filename = propfilename f_or_d in
           (* Log.debug (fun m -> m "writing property map %s: %s" filename data) ; *)
-          Fs.destroy fs filename >>= fun _ ->
-          Fs.write fs filename 0 (Cstruct.of_string data)
+          Fs.set fs filename data
       end
     | Some _ ->
       Log.err (fun m -> m "map %s with non-singleton pcdata for getlastmodified" (to_string f_or_d)) ;
       assert false
 
   let size fs (`File file) =
-    let name = to_string (`File file) in
-    Fs.size fs name
-
-  let stat fs f_or_d = Fs.stat fs (to_string f_or_d)
+    let key = data @@ to_string (`File file) in
+    Fs.get fs key >|= function
+    | Error e -> Error e
+    | Ok data -> Ok (Int64.of_int @@ String.length data)
 
   let exists fs str =
-    Fs.stat fs str >|= function
-    | Ok _ -> true
-    | Error _ -> false
+    let file = data str in
+    Fs.exists fs file >|= function
+    | Error e -> (* Error e *) false
+    | Ok None -> false
+    | Ok (Some _) -> true
+    (*Fs.mem fs file*)
 
   let dir_exists fs (`Dir dir) =
-    Fs.stat fs (to_string (`Dir dir)) >|= function
-    | Ok s when s.Mirage_fs.directory -> true
-    | _ -> false
+    let key = data @@ to_string (`Dir dir) in
+    Fs.exists fs key >|= function
+    | Error e -> (* Error e *) false
+    | Ok None -> false
+    | Ok (Some `Value) -> false
+    | Ok (Some `Dictionary) -> true
 
   let listdir fs (`Dir dir) =
-    let dir_string = to_string (`Dir dir) in
-    Fs.listdir fs dir_string >>== fun files ->
-    Lwt_list.fold_left_s (fun acc fn ->
-        if Astring.String.is_suffix ~affix:".prop.xml" fn then
-          Lwt.return acc
-        else
-          let str = dir_string ^ fn in
-          isdir fs str >|= function
-          | Error _ -> acc
-          | Ok is_dir ->
-            let f_or_d =
-              if is_dir
-              then dir_from_string str
-              else file_from_string str
-            in
-            f_or_d :: acc)
-      [] files >|= fun files ->
-    Ok files
+    let kv_dir = data @@ to_string (`Dir dir) in
+    Fs.list fs kv_dir >|= function
+    | Error e -> Error e
+    | Ok files ->
+      let files = List.fold_left (fun acc (step, kind) ->
+          if Astring.String.is_suffix ~affix:".prop.xml" step then
+            acc
+          else
+            (* TODO check whether step is the entire path, or dir needs to be included *)
+            let file = dir @ [step] in
+            match kind with
+            | `Value -> `File file :: acc
+            | `Dictionary -> `Dir file :: acc)
+          [] files in
+      Ok files
 
   let get_raw_property_map fs f_or_d =
     get_properties fs f_or_d >|= function
     | Error e ->
-      Log.err (fun m -> m "error while getting properties for %s %a" (to_string f_or_d) Fs.pp_error e) ;
+      Log.err (fun m -> m "error while getting properties for %s %a" (to_string f_or_d) pp_error e) ;
       None
-    | Ok data ->
-      let str = Cstruct.(to_string @@ concat data) in
+    | Ok str ->
       Some (Properties.of_sexp (Sexplib.Sexp.of_string str))
 
       (* match Xml.string_to_tree str with
@@ -214,6 +222,64 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
            Log.err (fun m -> m "couldn't convert %s to xml tree" str) ;
            None
          | Some t -> Some (Properties.from_tree t) *)
+
+  (* property getlastmodified does not exist for directories *)
+  (* careful: unsafe_find *)
+  let last_modified_as_ptime fs f_or_d =
+    get_raw_property_map fs f_or_d >|= function
+    | None ->
+      Printf.printf "invalid XML!\n" ;
+      None
+    | Some map ->
+      match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
+      | Some (_, [ Xml.Pcdata last_modified ]) ->
+        begin match Ptime.of_rfc3339 last_modified with
+          | Error _ ->
+            Printf.printf "invalid data!\n" ;
+            None
+          | Ok (ts, _, _) -> Some ts
+        end
+      | _ -> None
+
+  (* we only take depth 1 into account when computing the overall last modified *)
+  (* careful: unsafe_find *)
+  let last_modified_of_dir map fs (`Dir dir) =
+    let start = match Properties.unsafe_find (Xml.dav_ns, "creationdate") map with
+      | Some (_, [ Xml.Pcdata date ]) ->
+        begin match Ptime.of_rfc3339 date with
+          | Error _ -> assert false
+          | Ok (ts, _, _) -> ts
+        end
+      | _ -> Ptime.epoch
+    in
+    listdir fs (`Dir dir) >>= function
+    | Error _ -> Lwt.return (Xml.ptime_to_http_date start)
+    | Ok files ->
+      Lwt_list.map_p (last_modified_as_ptime fs) files >>= fun last_modifieds ->
+      let lms = List.fold_left (fun acc -> function None -> acc | Some lm -> lm :: acc) [] last_modifieds in
+      let max_mtime a b = if Ptime.is_later ~than:a b then b else a
+      in
+      Lwt.return (Xml.ptime_to_http_date @@ List.fold_left max_mtime start lms)
+
+  (* careful: unsafe_find *)
+  let get_etag fs f_or_d =
+    get_raw_property_map fs f_or_d >|= function
+    | None ->
+      Printf.printf "invalid XML!\n" ;
+      None
+    | Some map -> match Properties.unsafe_find (Xml.dav_ns, "getetag") map with
+      | Some (_, [ Xml.Pcdata etag ]) -> Some etag
+      | _ -> Some (to_string f_or_d)
+
+  (* careful: unsafe_find (when calling get_etag) *)
+  let etag_of_dir fs (`Dir dir) =
+    listdir fs (`Dir dir) >>= function
+    | Error _ -> Lwt.return ""
+    | Ok files ->
+      Lwt_list.map_p (get_etag fs) files >>= fun etags ->
+      let some_etags = List.fold_left (fun acc -> function None -> acc | Some x -> x :: acc) [] etags in
+      let data = String.concat ":" some_etags in
+      Lwt.return (Digest.to_hex @@ Digest.string data)
 
   (* let open_fs_error x =
        (x : ('a, Fs.error) result Lwt.t :> ('a, [> Fs.error ]) result Lwt.t) *)
@@ -236,49 +302,34 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
           Properties.unsafe_add (Xml.dav_ns, "getlastmodified") initial_date map
 
   let read fs (`File file) =
-    let name = to_string (`File file) in
-    Fs.size fs name >>== fun length ->
-    Fs.read fs name 0 (Int64.to_int length) >>== fun data ->
-    get_property_map fs (`File file) >|= fun props ->
-    Ok (Cstruct.concat data, props)
+    let kv_file = data @@ to_string (`File file) in
+    Fs.get fs kv_file >>= function
+    | Error e -> Lwt.return (Error e)
+    | Ok data ->
+      get_property_map fs (`File file) >|= fun props ->
+      Ok (data, props)
 
   let mkdir fs (`Dir dir) propmap =
-    Fs.mkdir fs (to_string (`Dir dir)) >>== fun () ->
     write_property_map fs (`Dir dir) propmap
 
-  let write fs (`File file) data propmap =
-    let filename = to_string (`File file) in
-    Fs.destroy fs filename >>= fun _ ->
-    Fs.write fs filename 0 data >>== fun () ->
-    write_property_map fs (`File file) propmap
+  let write fs (`File file) value propmap =
+    let kv_file = data @@ to_string (`File file) in
+    Fs.set fs kv_file value >>= function
+    | Error e -> Lwt.return (Error e)
+    | Ok () -> write_property_map fs (`File file) propmap
 
   let destroy_file_or_empty_dir fs f_or_d =
+    (* TODO could a propfile influence the right to deletion if it gets deleted first? *)
+    (* TODO use Mirage_kv.RW.batch! *)
     let propfile = propfilename f_or_d in
-    Fs.destroy fs (to_string propfile) >>== fun () ->
-    Fs.destroy fs (to_string f_or_d)
+    Fs.remove fs propfile >>= function
+    | Error e -> Lwt.return (Error e)
+    | Ok () ->
+      let file = data @@ to_string f_or_d in
+      Fs.remove fs file
 
-  (* TODO maybe push the recursive remove to FS *)
-  let rec destroy ?(recursive = false) fs f_or_d =
-    (if recursive then
-       match f_or_d with
-       | `File _ -> Lwt.return @@ Ok ()
-       | `Dir d ->
-         listdir fs (`Dir d) >>= function
-         | Error `Is_a_directory -> Lwt.return @@ Error `Is_a_directory
-         | Error `No_directory_entry -> Lwt.return @@ Error `No_directory_entry
-         | Error `Not_a_directory -> Lwt.return @@ Error `Not_a_directory
-         | Error _ -> assert false
-         | Ok f_or_ds ->
-           Lwt_list.fold_left_s (fun result f_or_d ->
-               match result with
-               | Error e -> Lwt.return @@ Error e
-               | Ok () -> destroy ~recursive fs f_or_d) (Ok ()) f_or_ds
-     else Lwt.return @@ Ok ()) >>= function
-    | Error e -> Lwt.return @@ Error e
-    | Ok () -> destroy_file_or_empty_dir fs f_or_d
-
-  let pp_error = Fs.pp_error
-  let pp_write_error = Fs.pp_write_error
+  let destroy fs f_or_d =
+    destroy_file_or_empty_dir fs f_or_d
 
   (* TODO check the following invariants:
       - every resource has a .prop.xml file

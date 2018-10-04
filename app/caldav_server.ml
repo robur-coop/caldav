@@ -2,15 +2,18 @@
 open Lwt.Infix
 open Caldav.Webdav_config
 
-module Clock = struct
-  let now = fun () -> int_of_float (Unix.gettimeofday ())
-end
-
 module Fs = Caldav.Webdav_fs.Make(FS_unix)
 module Webdav_server = Caldav.Webdav_server.Make(Clock)(Fs)
+
+module G = Irmin_git.Mem
+module Store = Irmin_mirage.Git.KV_RW(G)(Pclock)
+module Fs = Caldav.Webdav_fs.Make(Store)
+
+module Xml = Caldav.Webdav_xml
 module Dav = Caldav.Webdav_api.Make(Fs)
 
 module Http_server = Cohttp_lwt_unix.Server
+module Conduit_mirage_tcp = Conduit_mirage.With_tcp(Tcpip_stack_socket)
 
 let now = Ptime_clock.now
 
@@ -41,7 +44,17 @@ let main () =
   in
   let config = config ~do_trust_on_first_use host in
   (* create the file system *)
-  FS_unix.connect "/tmp/calendar" >>= fun fs ->
+  G.v (Fpath.v "bla") >>= function
+  | Error _ -> assert false
+  | Ok git ->
+    Udpv4_socket.connect None >>= fun udp ->
+    Tcpv4_socket.connect None >>= fun tcp ->
+    Tcpip_stack_socket.connect [] udp tcp >>= fun stack ->
+    Conduit_mirage_tcp.connect stack Conduit_mirage.empty >>= fun conduit' ->
+    Conduit_mirage.with_tls conduit' >>= fun conduit ->
+    let resolver = Resolver_lwt_unix.system in
+    Store.connect git ~conduit ~author:"caldav" ~resolver ~msg:(fun _ -> "a calendar change") ()
+      "https://github.com/roburio/testcalendar.git" >>= fun fs ->
   (* only for apple test suite *)
   (* initialize_fs_for_apple_testsuite fs now config >>= fun () -> *)
   Dav.initialize_fs fs (now ()) config >>= fun () ->

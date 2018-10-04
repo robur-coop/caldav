@@ -27,21 +27,16 @@ depends: [
   "mirage-random-test" {with-test}
   "mirage-clock-unix" {with-test}
   "mirage-fs-mem" {with-test}
-  "mirage-fs-unix" {>="1.5.0"}
   "ppx_deriving" {build}
   "webmachine"
   "lwt"
-  "ptime" 
+  "ptime"
   "cohttp-lwt-unix"
   "nocrypto"
   "xmlm"
   "tyxml"
   "icalendar"
   "rresult"
-]
-
-pin-depends: [
-  ["mirage-clock.dev" "git+https://github.com/hannesm/mirage-clock.git#t-is-unit"]
 ]
 
 synopsis: "A CalDAV server"

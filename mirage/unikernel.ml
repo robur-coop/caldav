@@ -9,10 +9,14 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
-module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_types_lwt.KV_RO) (S: HTTP) = struct
+module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_types_lwt.KV_RO) (S: HTTP) (Resolver : Resolver_lwt.S) (Conduit : Conduit_mirage.S) = struct
   module X509 = Tls_mirage.X509(KEYS)(Clock)
-  module Webdav_server1 = Caldav.Webdav_server.Make(R)(Clock)(Caldav.Webdav_fs.Make(Mirage_fs_mem))(S)
-  module Webdav_server2 = Caldav.Webdav_server.Make(R)(Clock)(Caldav.Webdav_fs.Make(FS_unix))(S)
+  module Store = Irmin_mirage.Git.KV_RW(Irmin_git.Mem)(Clock)
+
+  module Dav_fs = Caldav.Webdav_fs.Make(Store)
+  module Dav = Caldav.Webdav_api.Make(R)(Clock)(Dav_fs)
+  module Webdav_server1 = Caldav.Webdav_server.Make(R)(Clock)(Dav_fs)(S)
+  module Webdav_server2 = Caldav.Webdav_server.Make(R)(Clock)(Dav_fs)(S)
 
 
   let tls_init kv =
@@ -46,7 +50,7 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
     in
     S.make ~conn_closed ~callback ()
 
-  let start _random clock tls_keys http =
+  let start _random clock tls_keys http resolver conduit =
     (* TODO naming *)
     let init_http port config fs =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
@@ -71,17 +75,17 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
       and admin_pass = Key_gen.admin_password ()
       and apple_testable = Key_gen.apple_testable ()
       in
+      Irmin_git.Mem.v (Fpath.v "bla") >>= function
+      | Error _ -> assert false
+      | Ok git ->
+        Store.connect git ~conduit ~author:"caldav" ~resolver
+          ~msg:(fun _ -> "a calendar change") ()
+          "https://github.com/roburio/testcalendar.git" >>= fun fs ->
       if not apple_testable then
-        FS_unix.connect dir >>= fun fs ->
-        let module Fs = Caldav.Webdav_fs.Make(FS_unix) in
-        let module Dav = Caldav.Webdav_api.Make(R)(Clock)(Fs) in
         Dav.connect fs config admin_pass >|= fun fs ->
         `Unix fs
       else
-        let module Fs = Caldav.Webdav_fs.Make(Mirage_fs_mem) in
-        let module Dav = Caldav.Webdav_api.Make(R)(Clock)(Fs) in
         let now = Ptime.v (Clock.now_d_ps clock) in
-        Mirage_fs_mem.connect "" >>= fun fs ->
         Dav.initialize_fs_for_apple_testsuite fs now config >|= fun () ->
         `Apple fs
     in

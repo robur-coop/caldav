@@ -58,11 +58,11 @@ let keys = List.map (fun (Any k) -> Key.abstract k) [Any http_port; Any https_po
 let main =
   let direct_dependencies = [
     package "uri" ;
-    package ~pin:"git+https://github.com/roburio/ocaml-webmachine.git#webdav" "webmachine" ;
-    package ~pin:"git+https://github.com/roburio/caldav.git" "caldav" ;
-    package "mirage-fs-unix" ;
-    package "mirage-fs-mem" ;
-    package "mirage-fs-lwt" ;
+    package "irmin-git" ;
+    package "irmin-mirage" ;
+    package "caldav" ;
+(*    package ~pin:"git+https://github.com/roburio/ocaml-webmachine.git#webdav" "webmachine" ;
+      package ~pin:"git+https://github.com/roburio/caldav.git" "caldav" ; *)
   ] in
   let keys =
     [ Key.abstract http_port ; Key.abstract https_port ;
@@ -71,7 +71,7 @@ let main =
   in
   foreign
     ~packages:direct_dependencies ~keys
-    "Unikernel.Main" (random @-> pclock @-> kv_ro @-> http @-> job)
+    "Unikernel.Main" (random @-> pclock @-> kv_ro @-> http @-> resolver @-> conduit @-> job)
 
 let () =
-  register "caldav" [main $ default_random $ default_posix_clock $ certs $ http_srv]
+  register "caldav" [main $ default_random $ default_posix_clock $ certs $ http_srv $ resolver_dns net $ conduit_direct ~tls:true net ]
