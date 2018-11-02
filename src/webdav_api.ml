@@ -44,7 +44,7 @@ sig
   val change_group_members : state -> config -> string -> string list -> (unit, [> `Internal_server_error ]) result Lwt.t
   val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
-  val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
+  val initialize_fs : state -> Ptime.t -> Webdav_xml.ace list -> config -> unit Lwt.t
 end
 
 let src = Logs.Src.create "webdav.robur.io" ~doc:"webdav api logs"
@@ -67,6 +67,17 @@ module Make(Fs: Webdav_fs.S) = struct
        | Xml.Node (ns, "calendar", _, _) when ns = Xml.caldav_ns -> true
        | _ -> false in
        List.exists calendar_node trees
+
+  let unsafe_read_acl fs path =
+    Fs.get_property_map fs path >|= fun resource_props ->
+    match Properties.unsafe_find (Xml.dav_ns, "acl") resource_props with
+    | None ->
+      Log.warn (fun m -> m "unsafe_read_acl: encountered empty ACL for %s"
+                   (Fs.to_string path)) ;
+      []
+    | Some (_, aces) ->
+      let aces' = List.map Xml.xml_to_ace aces in
+      List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces'
 
   let properties_for_current_user fs config user =
     let user_path = `Dir [ config.principals ; user ] in
@@ -1040,7 +1051,7 @@ let create_calendar fs now acl name =
   let resourcetype = [ Xml.node ~ns:Xml.caldav_ns "calendar" [] ] in
   make_dir_if_not_present fs now acl ~resourcetype ~props name
 
-let initialize_fs_for_apple_testsuite fs now config =
+let initialize_fs_for_apple_testsuite fs now acl config =
   let calendars_properties =
     let url =
       Uri.with_path config.host
@@ -1050,7 +1061,6 @@ let initialize_fs_for_apple_testsuite fs now config =
     (Xml.caldav_ns, "calendar-home-set"),
     ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata (Uri.to_string url) ]])
   ] in
-  let acl = config.admin_only_acl in
   make_dir_if_not_present fs now acl ~props:calendars_properties (`Dir [config.calendars]) >>= fun _ ->
   make_dir_if_not_present fs now acl (`Dir [config.calendars ; "users"]) >>= fun _ ->
   make_dir_if_not_present fs now acl (`Dir [config.calendars ; "__uids__"]) >>= fun _ ->
@@ -1059,9 +1069,9 @@ let initialize_fs_for_apple_testsuite fs now config =
   make_dir_if_not_present fs now acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "tasks"]) >>= fun _ ->
   Lwt.return_unit
 
-let initialize_fs fs now config =
-  make_dir_if_not_present fs now config.admin_only_acl (`Dir [config.principals]) >>= fun _ ->
-  make_dir_if_not_present fs now config.admin_only_acl (`Dir [config.calendars]) >>= fun _ ->
+let initialize_fs fs now acl config =
+  make_dir_if_not_present fs now acl (`Dir [config.principals]) >>= fun _ ->
+  make_dir_if_not_present fs now acl (`Dir [config.calendars]) >>= fun _ ->
   Lwt.return_unit
 
 let change_user_password fs config ~name ~password ~salt =
@@ -1090,12 +1100,13 @@ let make_principal props fs now config name =
      ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata @@ Uri.to_string principal_url ] ]))
     :: props
   in
-  let acl = [ (`Href principal_url, `Grant [ `All ]) ] in
-  let acl' = config.admin_only_acl @ acl in
+  let acl = (`Href principal_url, `Grant [ `All ]) in
+  unsafe_read_acl fs (`Dir [config.principals]) >>= fun principal_acl ->
+  unsafe_read_acl fs (`Dir [config.calendars]) >>= fun calendar_acl ->
   (* maybe only allow root to write principal_dir (for password reset) *)
-  make_dir_if_not_present fs now acl' ~resourcetype ~props:props' principal_dir >>= fun _ ->
-  make_dir_if_not_present fs now acl' home_set_dir >>= fun _ ->
-  create_calendar fs now acl (`Dir [config.calendars ; name ; "calendar"]) >|= fun _ ->
+  make_dir_if_not_present fs now (acl :: principal_acl) ~resourcetype ~props:props' principal_dir >>= fun _ ->
+  make_dir_if_not_present fs now (acl :: calendar_acl) home_set_dir >>= fun _ ->
+  create_calendar fs now [acl] (`Dir [config.calendars ; name ; "calendar"]) >|= fun _ ->
   principal_url
 
 let make_user ?(props = []) fs now config ~name ~password ~salt =

@@ -27,6 +27,9 @@ DONE:
 - move stuff to webdav_api
 - curl command to add a user, delete a user, access control, change password
 - curl command to add group, add group members, delete group members, delete group
+- add custom salting
+- mode for TOFU (everybody can create their user if not already taken)
+- ACL/policy configuration via property in root folder
 
 -- 31st August 2018:
 
@@ -63,17 +66,14 @@ DONE:
 
 -- 2nd November 2018
 
+- configure  default group membership for newly created users via webdav property
 - make a mirage unikernel: parameter should be root password
 - LATER: KV updates for irmin/git
 - blackberry comma topic
-- ACL/policy configuration via property in root folder
---> also default group membership for newly created users
 - remove hardcoded users
 - stored URLs contain scheme, hostname, and port
 --> should instead be relative!?
 --> or absolute, but not containing scheme, hostname, port
-- add custom salting
-- mode for TOFU (everybody can create their user if not already taken)
 - test and adapt calendar-home-set with multiple entries:
  - does it work with clients?
  - which path is a "new calendar" created in?

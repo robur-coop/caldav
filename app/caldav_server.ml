@@ -485,17 +485,17 @@ let main () =
     principals ;
     calendars = "calendars" ;
     host ;
-    admin_only_acl = [
-      (`Href (Uri.with_path host @@ "/" ^ principals ^ "/root/"), `Grant [ `All ]) ;
-      (`All, `Grant [ `Read ])
-    ] ;
-    trust_on_first_use_mode
+    trust_on_first_use_mode ;
   } in
+  let admin_acl = [
+    (`Href (Uri.with_path host @@ "/" ^ principals ^ "/root/"), `Grant [ `All ]) ;
+    (`All, `Grant [ `Read ])
+  ] in
   (* create the file system *)
   FS_unix.connect "/tmp/calendar" >>= fun fs ->
   (* only for apple test suite *)
   (* initialize_fs_for_apple_testsuite fs now config >>= fun () -> *)
-  Dav.initialize_fs fs now config >>= fun () ->
+  Dav.initialize_fs fs now admin_acl config >>= fun () ->
   let user_password = [
     ("test", "password") ;
     ("root", "toor") ;
