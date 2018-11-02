@@ -10,8 +10,11 @@ module Privileges = Caldav.Privileges
 type file_or_dir = Caldav.Webdav_fs.file_or_dir
 
 module Wm = struct
-  module Rd = Webmachine.Rd
-  include Webmachine.Make(Cohttp_lwt_unix__Io)
+  module Clock = struct
+    let now = fun () -> int_of_float (Unix.gettimeofday ())
+  end
+   module Rd = Webmachine.Rd
+  include Webmachine.Make(Cohttp_lwt_unix__Io)(Clock)
 end
 
 open Wm.Rd
