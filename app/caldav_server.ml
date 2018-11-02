@@ -13,8 +13,7 @@ module Http_server = Cohttp_lwt_unix.Server
 
 let now = Ptime_clock.now
 
-let generate_salt () =
-  Cstruct.to_string @@ Nocrypto.Base64.encode @@ Nocrypto.Rng.generate 15
+let generate_salt () = Nocrypto.Rng.generate 15
 
 let init_users fs now config user_password =
   Lwt_list.iter_p (fun (name, password) ->

@@ -34,9 +34,9 @@ sig
 
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, [> `Msg of string | `Unknown_user of string * string ]) result Lwt.t
 
-  val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:string ->
+  val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:Cstruct.t ->
     Uri.t Lwt.t
-  val change_user_password : state -> config -> name:string -> password:string -> salt:string -> (unit, [> `Internal_server_error ]) result Lwt.t
+  val change_user_password : state -> config -> name:string -> password:string -> salt:Cstruct.t -> (unit, [> `Internal_server_error ]) result Lwt.t
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val make_group : state -> Ptime.t -> config -> string -> string list -> Uri.t Lwt.t
@@ -953,9 +953,10 @@ module Make(Fs: Webdav_fs.S) = struct
 
   (* moved from Caldav_server *)
 
+let base64_encode data = Cstruct.to_string @@ Nocrypto.Base64.encode @@ data
+
 let hash_password password salt =
-  Cstruct.to_string @@ Nocrypto.Base64.encode @@
-  Nocrypto.Hash.SHA256.digest @@ Cstruct.of_string (salt ^ "-" ^ password)
+  base64_encode @@ Nocrypto.Hash.SHA256.digest @@ Cstruct.of_string (salt ^ "-" ^ password)
 
 let verify_auth_header fs config v =
   match Astring.String.cut ~sep:"Basic " v with
@@ -1079,6 +1080,7 @@ let change_user_password fs config ~name ~password ~salt =
   let principal_dir = `Dir [ config.principals ; name ] in
   Fs.get_property_map fs principal_dir >>= fun auth_user_props ->
   let auth_user_props' =
+    let salt = base64_encode salt in
     Properties.unsafe_add (Xml.robur_ns, "salt")
       ([], [Xml.pcdata @@ salt])
       (Properties.unsafe_add (Xml.robur_ns, "password")
@@ -1186,6 +1188,7 @@ let make_user ?(props = []) fs now config ~name ~password ~salt =
   let home_set_dir = `Dir [ config.calendars ; name ] in
   let home_set_url = get_url home_set_dir in
   let props' =
+    let salt = base64_encode salt in
     ((Xml.caldav_ns, "calendar-home-set"),
      ([], [Xml.dav_node "href" [Xml.pcdata @@ Uri.to_string home_set_url ]]))
     :: ((Xml.robur_ns, "password"),

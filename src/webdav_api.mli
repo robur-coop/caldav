@@ -33,9 +33,9 @@ sig
 
   val verify_auth_header : state -> config -> string -> (string,  [> `Msg of string | `Unknown_user of string * string ]) result Lwt.t
 
-  val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:string ->
+  val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:Cstruct.t ->
     Uri.t Lwt.t
-  val change_user_password : state -> config -> name:string -> password:string -> salt:string -> (unit, [> `Internal_server_error ]) result Lwt.t
+  val change_user_password : state -> config -> name:string -> password:string -> salt:Cstruct.t -> (unit, [> `Internal_server_error ]) result Lwt.t
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val make_group : state -> Ptime.t -> config -> string -> string list -> Uri.t Lwt.t
