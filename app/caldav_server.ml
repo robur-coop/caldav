@@ -403,11 +403,8 @@ class group config fs = object(self)
       Fs.dir_exists fs (`Dir [config.principals ; name ]) >>= fun group_exists ->
       match group_exists, self#requested_members rd with
       | true, Ok members ->
-        begin
-          Dav.change_group_members fs config name members >>= function
-          | Ok () -> Wm.respond (to_status `OK) rd
-          | Error e -> Wm.respond (to_status e) rd
-        end
+        Dav.replace_group_members fs config name members >>= fun () ->
+        Wm.respond (to_status `OK) rd
       | _ -> Wm.continue group_exists rd
 
   method content_types_provided rd =

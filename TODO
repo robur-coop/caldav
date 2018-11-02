@@ -30,6 +30,7 @@ DONE:
 - add custom salting
 - mode for TOFU (everybody can create their user if not already taken)
 - ACL/policy configuration via property in root folder
+- configure default group membership for newly created users via webdav property
 
 -- 31st August 2018:
 
@@ -66,7 +67,6 @@ DONE:
 
 -- 2nd November 2018
 
-- configure  default group membership for newly created users via webdav property
 - make a mirage unikernel: parameter should be root password
 - LATER: KV updates for irmin/git
 - blackberry comma topic

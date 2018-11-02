@@ -39,8 +39,8 @@ sig
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val make_group : state -> Ptime.t -> config -> string -> string list -> Uri.t Lwt.t
-  val add_group_member : state -> config -> group:string -> member:string -> (unit, [> `Internal_server_error ]) result Lwt.t
-  val change_group_members : state -> config -> string -> string list -> (unit, [> `Internal_server_error ]) result Lwt.t
+  val enroll : state -> config -> member:string -> group:string -> unit Lwt.t
+  val replace_group_members : state -> config -> string -> string list -> unit Lwt.t
   val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val initialize_fs : state -> Ptime.t -> Webdav_xml.ace list -> config -> unit Lwt.t

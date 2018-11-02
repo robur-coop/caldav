@@ -40,8 +40,8 @@ sig
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val make_group : state -> Ptime.t -> config -> string -> string list -> Uri.t Lwt.t
-  val add_group_member : state -> config -> group:string -> member:string -> (unit, [> `Internal_server_error ]) result Lwt.t
-  val change_group_members : state -> config -> string -> string list -> (unit, [> `Internal_server_error ]) result Lwt.t
+  val enroll : state -> config -> member:string -> group:string -> unit Lwt.t
+  val replace_group_members : state -> config -> string -> string list -> unit Lwt.t
   val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val initialize_fs : state -> Ptime.t -> Webdav_xml.ace list -> config -> unit Lwt.t
@@ -1109,6 +1109,77 @@ let make_principal props fs now config name =
   create_calendar fs now [acl] (`Dir [config.calendars ; name ; "calendar"]) >|= fun _ ->
   principal_url
 
+let principal_to_href host principals_directory principal_string =
+  let uri = Uri.with_path host (Fs.to_string (`Dir [ principals_directory ; principal_string])) in
+  Xml.dav_node "href" [ Xml.pcdata @@ Uri.to_string uri ]
+
+let href_to_principal principals_directory tree =
+  match Xml.href_parser tree with
+  | Ok principal ->
+    let path = Uri.path (Uri.of_string principal) in
+    let dir = principals_directory ^ "/" in
+    if Astring.String.is_prefix ~affix:dir path then
+      match Astring.String.cut ~sep:dir path with
+      | Some ("", p) -> Ok p
+      | _ -> Error "invalid path"
+    else
+      Error "invalid path"
+  | Error msg -> Error msg
+
+let enroll_or_resign modify_membership fs config ~member ~group =
+  let update_properties modify_property_map home =
+    Fs.get_property_map fs home >>= fun prop_map ->
+    let prop_map' = modify_property_map prop_map in
+    Fs.write_property_map fs home prop_map' >|= function
+    | Error we -> Log.err (fun m -> m "failed to write properties for %s: %a"
+                              (Fs.to_string home) Fs.pp_write_error we)
+    | Ok () -> ()
+  in
+  let principals prop_map key =
+    match Properties.unsafe_find (Xml.dav_ns, key) prop_map with
+      | None -> ([], [])
+      | Some (attrs, all_principals) -> (attrs, all_principals)
+  in
+  let modify_member_in_group prop_map =
+    let member_href = principal_to_href config.host config.principals member in
+    let values = principals prop_map "group-member-set" in
+    let values' = modify_membership member_href values in
+    Properties.unsafe_add (Xml.dav_ns, "group-member-set") values' prop_map
+  in
+  let modify_group_in_member prop_map =
+    let group_href = principal_to_href config.host config.principals group in
+    let values = principals prop_map "group-membership" in
+    let values' = modify_membership group_href values in
+    Properties.unsafe_add (Xml.dav_ns, "group-membership") values' prop_map
+  in
+  update_properties modify_member_in_group (`Dir [ config.principals ; group ]) >>= fun () ->
+  update_properties modify_group_in_member (`Dir [ config.principals ; member ])
+
+let enroll =
+  let modify_membership href (attrs, values) =
+    if List.mem href values
+    then (attrs, values)
+    else (attrs, href :: values)
+  in
+  enroll_or_resign modify_membership
+
+let resign =
+  let remove_href href (attrs, values) =
+    (attrs, List.filter (fun href' -> not (href = href')) values)
+  in
+  enroll_or_resign remove_href
+
+let collect_principals fs config principal_dir key =
+  Fs.get_property_map fs principal_dir >|= fun prop_map ->
+  match Properties.unsafe_find key prop_map with
+  | None -> []
+  | Some (_, principals) ->
+    List.fold_left (fun acc href -> match href_to_principal config.principals href with
+        | Ok principal -> principal :: acc
+        | Error e ->
+          Log.err (fun m -> m "couldn't convert %a to principal: %s" Xml.pp_tree href e) ;
+          acc) [] principals
+
 let make_user ?(props = []) fs now config ~name ~password ~salt =
   let get_url dir = Uri.with_path config.host (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
   let home_set_dir = `Dir [ config.calendars ; name ] in
@@ -1122,43 +1193,10 @@ let make_user ?(props = []) fs now config ~name ~password ~salt =
         ([], [Xml.pcdata salt]))
     :: props
   in
-  make_principal props' fs now config name
-
-let collect_principals fs principal_dir label =
-  Fs.get_property_map fs principal_dir >|= fun auth_user_props ->
-  match Properties.unsafe_find (Xml.dav_ns, label) auth_user_props with
-  | None -> []
-  | Some (_, principals) -> List.map (fun tree ->
-      match Xml.href_parser tree with
-      | Ok url -> url
-      | Error msg ->
-        Log.err (fun m -> m "failed to parse %s url %a" label Xml.pp_tree tree);
-        assert false) principals
-
-let resign fs to_exclude label principal =
-  let leave tree = match Xml.href_parser tree with
-    | Error _ -> true
-    | Ok url ->
-      let path = Uri.path @@ Uri.of_string url in
-      not (String.equal path ("/" ^ Fs.to_string to_exclude))
-  in
-  let principal_dir = Uri.path @@ Uri.of_string principal in
-  Fs.from_string fs principal_dir >>= function
-  | Error err -> Log.err (fun m -> m "from_string failed for %s" principal_dir) ; assert false
-  | Ok f_or_d ->
-    Fs.get_property_map fs f_or_d >>= fun principal_props ->
-    match Properties.unsafe_find (Xml.dav_ns, label) principal_props with
-    | None -> Lwt.return_unit
-    | Some (attrs, all_principals) ->
-      let all_principals' = attrs, List.filter leave all_principals in
-      let principal_props' = Properties.unsafe_add (Xml.dav_ns, label) all_principals' principal_props in
-      Fs.write_property_map fs f_or_d principal_props' >|= function
-      | Error we -> Log.err (fun m -> m "failed to write group properties %s: %a" principal_dir Fs.pp_write_error we)
-      | Ok () -> ()
-
-let delete_group_memberships fs principal_dir =
-  collect_principals fs principal_dir "group-membership" >>= fun groups ->
-  Lwt_list.iter_p (resign fs principal_dir "group-member-set") groups
+  make_principal props' fs now config name >>= fun principal_url ->
+  collect_principals fs config (`Dir [config.principals]) (Xml.robur_ns, "default_groups") >>= fun groups ->
+  Lwt_list.iter_s (fun group -> enroll fs config ~member:name ~group) groups >|= fun () ->
+  principal_url
 
 let delete_home_and_calendars fs principal_dir user_calendar_dir =
   Fs.destroy ~recursive:true fs principal_dir >>= function
@@ -1173,108 +1211,31 @@ let delete_user fs config name =
   Fs.dir_exists fs principal_dir >>= function
   | false -> Lwt.return @@ Error `Not_found
   | true ->
-    delete_group_memberships fs principal_dir >>= fun () ->
+    collect_principals fs config principal_dir (Xml.dav_ns, "group-membership") >>= fun groups ->
+    Lwt_list.iter_s (fun group -> resign fs config ~member:name ~group) groups >>= fun () ->
     delete_home_and_calendars fs principal_dir user_calendar_dir >|= function
     | Error e ->
       Log.err (fun m -> m "error %a while removing home and calendars" Fs.pp_write_error e) ;
       Error `Internal_server_error
     | Ok () -> Ok ()
 
-let delete_group_members fs principal_dir =
-  collect_principals fs principal_dir "group-member-set" >>= fun members ->
-  Lwt_list.iter_p (resign fs principal_dir "group-membership") members
+let delete_group_members fs config group =
+  let principal_dir = `Dir [ config.principals ; group ] in
+  collect_principals fs config principal_dir (Xml.dav_ns, "group-member-set") >>= fun members ->
+  Lwt_list.iter_s (fun member -> resign fs config ~member ~group) members
 
 let delete_group fs config name =
-  let principal_dir = `Dir [ config.principals ; name ] in
-  delete_group_members fs principal_dir >>= fun () ->
+  delete_group_members fs config name >>= fun () ->
   delete_user fs config name
 
-let enroll fs to_include principal =
-  Log.debug (fun m -> m "enrolling %a to principal %s" Xml.pp_tree to_include principal) ;
-  let principal_dir = Uri.path @@ Uri.of_string principal in
-  Fs.from_string fs principal_dir >>= function
-  | Error err -> Log.err (fun m -> m "from_string failed for %s" principal_dir) ; assert false
-  | Ok f_or_d ->
-    Fs.get_property_map fs f_or_d >>= fun principal_props ->
-    let memberships =
-      match Properties.unsafe_find (Xml.dav_ns, "group-membership") principal_props with
-      | None -> ([], [to_include])
-      | Some (attrs, all_principals) ->
-        if List.mem to_include all_principals
-        then (attrs, all_principals)
-        else (attrs, to_include :: all_principals)
-    in
-    let principal_props' = Properties.unsafe_add (Xml.dav_ns, "group-membership") memberships principal_props in
-    Fs.write_property_map fs f_or_d principal_props' >|= function
-    | Error we -> Log.err (fun m -> m "failed to write group properties %s: %a" principal_dir Fs.pp_write_error we)
-    | Ok () -> ()
-
-let change_group_members fs config name new_members =
-  let principal_path user = Fs.to_string (`Dir [ config.principals ; user ]) in
-  let new_member_paths = List.map principal_path new_members in
-  let new_member_urls =
-    List.map
-      (fun path -> Uri.to_string @@ Uri.with_path config.host path)
-      new_member_paths
-  in
-  let principal_dir = `Dir [ config.principals ; name ] in
-  delete_group_members fs principal_dir >>= fun () ->
-  let group_node =
-    Xml.dav_node "href"
-      [ Xml.pcdata (Uri.to_string @@ Uri.with_path config.host (principal_path name)) ]
-  in
-  Lwt_list.iter_p (enroll fs group_node) new_member_paths >>= fun () ->
-  Fs.get_property_map fs principal_dir >>= fun props ->
-  let props' =
-    Properties.unsafe_add
-      (Xml.dav_ns, "group-member-set")
-      ([], List.map (fun u -> Xml.dav_node "href" [ Xml.pcdata u ]) new_member_urls)
-      props
-  in
-  Fs.write_property_map fs principal_dir props' >|= function
-  | Error e -> Log.err (fun m -> m "write error %a while writing group properties in change_group_members" Fs.pp_write_error e) ; Error `Internal_server_error
-  | Ok () -> Ok ()
-
-let add_group_member fs config ~group ~member =
-  let principal_path user = `Dir [ config.principals ; user ] in
-  let url path = Uri.to_string @@ Uri.with_path config.host (Fs.to_string path) in
-  let new_member_path = principal_path member in
-  let group_path = principal_path group in
-  let group_node = Xml.dav_node "href" [Xml.pcdata (url group_path)] in
-  enroll fs group_node (Fs.to_string new_member_path) >>= fun () ->
-  Fs.get_property_map fs group_path >>= fun props ->
-  let props' =
-    let member_key = (Xml.dav_ns, "group-member-set") in
-    let new_node = Xml.dav_node "href" [Xml.pcdata (url new_member_path)] in
-    let new_members = match Properties.unsafe_find member_key props with
-      | None -> ([], [new_node])
-      | Some (a, members) -> (a, new_node :: members)
-    in
-    Properties.unsafe_add member_key new_members props
-  in
-  Fs.write_property_map fs group_path props' >|= function
-  | Error e -> Log.err (fun m -> m "write error %a while writing group properties in change_group_members" Fs.pp_write_error e) ; Error `Internal_server_error
-  | Ok () -> Ok ()
+let replace_group_members fs config group new_members =
+  delete_group_members fs config group >>= fun () ->
+  Lwt_list.iter_s (fun member -> enroll fs config ~member ~group) new_members
 
 (* TODO find out whether we should modify calendar-home-set of group or members *)
 let make_group fs now config name members =
-  let principal_path user = Fs.to_string (`Dir [ config.principals ; user ]) in
-  let new_member_paths = List.map principal_path members in
-  let new_member_urls =
-    List.map
-      (fun path -> Uri.to_string @@ Uri.with_path config.host path)
-      new_member_paths
-  in
-  let group_props = [
-    (Xml.dav_ns, "group-member-set"),
-    ([], List.map (fun u -> Xml.dav_node "href" [ Xml.pcdata u ]) new_member_urls)
-  ] in
-  make_principal group_props fs now config name >>= fun principal_uri ->
-  let group_node =
-    Xml.dav_node "href"
-      [ Xml.pcdata (Uri.to_string @@ Uri.with_path config.host (principal_path name)) ]
-  in
-  Lwt_list.iter_p (enroll fs group_node) new_member_paths >|= fun () ->
+  make_principal [] fs now config name >>= fun principal_uri ->
+  Lwt_list.iter_s (fun member -> enroll fs config ~member ~group:name) members >|= fun () ->
   principal_uri
 
 end
