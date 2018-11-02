@@ -44,7 +44,7 @@ sig
   val replace_group_members : state -> config -> string -> string list -> unit Lwt.t
   val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
-  val initialize_fs : state -> Ptime.t -> Webdav_xml.ace list -> config -> unit Lwt.t
+  val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
 end
 
 let src = Logs.Src.create "webdav.robur.io" ~doc:"webdav api logs"
@@ -1069,9 +1069,10 @@ let initialize_fs_for_apple_testsuite fs now acl config =
   make_dir_if_not_present fs now acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "tasks"]) >>= fun _ ->
   Lwt.return_unit
 
-let initialize_fs fs now acl config =
-  make_dir_if_not_present fs now acl (`Dir [config.principals]) >>= fun _ ->
-  make_dir_if_not_present fs now acl (`Dir [config.calendars]) >>= fun _ ->
+let initialize_fs fs now config =
+  let admin_acl = admin_acl config in
+  make_dir_if_not_present fs now admin_acl (`Dir [config.principals]) >>= fun _ ->
+  make_dir_if_not_present fs now admin_acl (`Dir [config.calendars]) >>= fun _ ->
   Lwt.return_unit
 
 let change_user_password fs config ~name ~password ~salt =
