@@ -31,6 +31,10 @@ let tofu =
   let doc = Key.Arg.info ~doc:"If a user does not exist, create them and give them a new calendar." [ "tofu" ] in
   Key.(create "tofu" Arg.(flag doc))
 
+let hostname =
+  let doc = Key.Arg.info ~doc:"Hostname to use." [ "host" ] ~docv:"STRING" in
+  Key.(create "hostname" Arg.(opt string "localhost" doc))
+
 (*
 in the Mirage module (from the mirage package):
 code: let keys = List.map Key.abstract [ http_port ; https_port ; admin_password ]
@@ -47,8 +51,6 @@ type any_key = Any : 'a Key.key -> any_key
 let keys = List.map (fun (Any k) -> Key.abstract k) [Any http_port; Any https_port; Any admin_password]
 *)
 
-
-
 let main =
   let direct_dependencies = [
     package "uri" ;
@@ -59,7 +61,7 @@ let main =
   let keys =
     [ Key.abstract http_port ; Key.abstract https_port ;
       Key.abstract admin_password ; Key.abstract fs_root ;
-      Key.abstract tofu ]
+      Key.abstract tofu ; Key.abstract hostname ]
   in
   foreign
     ~packages:direct_dependencies ~keys

@@ -116,20 +116,21 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
       in
       initialize_fs clock config dir admin_pass
     in
+    let hostname = Key_gen.hostname () in
     match Key_gen.http_port (), Key_gen.https_port () with
     | None, None ->
       Logs.err (fun m -> m "no port provided for neither HTTP nor HTTPS, exiting") ;
       Lwt.return_unit
     | Some port, None ->
-      let config = config @@ Caldav.Webdav_config.host ~port () in
+      let config = config @@ Caldav.Webdav_config.host ~port ~hostname () in
       init_fs_for_runtime config >>=
       init_http port config
     | None, Some port ->
-      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port () in
+      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port ~hostname () in
       init_fs_for_runtime config >>=
       init_https port config
     | Some http_port, Some https_port ->
-      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port () in
+      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname () in
       init_fs_for_runtime config >>= fun fs ->
       Lwt.pick [
         http (`TCP http_port) @@ serve (redirect https_port) ;
