@@ -13,9 +13,8 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
 
   let generate_salt () = R.generate 15
 
-  let initialize_fs clock host data_dir admin_pass =
+  let initialize_fs clock config data_dir admin_pass =
     let now = Ptime.v (Clock.now_d_ps clock) in
-    let config = Caldav.Webdav_config.config host in
     FS_unix.connect data_dir >>= fun fs ->
     Fs.valid fs config >>= fun fs_is_valid ->
     match fs_is_valid, admin_pass with
@@ -25,12 +24,12 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
       Dav.initialize_fs fs now config >>= fun () ->
       let salt = generate_salt () in
       Dav.make_user fs now config ~name:"root" ~password ~salt >|= fun _ ->
-      (config, fs)
-    | Ok (), None -> Lwt.return (config, fs)
+      fs
+    | Ok (), None -> Lwt.return fs
     | Ok (), Some password ->
       let salt = generate_salt () in
       Dav.change_user_password fs config ~name:"root" ~password ~salt >|= fun _ ->
-      (config, fs)
+      fs
 
   let tls_init kv =
     Lwt.catch (fun () ->
@@ -97,39 +96,43 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
 
   let start _random clock tls_keys http =
     (* TODO naming *)
-    let init_http port (config, fs) =
+    let init_http port config fs =
       Http_log.info (fun f -> f "listening on %d/HTTP" port);
       http (`TCP port) @@ serve (dispatch clock config fs)
     in
-    let init_https port (config, fs) =
+    let init_https port config fs =
       tls_init tls_keys >>= fun tls_config ->
       Http_log.info (fun f -> f "listening on %d/HTTPS" port);
       let tls = `TLS (tls_config, `TCP port) in
       http tls @@ serve (dispatch clock config fs)
     in
-    let init_fs_for_runtime host =
+    let config host =
+      let do_trust_on_first_use = Key_gen.tofu () in
+      Caldav.Webdav_config.config ~do_trust_on_first_use host
+    in
+    let init_fs_for_runtime config =
       let dir = Key_gen.fs_root ()
       and admin_pass = Key_gen.admin_password ()
       in
-      initialize_fs clock host dir admin_pass
+      initialize_fs clock config dir admin_pass
     in
     match Key_gen.http_port (), Key_gen.https_port () with
     | None, None ->
       Logs.err (fun m -> m "no port provided for neither HTTP nor HTTPS, exiting") ;
       Lwt.return_unit
     | Some port, None ->
-      let host = Caldav.Webdav_config.host ~port () in
-      init_fs_for_runtime host >>=
-      init_http port
+      let config = config @@ Caldav.Webdav_config.host ~port () in
+      init_fs_for_runtime config >>=
+      init_http port config
     | None, Some port ->
-      let host = Caldav.Webdav_config.host ~scheme:"https" ~port () in
-      init_fs_for_runtime host >>=
-      init_https port
+      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port () in
+      init_fs_for_runtime config >>=
+      init_https port config
     | Some http_port, Some https_port ->
-      let host = Caldav.Webdav_config.host ~scheme:"https" ~port:https_port () in
-      init_fs_for_runtime host >>= fun (config, fs) ->
+      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port () in
+      init_fs_for_runtime config >>= fun fs ->
       Lwt.pick [
         http (`TCP http_port) @@ serve (redirect https_port) ;
-        init_https https_port (config, fs)
+        init_https https_port config fs
       ]
 end

@@ -27,6 +27,10 @@ let fs_root =
   let doc = Key.Arg.info ~doc:"Location of calendar data." [ "data" ] ~docv:"DIR" in
   Key.(create "fs_root" Arg.(required string doc))
 
+let tofu =
+  let doc = Key.Arg.info ~doc:"If a user does not exist, create them and give them a new calendar." [ "tofu" ] in
+  Key.(create "tofu" Arg.(flag doc))
+
 (*
 in the Mirage module (from the mirage package):
 code: let keys = List.map Key.abstract [ http_port ; https_port ; admin_password ]
@@ -54,7 +58,8 @@ let main =
   ] in
   let keys =
     [ Key.abstract http_port ; Key.abstract https_port ;
-      Key.abstract admin_password ; Key.abstract fs_root ]
+      Key.abstract admin_password ; Key.abstract fs_root ;
+      Key.abstract tofu ]
   in
   foreign
     ~packages:direct_dependencies ~keys
