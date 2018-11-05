@@ -56,6 +56,8 @@ sig
   val pp_error : error Fmt.t
 
   val pp_write_error : write_error Fmt.t
+
+  val valid : t -> Webdav_config.config -> (unit, [> `Msg of string ]) result Lwt.t
 end
 
 module Make (Fs:Mirage_fs_lwt.S) = struct
@@ -328,5 +330,20 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
 
   let pp_error = Fs.pp_error
   let pp_write_error = Fs.pp_write_error
+
+  (* TODO check the following invariants:
+      - every resource has a .prop.xml file
+      - there are no references to non-existing principals (e.g. in <acl><ace>)
+      - all principals (apart from groups) have a password and salt (of type Pcdata)
+      - all local URLs use the correct hostname *)
+  let valid fs config =
+    get_property_map fs (`Dir [config.Webdav_config.principals ; "root"]) >|= fun root_map ->
+    match
+      Properties.unsafe_find (Xml.robur_ns, "password") root_map,
+      Properties.unsafe_find (Xml.robur_ns, "salt") root_map
+    with
+    | Some _, Some _ -> Ok ()
+    | _ -> Error (`Msg "root user does not have password and salt")
+
 
 end
