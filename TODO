@@ -32,7 +32,8 @@ DONE:
 - ACL/policy configuration via property in root folder
 - configure default group membership for newly created users via webdav property
 - make a mirage unikernel
-- unikernel parameter: http vs https (certificates)
+- unikernel parameter: http vs https (certificates), root password, file system root / data directory, trust on first use, hostname
+- remove hardcoded users
 
 -- 31st August 2018:
 
@@ -69,10 +70,8 @@ DONE:
 
 -- 2nd November 2018
 
-- unikernel parameter: root password, trust on first use, hostname
 - LATER: KV updates for irmin/git
 - blackberry comma topic
-- remove hardcoded users
 - stored URLs contain scheme, hostname, and port
 --> should instead be relative!?
 --> or absolute, but not containing scheme, hostname, port

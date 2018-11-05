@@ -535,7 +535,7 @@ let config = {
   principals = "principals" ;
   calendars = "calendars" ;
   host = Uri.of_string "http://cal.example.com" ;
-  trust_on_first_use_mode = false ;
+  do_trust_on_first_use = false ;
 }
 
 let allow_all_acl = [ (`All, `Grant [ `All ]) ]
