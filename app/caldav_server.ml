@@ -34,6 +34,7 @@ let main () =
   Logs.set_level (Some Logs.Debug);
   let host = host () in
   let trust_on_first_use_mode = match Sys.getenv "CALDAV_TOFU" with
+    | exception Not_found -> false
     | "yes" | "YES" | "1" | "true" | "TRUE" -> true
     | _ -> false
   in
