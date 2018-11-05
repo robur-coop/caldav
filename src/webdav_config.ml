@@ -2,7 +2,7 @@ type config = {
   principals : string ;
   calendars : string ;
   host : Uri.t ;
-  trust_on_first_use_mode : bool ;
+  do_trust_on_first_use : bool ;
 }
 
 let admin_acl config = [
@@ -22,10 +22,10 @@ let host ?(scheme = "http") ?(port = 8080) ?(hostname = "127.0.0.1") () =
 let config
     ?(principals = "principals")
     ?(calendars = "calendars")
-    ?(trust_on_first_use_mode = false)
+    ?(do_trust_on_first_use = false)
     host =
   { principals ;
     calendars ;
-    trust_on_first_use_mode ;
+    do_trust_on_first_use ;
     host ;
   }

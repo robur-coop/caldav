@@ -121,7 +121,7 @@ module Make (Wm_clock : Webmachine.CLOCK) (Fs : Webdav_fs.S) = struct
           Logs.warn (fun m -> m "is_authorized failed with header value %s and message %s" v msg);
           Wm.continue (`Basic "invalid authorization") rd
         | Error (`Unknown_user (name, password)) ->
-          if config.trust_on_first_use_mode then begin
+          if config.do_trust_on_first_use then begin
             if sane name then begin
               let now = now () in
               let salt = generate_salt () in

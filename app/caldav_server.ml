@@ -33,12 +33,12 @@ let main () =
   Logs.set_reporter (Logs_fmt.reporter ());
   Logs.set_level (Some Logs.Debug);
   let host = host () in
-  let trust_on_first_use_mode = match Sys.getenv "CALDAV_TOFU" with
+  let do_trust_on_first_use = match Sys.getenv "CALDAV_TOFU" with
     | exception Not_found -> false
     | "yes" | "YES" | "1" | "true" | "TRUE" -> true
     | _ -> false
   in
-  let config = config ~trust_on_first_use_mode host in
+  let config = config ~do_trust_on_first_use host in
   (* create the file system *)
   FS_unix.connect "/tmp/calendar" >>= fun fs ->
   (* only for apple test suite *)
