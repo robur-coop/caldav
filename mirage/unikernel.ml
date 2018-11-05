@@ -11,25 +11,24 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
   module Dav = Caldav.Webdav_api.Make(Fs)
   module X509 = Tls_mirage.X509(KEYS)(Clock)
 
-  let init_users fs now config user_password =
-    Lwt_list.iter_p (fun (name, password) ->
-        let salt = R.generate 15 in
-        Dav.make_user fs now config ~name ~password ~salt >|= fun _ -> ())
-      user_password >>= fun () ->
-    Dav.make_group fs now config "group" [ "root" ; "test" ]
-
-  let initialize_fs clock host () =
-    FS_unix.connect "/tmp/calendar" >>= fun fs ->
+  let initialize_fs clock host admin_pass =
     let now = Ptime.v (Clock.now_d_ps clock) in
     let config = Caldav.Webdav_config.config host in
-    Dav.initialize_fs fs now config >>= fun () ->
-    let user_password = [
-      ("test", "password") ;
-      ("root", "toor") ;
-      ("nobody", "1")
-    ] in
-    init_users fs now config user_password >|= fun _ ->
-    (config, fs)
+    FS_unix.connect "/tmp/calendar" >>= fun fs ->
+    Fs.valid fs config >>= fun fs_is_valid ->
+    match fs_is_valid, admin_pass with
+    | Error (`Msg msg), None ->
+      Lwt.fail_with ("got an uninitalized file system (error: " ^ msg ^ "), please provide admin password")
+    | Error _, Some password ->
+      Dav.initialize_fs fs now config >>= fun () ->
+      let salt = R.generate 15 in
+      Dav.make_user fs now config ~name:"root" ~password ~salt >|= fun _ ->
+      (config, fs)
+    | Ok (), None -> Lwt.return (config, fs)
+    | Ok (), Some password ->
+      let salt = R.generate 15 in
+      Dav.change_user_password fs config ~name:"root" ~password ~salt >|= fun _ ->
+      (config, fs)
 
   let tls_init kv =
     Lwt.catch (fun () ->
@@ -94,14 +93,14 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
     in
     S.make ~conn_closed ~callback ()
 
-  let start _random clock keys http =
+  let start _random clock tls_keys http =
     let generate_salt () = R.generate 15 in
     let init_http port (config, fs) =
       Http_log.info (fun f -> f "listening on %d/HTTP" port);
       http (`TCP port) @@ serve (dispatch clock generate_salt config fs)
     in
     let init_https port (config, fs) =
-      tls_init keys >>= fun tls_config ->
+      tls_init tls_keys >>= fun tls_config ->
       Http_log.info (fun f -> f "listening on %d/HTTPS" port);
       let tls = `TLS (tls_config, `TCP port) in
       http tls @@ serve (dispatch clock generate_salt config fs)
@@ -112,15 +111,15 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
       Lwt.return_unit
     | Some port, None ->
       let host = Caldav.Webdav_config.host ~port () in
-      initialize_fs clock host () >>=
+      initialize_fs clock host (Key_gen.admin_password ()) >>=
       init_http port
     | None, Some port ->
       let host = Caldav.Webdav_config.host ~scheme:"https" ~port () in
-      initialize_fs clock host () >>=
+      initialize_fs clock host (Key_gen.admin_password ()) >>=
       init_https port
     | Some http_port, Some https_port ->
       let host = Caldav.Webdav_config.host ~scheme:"https" ~port:https_port () in
-      initialize_fs clock host () >>= fun (config, fs) ->
+      initialize_fs clock host (Key_gen.admin_password ()) >>= fun (config, fs) ->
       Lwt.pick [
         http (`TCP http_port) @@ serve (redirect https_port) ;
         init_https https_port (config, fs)
