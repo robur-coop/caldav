@@ -8,21 +8,28 @@ let net =
 (* set ~tls to false to get a plain-http server *)
 let http_srv = http_server @@ conduit_direct ~tls:true net
 
+(* TODO: make it possible to enable and disable schemes without providing a port *)
 let http_port =
-  let doc = Key.Arg.info ~doc:"Listening HTTP port." ["http"] in
-  Key.(create "http_port" Arg.(opt int 8080 doc))
+  let doc = Key.Arg.info ~doc:"Listening HTTP port." ["http"] ~docv:"PORT" in
+  Key.(create "http_port" Arg.(opt (some int) None doc))
+
+let https_port =
+  let doc = Key.Arg.info ~doc:"Listening HTTPS port." ["https"] ~docv:"PORT" in
+  Key.(create "https_port" Arg.(opt (some int) None doc))
+
+let certs = generic_kv_ro ~key:Key.(value @@ kv_ro ()) "tls"
 
 let main =
-  let packages = [
+  let direct_dependencies = [
     package "uri" ;
     package "webmachine" ;
     package "caldav" ;
-    package "mirage-fs-unix"
+    package "mirage-fs-unix" ;
   ] in
-  let keys = List.map Key.abstract [ http_port ] in
+  let keys = List.map Key.abstract [ http_port ; https_port ] in
   foreign
-    ~packages ~keys
-    "Unikernel.Main" (random @-> pclock @-> http @-> job)
+    ~packages:direct_dependencies ~keys
+    "Unikernel.Main" (random @-> pclock @-> kv_ro @-> http @-> job)
 
 let () =
-  register "caldav" [main $ default_random $ default_posix_clock $ http_srv]
+  register "caldav" [main $ default_random $ default_posix_clock $ certs $ http_srv]
