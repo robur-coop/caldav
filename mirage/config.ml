@@ -23,6 +23,10 @@ let admin_password =
   let doc = Key.Arg.info ~doc:"Password for the administrator." ["admin-password"] ~docv:"STRING" in
   Key.(create "admin_password" Arg.(opt (some string) None doc))
 
+let fs_root =
+  let doc = Key.Arg.info ~doc:"Location of calendar data." [ "data" ] ~docv:"DIR" in
+  Key.(create "fs_root" Arg.(required string doc))
+
 (*
 in the Mirage module (from the mirage package):
 code: let keys = List.map Key.abstract [ http_port ; https_port ; admin_password ]
@@ -39,6 +43,8 @@ type any_key = Any : 'a Key.key -> any_key
 let keys = List.map (fun (Any k) -> Key.abstract k) [Any http_port; Any https_port; Any admin_password]
 *)
 
+
+
 let main =
   let direct_dependencies = [
     package "uri" ;
@@ -47,7 +53,8 @@ let main =
     package "mirage-fs-unix" ;
   ] in
   let keys =
-    [ Key.abstract http_port ; Key.abstract https_port ; Key.abstract admin_password ]
+    [ Key.abstract http_port ; Key.abstract https_port ;
+      Key.abstract admin_password ; Key.abstract fs_root ]
   in
   foreign
     ~packages:direct_dependencies ~keys
