@@ -32,6 +32,7 @@ DONE:
 - ACL/policy configuration via property in root folder
 - configure default group membership for newly created users via webdav property
 - make a mirage unikernel
+- unikernel parameter: http vs https (certificates)
 
 -- 31st August 2018:
 
@@ -68,7 +69,7 @@ DONE:
 
 -- 2nd November 2018
 
-- unikernel parameter: http vs https (certificates), root password, trust on first use, hostname
+- unikernel parameter: root password, trust on first use, hostname
 - LATER: KV updates for irmin/git
 - blackberry comma topic
 - remove hardcoded users
