@@ -1220,7 +1220,8 @@ let mkcol_success () =
       Mirage_fs_mem.connect "" >>= fun res_fs ->
       let props =
         let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
-        Properties.create_dir ~resourcetype allow_all_acl now "Special Resource"
+        let acl = [ (`Href (Uri.of_string "/principals/testuser/"), `Grant [`All])] in
+        Properties.create_dir ~resourcetype acl now "Special Resource"
       in
       let properties = Properties.create_dir allow_all_acl now "home" in
       Fs.mkdir res_fs (`Dir ["home"]) properties >>= fun _ ->

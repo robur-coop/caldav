@@ -363,8 +363,8 @@ module Make(Fs: Webdav_fs.S) = struct
       | Error _ -> Error `Bad_request
       | Ok set_props -> Ok set_props
 
-  let create_collection_dir fs parent_acl set_props now resourcetype dir =
-    let col_props = Properties.create_dir ~resourcetype parent_acl now (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
+  let create_collection_dir fs acl set_props now resourcetype dir =
+    let col_props = Properties.create_dir ~resourcetype acl now (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
     match Properties.patch ~is_mkcol:true col_props set_props with
     | None, errs ->
       let propstats = List.map propstat_node errs in
@@ -396,9 +396,9 @@ module Make(Fs: Webdav_fs.S) = struct
           is_calendar fs parent' >>= fun parent_is_calendar ->
           if resource_is_calendar && parent_is_calendar
           then Lwt.return @@ Error `Conflict
-          else acl fs config user parent' >>= function
-            | Error `Forbidden -> Lwt.return @@ Error (`Forbidden "TODO")
-            | Ok parent_acl -> create_collection_dir fs parent_acl set_props now resourcetype dir
+          else 
+            let acl = [ ( `Href (Uri.of_string (Fs.to_string (`Dir [config.principals ; user]))), `Grant [`All] )] in
+            create_collection_dir fs acl set_props now resourcetype dir
 
   let check_in_bounds p s e = true
   let apply_to_params pfs p = true
