@@ -105,8 +105,8 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
   let to_string =
     let a = Astring.String.concat ~sep:"/" in
     function
-    | `File data -> a data
-    | `Dir data -> a data ^ "/"
+    | `File data -> "/" ^ a data
+    | `Dir data -> "/" ^ a data ^ "/"
 
   let parent f_or_d =
     let parent p =

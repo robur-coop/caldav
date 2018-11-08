@@ -1,11 +1,15 @@
 all:
-	jbuilder build app/caldav_server.exe
+	opam reinstall caldav
+	cd mirage; make
+
+configure:
+	cd mirage; mirage configure
+
 test: clean
-	jbuilder runtest --no-buffer -j 1
+	jbuilder runtest --no-buffer -j 1 test
+
 clean:
 	jbuilder clean
-run: all
-	_build/default/app/caldav_server.exe
 
 utop:
 	dune utop src --profile=release

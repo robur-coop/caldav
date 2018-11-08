@@ -6,7 +6,7 @@ type config = {
 }
 
 let admin_acl config = [
-  (`Href (Uri.with_path config.host @@ "/" ^ config.principals ^ "/root/"), `Grant [ `All ]) ;
+  (`Href (Uri.of_string @@ "/" ^ config.principals ^ "/root/"), `Grant [ `All ]) ;
   (`All, `Grant [ `Read ])
 ]
 

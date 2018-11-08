@@ -1094,15 +1094,15 @@ let change_user_password fs config ~name ~password ~salt =
 
 let make_principal props fs now config name =
   let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
-  let get_url dir = Uri.with_path config.host (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
   let principal_dir = `Dir [ config.principals ; name ] in
-  let principal_url = get_url principal_dir in
+  let principal_url_string = Fs.to_string (principal_dir :> Webdav_fs.file_or_dir) in
   let home_set_dir = `Dir [ config.calendars ; name ] in
   let props' =
     ((Xml.dav_ns, "principal-URL"),
-     ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata @@ Uri.to_string principal_url ] ]))
+     ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata principal_url_string ] ]))
     :: props
   in
+  let principal_url = Uri.of_string principal_url_string in
   let acl = (`Href principal_url, `Grant [ `All ]) in
   unsafe_read_acl fs (`Dir [config.principals]) >>= fun principal_acl ->
   unsafe_read_acl fs (`Dir [config.calendars]) >>= fun calendar_acl ->
@@ -1112,15 +1112,15 @@ let make_principal props fs now config name =
   create_calendar fs now [acl] (`Dir [config.calendars ; name ; "calendar"]) >|= fun _ ->
   principal_url
 
-let principal_to_href host principals_directory principal_string =
-  let uri = Uri.with_path host (Fs.to_string (`Dir [ principals_directory ; principal_string])) in
-  Xml.dav_node "href" [ Xml.pcdata @@ Uri.to_string uri ]
+let principal_to_href principals_directory principal_string =
+  let uri_string = Fs.to_string (`Dir [ principals_directory ; principal_string]) in
+  Xml.dav_node "href" [ Xml.pcdata uri_string ]
 
 let href_to_principal principals_directory tree =
   match Xml.href_parser tree with
   | Ok principal ->
     let path = Uri.path (Uri.of_string principal) in
-    let dir = principals_directory ^ "/" in
+    let dir = Fs.to_string (`Dir [principals_directory]) in
     if Astring.String.is_prefix ~affix:dir path then
       match Astring.String.cut ~sep:dir path with
       | Some ("", p) -> Ok p
@@ -1144,13 +1144,13 @@ let enroll_or_resign modify_membership fs config ~member ~group =
       | Some (attrs, all_principals) -> (attrs, all_principals)
   in
   let modify_member_in_group prop_map =
-    let member_href = principal_to_href config.host config.principals member in
+    let member_href = principal_to_href config.principals member in
     let values = principals prop_map "group-member-set" in
     let values' = modify_membership member_href values in
     Properties.unsafe_add (Xml.dav_ns, "group-member-set") values' prop_map
   in
   let modify_group_in_member prop_map =
-    let group_href = principal_to_href config.host config.principals group in
+    let group_href = principal_to_href config.principals group in
     let values = principals prop_map "group-membership" in
     let values' = modify_membership group_href values in
     Properties.unsafe_add (Xml.dav_ns, "group-membership") values' prop_map
@@ -1184,13 +1184,12 @@ let collect_principals fs config principal_dir key =
           acc) [] principals
 
 let make_user ?(props = []) fs now config ~name ~password ~salt =
-  let get_url dir = Uri.with_path config.host (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
   let home_set_dir = `Dir [ config.calendars ; name ] in
-  let home_set_url = get_url home_set_dir in
+  let home_set_url_string = Fs.to_string (home_set_dir :> Webdav_fs.file_or_dir) in
   let props' =
     let salt = base64_encode salt in
     ((Xml.caldav_ns, "calendar-home-set"),
-     ([], [Xml.dav_node "href" [Xml.pcdata @@ Uri.to_string home_set_url ]]))
+     ([], [Xml.dav_node "href" [Xml.pcdata home_set_url_string ]]))
     :: ((Xml.robur_ns, "password"),
         ([], [Xml.pcdata @@ hash_password password salt]))
     :: ((Xml.robur_ns, "salt"),

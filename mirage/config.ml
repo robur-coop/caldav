@@ -33,7 +33,7 @@ let tofu =
 
 let hostname =
   let doc = Key.Arg.info ~doc:"Hostname to use." [ "host" ] ~docv:"STRING" in
-  Key.(create "hostname" Arg.(opt string "localhost" doc))
+  Key.(create "hostname" Arg.(required string doc))
 
 (*
 in the Mirage module (from the mirage package):
