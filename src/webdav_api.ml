@@ -262,21 +262,24 @@ module Make(Fs: Webdav_fs.S) = struct
 
   let property_selector fs host propfind_request auth_user_props f_or_d =
     Fs.get_property_map fs f_or_d >|= fun resource_props ->
-    if resource_props = Properties.empty
-    then `Not_found
-    else
-      (* results for props, grouped by code *)
-      let propstats = match propfind_request with
-        | `Propname -> [`OK, Properties.names resource_props]
-        | `All_prop includes -> [`OK, Properties.all resource_props] (* TODO: finish this *)
-        | `Props ps -> Properties.find_many ~auth_user_props ~resource_props ps
-      in
-      let ps = List.map propstat_node propstats in
-      let selected_properties =
-        Xml.dav_node "response"
-          (Xml.dav_node "href" [ Xml.Pcdata (uri_string host f_or_d) ] :: ps)
-      in
-      `Single_response selected_properties
+    let privileges = Properties.privileges ~auth_user_props resource_props in
+    if not (Privileges.is_met ~requirement:`Read privileges) 
+    then `Forbidden
+    else if resource_props = Properties.empty
+      then `Not_found
+      else
+        (* results for props, grouped by code *)
+        let propstats = match propfind_request with
+          | `Propname -> [`OK, Properties.names resource_props]
+          | `All_prop includes -> [`OK, Properties.all resource_props] (* TODO: finish this *)
+          | `Props ps -> Properties.find_many ~auth_user_props ~resource_props ps
+        in
+        let ps = List.map propstat_node propstats in
+        let selected_properties =
+          Xml.dav_node "response"
+            (Xml.dav_node "href" [ Xml.Pcdata (uri_string host f_or_d) ] :: ps)
+        in
+        `Single_response selected_properties
 
   let multistatus nodes = Xml.dav_node "multistatus" nodes
 
@@ -288,7 +291,7 @@ module Make(Fs: Webdav_fs.S) = struct
       (* answers : [ `Not_found | `Single_response of Tyxml.Xml.node ] list *)
       let nodes = List.fold_left (fun acc element ->
           match element with
-          | `Not_found -> acc
+          | `Not_found | `Forbidden -> acc
           | `Single_response node -> node :: acc) [] answers
       in
       Ok (multistatus nodes)
@@ -301,7 +304,7 @@ module Make(Fs: Webdav_fs.S) = struct
     | _, `File _ ->
       begin
         property_selector fs host req auth_user_props f_or_d >|= function
-        | `Not_found -> Error `Property_not_found
+        | `Not_found | `Forbidden -> Error `Property_not_found
         | `Single_response t -> Ok (multistatus [t])
       end
     | `One, `Dir data ->
