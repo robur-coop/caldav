@@ -37,6 +37,10 @@ DONE:
 - stored URLs contain scheme, hostname, and port
 --> should instead be relative!?
 --> or absolute, but not containing scheme, hostname, port
+- test and adapt calendar-home-set with multiple entries:
+ - does it work with clients? no
+ - which path is a "new calendar" created in? unclear
+ => man kann alles in ein verzeichnis dumpen, filenames sind uniqe
 
 -- 31st August 2018:
 
@@ -73,8 +77,7 @@ DONE:
 
 -- 2nd November 2018
 
-- LATER: KV updates for irmin/git
+- put all calendars into one dir, control access via acl
+- make a running calendar server for robur internally
 - blackberry comma topic
-- test and adapt calendar-home-set with multiple entries:
- - does it work with clients?
- - which path is a "new calendar" created in?
+- LATER: KV updates for irmin/git

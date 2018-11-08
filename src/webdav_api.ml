@@ -1071,9 +1071,8 @@ let initialize_fs_for_apple_testsuite fs now acl config =
   Lwt.return_unit
 
 let initialize_fs fs now config =
-  let admin_acl = admin_acl config in
-  make_dir_if_not_present fs now admin_acl (`Dir [config.principals]) >>= fun _ ->
-  make_dir_if_not_present fs now admin_acl (`Dir [config.calendars]) >>= fun _ ->
+  make_dir_if_not_present fs now (admin_acl config) (`Dir [config.principals]) >>= fun _ ->
+  make_dir_if_not_present fs now (calendars_acl config) (`Dir [config.calendars]) >>= fun _ ->
   Lwt.return_unit
 
 let change_user_password fs config ~name ~password ~salt =
@@ -1096,7 +1095,7 @@ let make_principal props fs now config name =
   let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
   let principal_dir = `Dir [ config.principals ; name ] in
   let principal_url_string = Fs.to_string (principal_dir :> Webdav_fs.file_or_dir) in
-  let home_set_dir = `Dir [ config.calendars ; name ] in
+  let home_set_dir = `Dir [ config.calendars ] in
   let props' =
     ((Xml.dav_ns, "principal-URL"),
      ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata principal_url_string ] ]))
@@ -1105,11 +1104,9 @@ let make_principal props fs now config name =
   let principal_url = Uri.of_string principal_url_string in
   let acl = (`Href principal_url, `Grant [ `All ]) in
   unsafe_read_acl fs (`Dir [config.principals]) >>= fun principal_acl ->
-  unsafe_read_acl fs (`Dir [config.calendars]) >>= fun calendar_acl ->
   (* maybe only allow root to write principal_dir (for password reset) *)
   make_dir_if_not_present fs now (acl :: principal_acl) ~resourcetype ~props:props' principal_dir >>= fun _ ->
-  make_dir_if_not_present fs now (acl :: calendar_acl) home_set_dir >>= fun _ ->
-  create_calendar fs now [acl] (`Dir [config.calendars ; name ; "calendar"]) >|= fun _ ->
+  create_calendar fs now [acl] (`Dir [config.calendars ; name ]) >|= fun _ ->
   principal_url
 
 let principal_to_href principals_directory principal_string =
@@ -1184,7 +1181,7 @@ let collect_principals fs config principal_dir key =
           acc) [] principals
 
 let make_user ?(props = []) fs now config ~name ~password ~salt =
-  let home_set_dir = `Dir [ config.calendars ; name ] in
+  let home_set_dir = `Dir [ config.calendars ] in
   let home_set_url_string = Fs.to_string (home_set_dir :> Webdav_fs.file_or_dir) in
   let props' =
     let salt = base64_encode salt in
@@ -1209,6 +1206,7 @@ let delete_home_and_calendars fs principal_dir user_calendar_dir =
 let delete_user fs config name =
   let principal_dir = `Dir [config.principals ; name] in
   let user_calendar_dir = `Dir [config.calendars ; name] in
+  (* TODO also delete an users other calendars besides their default calendar *)
   (* TODO delete user from all acls *)
   (* TODO events in other people calendars? *)
   Fs.dir_exists fs principal_dir >>= function
