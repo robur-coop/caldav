@@ -41,6 +41,7 @@ DONE:
  - does it work with clients? no
  - which path is a "new calendar" created in? unclear
  => man kann alles in ein verzeichnis dumpen, filenames sind uniqe
+- put all calendars into one dir, control access via acl
 
 -- 31st August 2018:
 
@@ -77,7 +78,7 @@ DONE:
 
 -- 2nd November 2018
 
-- put all calendars into one dir, control access via acl
+- fix deletion of calendars
 - make a running calendar server for robur internally
 - blackberry comma topic
 - LATER: KV updates for irmin/git

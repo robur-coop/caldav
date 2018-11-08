@@ -1,6 +1,9 @@
 all:
 	opam reinstall caldav
-	cd mirage; make
+	cd mirage; make clean && mirage configure && make
+
+run:
+	mirage/main.native --data=/tmp/calendar --http=888 --admin=epsilon --host=192.168.42.84 --tofu
 
 configure:
 	cd mirage; mirage configure
