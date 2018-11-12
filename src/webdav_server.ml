@@ -351,7 +351,7 @@ class group config fs now = object(self)
 
   method private requested_members rd =
     match Uri.get_query_param rd.uri "members" with
-    | None -> Error `Bad_request
+    | None -> Ok []
     | Some x ->
       let members = Astring.String.cuts ~sep:"," x in
       if List.for_all sane members
