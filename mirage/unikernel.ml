@@ -62,11 +62,12 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
       | None        -> (`Not_found, Cohttp.Header.init (), `String "Not found", [])
       | Some result -> result
     end
-    >>= fun (status, headers, body, _path) ->
-    Http_log.info (fun m -> m "\nRESPONSE %d - %s %s, body: %s"
+    >>= fun (status, headers, body, path) ->
+    Http_log.info (fun m -> m "RESPONSE %d - %s %s path: %s, body: %s"
                       (Cohttp.Code.code_of_status status)
                       (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
                       (Uri.path (Cohttp.Request.uri request))
+                      (Astring.String.concat ~sep:", " path)
                       (match body with `String s -> s | `Empty -> "empty" | _ -> "unknown") ) ;
     (* Finally, send the response to the client *)
     S.respond ~headers ~body ~status ()

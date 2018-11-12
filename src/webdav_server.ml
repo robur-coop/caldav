@@ -457,11 +457,6 @@ class group_users config fs now = object(self)
       Dav.resign fs config ~group ~member >>= fun () ->
       Wm.continue true rd
 
-  method is_conflict rd =
-    match self#requested_group rd with
-    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
-    | Ok name -> Wm.continue true rd
-
   method content_types_provided rd =
     Wm.continue [ ("*/*", Wm.continue `Empty) ] rd
 
@@ -469,6 +464,9 @@ class group_users config fs now = object(self)
     Wm.continue [
       ("application/octet-stream", self#add_group_member)
     ] rd
+
+  method is_conflict rd =
+    Wm.continue false rd
 
   method is_authorized rd =
     (* TODO implement digest authentication! *)

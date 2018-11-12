@@ -23,13 +23,13 @@ depends: [
   "ocaml" {>= "4.05.0"}
   "dune" {build}
   "alcotest" {with-test}
+  "mirage-fs-mem" {with-test}
+  "mirage-fs-unix" {>="1.5.0"}
   "ppx_deriving" {build}
   "webmachine"
   "lwt"
   "ptime" 
   "cohttp-lwt-unix"
-  "mirage-fs-mem"
-  "mirage-fs-unix"
   "xmlm"
   "tyxml"
   "icalendar"

@@ -5,9 +5,7 @@ Then, you need to install [`opam`](https://opam.ocaml.org) via your package mana
 
 Since some dependencies are not released via `opam` yet, they need to be manually pinned. To do this, run:
 
-    opam pin add mirage-fs-mem https://github.com/roburio/mirage-fs-mem.git
     opam pin add webmachine https://github.com/roburio/ocaml-webmachine.git#webdav
-    opam pin add icalendar https://github.com/roburio/icalendar.git
     opam pin add caldav https://github.com/roburio/caldav.git
 
 Now we're ready to compile the CalDAV server. Let's get the code (don't worry that we already pinned caldav, we now need the source code of the unikernel):
@@ -76,6 +74,26 @@ If someone wants to leave, root can delete their account:
 
 ### Create group
 
-You might want to create a new group:
+You might want to create a new group. Members is an optional query parameter.
 
     curl -v -u root:somecoolpassword -X PUT "https://calendar.example.com/groups/somenewgroup?members=ruth,viktor,carsten,else"
+
+### Update group members
+
+You might want to update the members of a group. The members parameter will overwrite the existing group members. Be careful not to lose your groups.
+
+    curl -v -u root:somecoolpassword -X PUT "https://calendar.example.com/groups/somenewgroup?members=ruth,viktor,carsten,else"
+
+You might want to add a member to a group.
+
+    curl -v -u root:somecoolpassword -X PUT "https://calendar.example.com/groups/somenewgroup/users/ruth"
+
+You might want to remove a member from a group.
+
+    curl -v -u root:somecoolpassword -X DELETE "https://calendar.example.com/groups/somenewgroup/users/ruth"
+
+### Delete group
+
+You might want to delete a group. Root can do this.
+
+    curl -v -u root:somecoolpassword -X DELETE "https://calendar.example.com/groups/somenewgroup"
