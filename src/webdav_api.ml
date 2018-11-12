@@ -1098,7 +1098,6 @@ let make_principal props fs now config name =
   let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
   let principal_dir = `Dir [ config.principals ; name ] in
   let principal_url_string = Fs.to_string (principal_dir :> Webdav_fs.file_or_dir) in
-  let home_set_dir = `Dir [ config.calendars ] in
   let props' =
     ((Xml.dav_ns, "principal-URL"),
      ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata principal_url_string ] ]))

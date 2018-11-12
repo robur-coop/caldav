@@ -1,0 +1,4 @@
+(test
+  (name test)
+  (libraries alcotest ptime.clock.os caldav lwt.unix mirage-fs-mem)
+  (package caldav))

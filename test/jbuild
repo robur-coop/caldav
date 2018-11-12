@@ -1,8 +1,0 @@
-(executables
- ((names (test_webdav))
-  (libraries (ptime.clock.os caldav alcotest lwt.unix mirage-fs-mem))))
-
-(alias
- ((name    runtest)
-  (deps    (test_webdav.exe))
-  (action  (run ${<}))))

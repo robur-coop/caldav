@@ -1,7 +1,28 @@
-opam-version: "1.2"
+opam-version: "2.0"
+maintainer: [
+  "Stefanie Schirmer @linse"
+]
+authors: [
+  "Stefanie Schirmer @linse"
+  "Hannes Mehnert"
+]
+homepage: "https://github.com/roburio/caldav"
+bug-reports: "https://github.com/roburio/caldav/issues"
+dev-repo: "git+https://github.com/roburio/caldav.git"
+tags: ["org:mirage" "org:robur"]
+doc: "https://roburio.github.io/caldav/"
+license: "ISC"
+
+build: [
+  ["dune" "subst"] {pinned}
+  ["dune" "build" "-p" name "-j" jobs]
+  ["dune" "runtest" "-p" name "-j" jobs] {with-test}
+]
+
 depends: [
-  "alcotest" {test}
-  "jbuilder" {build}
+  "ocaml" {>= "4.05.0"}
+  "dune" {build}
+  "alcotest" {with-test}
   "ppx_deriving" {build}
   "webmachine"
   "lwt"
@@ -15,21 +36,8 @@ depends: [
   "rresult"
 ]
 
-build: [
-  ["jbuilder" "subst" "-p" name]{pinned}
-  ["jbuilder" "build" "-p" name "-j" jobs]
-]
-build-test: [
-  [ "ocaml" "pkg/pkg.ml" "build" "--pinned" "%{pinned}%" "--tests" "true" ]
-  [ "ocaml" "pkg/pkg.ml" "test" ]
-]
-maintainer: [
-  "Stefanie Schirmer @linse"
-]
-authors: [
-  "Stefanie Schirmer @linse"
-  "Hannes Mehnert"
-]
-homepage: "https://github.com/roburio/icalendar"
-bug-reports: "https://github.com/roburio/icalendar/issues"
-dev-repo: "https://github.com/roburio/icalendar.git"
+synopsis: "A CalDAV server"
+description: """
+A CalDAV server. Supports everything from the roburio/icalendar library.
+Also supports a bit of WebDAV.
+"""

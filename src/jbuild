@@ -1,7 +1,0 @@
-(jbuild_version 1)
-
-(library
- ((name        caldav)
-  (public_name caldav)
-  (preprocess (pps (ppx_deriving.std)))
-  (libraries (logs lwt ptime cohttp mirage-fs-lwt xmlm tyxml icalendar rresult nocrypto webmachine cohttp-lwt mirage-clock))))
