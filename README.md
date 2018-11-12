@@ -60,4 +60,22 @@ Startup:
 
 If you don't use trust on first use, you might want to create a new user:
 
-    curl -v -u root:somecoolpassword -X PUT "https://calendar.example.com/user?name=somenewuser&password=theirpassword"
+    curl -v -u root:somecoolpassword -X PUT "https://calendar.example.com/users/somenewuser?password=theirpassword"
+
+### Update password
+
+If someone forgot their password, root can set a new one:
+
+    curl -v -u root:somecoolpassword -X PUT "https://calendar.example.com/users/somenewuser?password=theirpassword"
+
+### Delete user
+
+If someone wants to leave, root can delete their account:
+
+    curl -v -u root:somecoolpassword -X DELETE "https://calendar.example.com/users/somenewuser"
+
+### Create group
+
+You might want to create a new group:
+
+    curl -v -u root:somecoolpassword -X PUT "https://calendar.example.com/groups/somenewgroup?members=ruth,viktor,carsten,else"

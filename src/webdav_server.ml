@@ -338,8 +338,7 @@ class user config fs now generate_salt = object(self)
     | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
     | Ok requested_user ->
       Dav.access_granted_for_acl fs config ~path:(config.principals ^ "/" ^ requested_user) rd.meth ~user >>= fun principals_granted ->
-      Dav.access_granted_for_acl fs config ~path:(config.calendars ^ "/" ^ requested_user) rd.meth ~user >>= fun calendars_granted ->
-      Wm.continue (not (principals_granted && calendars_granted)) rd
+      Wm.continue (not principals_granted) rd
 end
 
 class group config fs now = object(self)
@@ -422,8 +421,7 @@ class group config fs now = object(self)
     | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
     | Ok requested_group ->
       Dav.access_granted_for_acl fs config ~path:(config.principals ^ "/" ^ requested_group) rd.meth ~user >>= fun principals_granted ->
-      Dav.access_granted_for_acl fs config ~path:(config.calendars ^ "/" ^ requested_group) rd.meth ~user >>= fun calendars_granted ->
-      Wm.continue (not (principals_granted && calendars_granted)) rd
+      Wm.continue (not principals_granted) rd
 end
 
 class group_users config fs now = object(self)
@@ -493,8 +491,7 @@ class group_users config fs now = object(self)
     | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
     | Ok requested_group ->
       Dav.access_granted_for_acl fs config ~path:(config.principals ^ "/" ^ requested_group) rd.meth ~user >>= fun principals_granted ->
-      Dav.access_granted_for_acl fs config ~path:(config.calendars ^ "/" ^ requested_group) rd.meth ~user >>= fun calendars_granted ->
-      Wm.continue (not (principals_granted && calendars_granted)) rd
+      Wm.continue (not principals_granted) rd
 end
 
 (* the route table *)
