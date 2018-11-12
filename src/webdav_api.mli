@@ -40,6 +40,7 @@ sig
 
   val make_group : state -> Ptime.t -> config -> string -> string list -> Uri.t Lwt.t
   val enroll : state -> config -> member:string -> group:string -> unit Lwt.t
+  val resign : state -> config -> member:string -> group:string -> unit Lwt.t
   val replace_group_members : state -> config -> string -> string list -> unit Lwt.t
   val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 

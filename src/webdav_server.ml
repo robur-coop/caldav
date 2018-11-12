@@ -258,7 +258,7 @@ class user config fs now generate_salt = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
 
   method private requested_user rd =
-    match Uri.get_query_param rd.uri "name" with
+    match Webmachine.Rd.lookup_path_info "id" rd with
     | None -> Error `Bad_request
     | Some x -> if not (sane x) then Error `Bad_request else Ok x
 
@@ -346,7 +346,7 @@ class group config fs now = object(self)
   inherit [Cohttp_lwt.Body.t] Wm.resource
 
   method private requested_group rd =
-    match Uri.get_query_param rd.uri "name" with
+    match Webmachine.Rd.lookup_path_info "id" rd with
     | None -> Error `Bad_request
     | Some x -> if not (sane x) then Error `Bad_request else Ok x
 
@@ -426,11 +426,83 @@ class group config fs now = object(self)
       Wm.continue (not (principals_granted && calendars_granted)) rd
 end
 
+class group_users config fs now = object(self)
+  inherit [Cohttp_lwt.Body.t] Wm.resource
+
+  method private requested_group rd =
+    match Webmachine.Rd.lookup_path_info "group_id" rd with
+    | None -> Error `Bad_request
+    | Some x -> if not (sane x) then Error `Bad_request else Ok x
+
+  method private requested_member rd =
+    match Webmachine.Rd.lookup_path_info "user_id" rd with
+    | None -> Error `Bad_request
+    | Some x -> if not (sane x) then Error `Bad_request else Ok x
+
+  method allowed_methods rd =
+    Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
+
+  method known_methods rd =
+    Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
+
+  method private add_group_member rd =
+    match self#requested_group rd, self#requested_member rd with
+    | Error _, _ | _, Error _ -> Wm.respond (to_status `Bad_request) rd
+    | Ok group, Ok member ->
+      Dav.enroll fs config ~group ~member >>= fun () ->
+      Wm.continue true rd
+
+  method delete_resource rd =
+    match self#requested_group rd, self#requested_member rd with
+    | Error `Bad_request, _ | _, Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    | Ok group, Ok member ->
+      Dav.resign fs config ~group ~member >>= fun () ->
+      Wm.continue true rd
+
+  method is_conflict rd =
+    match self#requested_group rd with
+    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    | Ok name -> Wm.continue true rd
+
+  method content_types_provided rd =
+    Wm.continue [ ("*/*", Wm.continue `Empty) ] rd
+
+  method content_types_accepted rd =
+    Wm.continue [
+      ("application/octet-stream", self#add_group_member)
+    ] rd
+
+  method is_authorized rd =
+    (* TODO implement digest authentication! *)
+    match Headers.get_authorization rd.req_headers with
+     | None -> Wm.continue (`Basic "calendar") rd
+     | Some v -> Dav.verify_auth_header fs config v >>= function
+       | Error (`Msg msg) ->
+         Logs.warn (fun m -> m "is_authorized failed with header value %s and message %s" v msg);
+         Wm.continue (`Basic "invalid authorization") rd
+       | Error (`Unknown_user (name, _)) ->
+         Logs.warn (fun m -> m "is_authorized failed with unknown user %s" name);
+         Wm.continue (`Basic "invalid authorization") rd
+       | Ok user ->
+         let rd' = with_req_headers (Headers.replace_authorization user) rd in
+         Wm.continue `Authorized rd'
+
+  method forbidden rd =
+    let user = Headers.get_user rd.req_headers in
+    match self#requested_group rd with
+    | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
+    | Ok requested_group ->
+      Dav.access_granted_for_acl fs config ~path:(config.principals ^ "/" ^ requested_group) rd.meth ~user >>= fun principals_granted ->
+      Dav.access_granted_for_acl fs config ~path:(config.calendars ^ "/" ^ requested_group) rd.meth ~user >>= fun calendars_granted ->
+      Wm.continue (not (principals_granted && calendars_granted)) rd
+end
+
 (* the route table *)
 let routes config fs now generate_salt = [
   ("/.well-known/caldav", fun () -> new redirect config) ;
-  ("/user", fun () -> new user config fs now generate_salt) ;
-  ("/group", fun () -> new group config fs now) ;
+  ("/users/:id", fun () -> new user config fs now generate_salt) ;
+  ("/groups/:group_id/users/:user_id", fun () -> new group_users config fs now) ;
+  ("/groups/:id", fun () -> new group config fs now) ;
   ("/" ^ config.principals, fun () -> new handler config fs now generate_salt) ;
   ("/" ^ config.principals ^ "/*", fun () -> new handler config fs now generate_salt) ;
   ("/" ^ config.calendars, fun () -> new handler config fs now generate_salt) ;
