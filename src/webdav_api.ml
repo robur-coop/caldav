@@ -46,6 +46,8 @@ sig
   val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
+  val initialize_fs_for_apple_testsuite : state -> Ptime.t -> config -> unit Lwt.t
+
 end
 
 let src = Logs.Src.create "webdav.robur.io" ~doc:"webdav api logs"
@@ -1056,7 +1058,8 @@ let create_calendar fs now acl name =
   let resourcetype = [ Xml.node ~ns:Xml.caldav_ns "calendar" [] ] in
   make_dir_if_not_present fs now acl ~resourcetype ~props name
 
-let initialize_fs_for_apple_testsuite fs now acl config =
+let initialize_fs_for_apple_testsuite fs now config =
+  let acl = [ `All, `Grant [ `All ] ] in
   let calendars_properties =
     let url =
       Uri.with_path config.host
@@ -1072,6 +1075,7 @@ let initialize_fs_for_apple_testsuite fs now acl config =
   make_dir_if_not_present fs now acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001"]) >>= fun _ ->
   create_calendar fs now acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "calendar" ]) >>= fun _ ->
   make_dir_if_not_present fs now acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "tasks"]) >>= fun _ ->
+  make_dir_if_not_present fs now acl (`Dir [config.principals]) >>= fun _ ->
   Lwt.return_unit
 
 let initialize_fs fs now config =

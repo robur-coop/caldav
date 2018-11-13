@@ -45,6 +45,7 @@ sig
   val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
+  val initialize_fs_for_apple_testsuite : state -> Ptime.t -> config -> unit Lwt.t
 end
 
 module Make (Fs: Webdav_fs.S) : S with type state = Fs.t
