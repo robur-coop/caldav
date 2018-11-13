@@ -3,8 +3,11 @@ open Lwt.Infix
 (** Common signature for http and https. *)
 module type HTTP = Cohttp_lwt.S.Server
 
-let http_src = Logs.Src.create "http" ~doc:"HTTP server"
-module Http_log = (val Logs.src_log http_src : Logs.LOG)
+let server_src = Logs.Src.create "http.server" ~doc:"HTTP server"
+module Server_log = (val Logs.src_log server_src : Logs.LOG)
+
+let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
+module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
 module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_types_lwt.KV_RO) (S: HTTP) = struct
   module X509 = Tls_mirage.X509(KEYS)(Clock)
@@ -54,22 +57,29 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
        * match any of the route patterns. In this case the server should return a
        * 404 [`Not_found]. *)
       let now () = Ptime.v (Clock.now_d_ps clock) in
-      Http_log.info (fun m -> m "REQUEST %s %s headers %s"
-                        (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
-                        (Cohttp.Request.resource request)
-                        (Cohttp.Header.to_string (Cohttp.Request.headers request)) );
+      let start = now () in
+      Access_log.info (fun m -> m "request %s %s"
+                          (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
+                          (Cohttp.Request.resource request));
+      Access_log.debug (fun m -> m "request headers %s"
+                           (Cohttp.Header.to_string (Cohttp.Request.headers request)) );
       Webdav_server.Wm.dispatch' (Webdav_server.routes config fs now generate_salt) ~body ~request
       >|= begin function
         | None        -> (`Not_found, Cohttp.Header.init (), `String "Not found", [])
         | Some result -> result
       end
       >>= fun (status, headers, body, path) ->
-      Http_log.info (fun m -> m "RESPONSE %d - %s %s path: %s, body: %s"
-                        (Cohttp.Code.code_of_status status)
-                        (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
-                        (Uri.path (Cohttp.Request.uri request))
-                        (Astring.String.concat ~sep:", " path)
-                        (match body with `String s -> s | `Empty -> "empty" | _ -> "unknown") ) ;
+      let stop = now () in
+      let diff = Ptime.diff stop start in
+      Access_log.info (fun m -> m "response %d response time %a"
+                          (Cohttp.Code.code_of_status status)
+                          Ptime.Span.pp diff) ;
+      Access_log.debug (fun m -> m "%s %s path: %s"
+                          (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
+                          (Uri.path (Cohttp.Request.uri request))
+                          (Astring.String.concat ~sep:", " path)) ;
+(*      Access_log.debug (fun m -> m "body: %s"
+                           (match body with `String s -> s | `Empty -> "empty" | _ -> "unknown") ) ; *)
       (* Finally, send the response to the client *)
       S.respond ~headers ~body ~status ()
   end
@@ -83,8 +93,8 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
     let uri = Cohttp.Request.uri request in
     let new_uri = Uri.with_scheme uri (Some "https") in
     let new_uri = Uri.with_port new_uri redirect_port in
-    Http_log.info (fun f -> f "[%s] -> [%s]"
-                      (Uri.to_string uri) (Uri.to_string new_uri));
+    Access_log.debug (fun f -> f "[%s] -> [%s]"
+                         (Uri.to_string uri) (Uri.to_string new_uri));
     let headers = Cohttp.Header.init_with "location" (Uri.to_string new_uri) in
     S.respond ~headers ~status:`Moved_permanently ~body:`Empty ()
 
@@ -92,25 +102,25 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
     let callback (_, cid) request body =
       let cid = Cohttp.Connection.to_string cid in
       let uri = Cohttp.Request.uri request in
-      Http_log.info (fun f -> f "[%s] serving %s." cid (Uri.to_string uri));
+      Access_log.debug (fun f -> f "[%s] serving %s." cid (Uri.to_string uri));
       callback request body
     and conn_closed (_,cid) =
       let cid = Cohttp.Connection.to_string cid in
-      Http_log.info (fun f -> f "[%s] closing" cid);
+      Access_log.debug (fun f -> f "[%s] closing" cid);
     in
     S.make ~conn_closed ~callback ()
 
   let start _random clock tls_keys http =
     (* TODO naming *)
     let init_http port config fs =
-      Http_log.info (fun f -> f "listening on %d/HTTP" port);
+      Server_log.info (fun f -> f "listening on %d/HTTP" port);
       http (`TCP port) @@ serve (match fs with
           | `Unix fs -> D2.dispatch clock config fs
           | `Apple fs -> D1.dispatch clock config fs)
     in
     let init_https port config fs =
       tls_init tls_keys >>= fun tls_config ->
-      Http_log.info (fun f -> f "listening on %d/HTTPS" port);
+      Server_log.info (fun f -> f "listening on %d/HTTPS" port);
       let tls = `TLS (tls_config, `TCP port) in
       http tls @@ serve (match fs with
           | `Unix fs -> D2.dispatch clock config fs
@@ -150,6 +160,7 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
       init_fs_for_runtime config >>=
       init_https port config
     | Some http_port, Some https_port ->
+      Server_log.info (fun f -> f "redirecting on %d/HTTP to %d/HTTPS" http_port https_port);
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname () in
       init_fs_for_runtime config >>= fun fs ->
       Lwt.pick [
