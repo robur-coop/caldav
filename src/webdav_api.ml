@@ -159,7 +159,7 @@ module Make(Fs: Webdav_fs.S) = struct
       Printf.sprintf "<tr><td><a href=\"%s\">%s</a></td><td>%s</td><td>%s</td></tr>"
         file file (if is_dir then "directory" else "text/calendar") last_modified in
     let data = String.concat "\n" (List.map print_file files) in
-    (data, "text/html")
+    ("text/html", data)
 
   let directory_etag fs (`Dir dir) =
     directory_as_html fs (`Dir dir) >|= fun (data, ct) ->
@@ -197,7 +197,7 @@ module Make(Fs: Webdav_fs.S) = struct
       ] @ name in
       Lwt_list.map_p calendar_components files >|= fun components ->
       let data = Icalendar.to_ics (calprops, List.flatten components) in
-      (data, "text/calendar")
+      ("text/calendar", data)
 
   let read fs ~path ~is_mozilla =
     Fs.from_string fs path >>= function
