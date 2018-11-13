@@ -35,6 +35,10 @@ let hostname =
   let doc = Key.Arg.info ~doc:"Hostname to use." [ "host" ] ~docv:"STRING" in
   Key.(create "hostname" Arg.(required string doc))
 
+let apple_testable =
+  let doc = Key.Arg.info ~doc:"Configure the server to use with Apple CCS CalDAVtester." [ "apple-testable" ] in
+  Key.(create "apple_testable" Arg.(flag doc))
+
 (*
 in the Mirage module (from the mirage package):
 code: let keys = List.map Key.abstract [ http_port ; https_port ; admin_password ]
@@ -57,11 +61,13 @@ let main =
     package "webmachine" ;
     package "caldav" ;
     package "mirage-fs-unix" ;
+    package "mirage-fs-mem" ;
+    package "mirage-fs-lwt" ;
   ] in
   let keys =
     [ Key.abstract http_port ; Key.abstract https_port ;
       Key.abstract admin_password ; Key.abstract fs_root ;
-      Key.abstract tofu ; Key.abstract hostname ]
+      Key.abstract tofu ; Key.abstract hostname ; Key.abstract apple_testable ]
   in
   foreign
     ~packages:direct_dependencies ~keys

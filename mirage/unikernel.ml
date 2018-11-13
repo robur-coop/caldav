@@ -7,14 +7,14 @@ let http_src = Logs.Src.create "http" ~doc:"HTTP server"
 module Http_log = (val Logs.src_log http_src : Logs.LOG)
 
 module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_types_lwt.KV_RO) (S: HTTP) = struct
-  module Fs = Caldav.Webdav_fs.Make(FS_unix)
-  module Dav = Caldav.Webdav_api.Make(Fs)
   module X509 = Tls_mirage.X509(KEYS)(Clock)
 
   let generate_salt () = R.generate 15
 
   let initialize_fs clock config data_dir admin_pass =
     let now = Ptime.v (Clock.now_d_ps clock) in
+    let module Fs = Caldav.Webdav_fs.Make(FS_unix) in
+    let module Dav = Caldav.Webdav_api.Make(Fs) in
     FS_unix.connect data_dir >>= fun fs ->
     Fs.valid fs config >>= fun fs_is_valid ->
     match fs_is_valid, admin_pass with
@@ -39,38 +39,43 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
         | Failure _ -> Lwt.fail_with "Could not find server.pem and server.key in the <working directory>/tls."
         | e -> Lwt.fail e)
 
-  let dispatch clock config fs request body =
-    let module WmClock = struct
-      let now () =
-        let ts = Clock.now_d_ps clock in
-        let span = Ptime.Span.v ts in
-        match Ptime.Span.to_int_s span with
-        | None -> 0
-        | Some seconds -> seconds
-    end in
-    let module Webdav_server = Caldav.Webdav_server.Make(WmClock)(Fs) in
-    (* Perform route dispatch. If [None] is returned, then the URI path did not
-     * match any of the route patterns. In this case the server should return a
-     * 404 [`Not_found]. *)
-    let now () = Ptime.v (Clock.now_d_ps clock) in
-    Http_log.info (fun m -> m "REQUEST %s %s headers %s"
-                      (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
-                      (Cohttp.Request.resource request)
-                      (Cohttp.Header.to_string (Cohttp.Request.headers request)) );
-    Webdav_server.Wm.dispatch' (Webdav_server.routes config fs now generate_salt) ~body ~request
-    >|= begin function
-      | None        -> (`Not_found, Cohttp.Header.init (), `String "Not found", [])
-      | Some result -> result
-    end
-    >>= fun (status, headers, body, path) ->
-    Http_log.info (fun m -> m "RESPONSE %d - %s %s path: %s, body: %s"
-                      (Cohttp.Code.code_of_status status)
-                      (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
-                      (Uri.path (Cohttp.Request.uri request))
-                      (Astring.String.concat ~sep:", " path)
-                      (match body with `String s -> s | `Empty -> "empty" | _ -> "unknown") ) ;
-    (* Finally, send the response to the client *)
-    S.respond ~headers ~body ~status ()
+  module D (FS : Mirage_fs_lwt.S) = struct
+    let dispatch clock config fs request body =
+      let module WmClock = struct
+        let now () =
+          let ts = Clock.now_d_ps clock in
+          let span = Ptime.Span.v ts in
+          match Ptime.Span.to_int_s span with
+          | None -> 0
+          | Some seconds -> seconds
+      end in
+      let module Webdav_server = Caldav.Webdav_server.Make(WmClock)(Caldav.Webdav_fs.Make(FS)) in
+      (* Perform route dispatch. If [None] is returned, then the URI path did not
+       * match any of the route patterns. In this case the server should return a
+       * 404 [`Not_found]. *)
+      let now () = Ptime.v (Clock.now_d_ps clock) in
+      Http_log.info (fun m -> m "REQUEST %s %s headers %s"
+                        (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
+                        (Cohttp.Request.resource request)
+                        (Cohttp.Header.to_string (Cohttp.Request.headers request)) );
+      Webdav_server.Wm.dispatch' (Webdav_server.routes config fs now generate_salt) ~body ~request
+      >|= begin function
+        | None        -> (`Not_found, Cohttp.Header.init (), `String "Not found", [])
+        | Some result -> result
+      end
+      >>= fun (status, headers, body, path) ->
+      Http_log.info (fun m -> m "RESPONSE %d - %s %s path: %s, body: %s"
+                        (Cohttp.Code.code_of_status status)
+                        (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
+                        (Uri.path (Cohttp.Request.uri request))
+                        (Astring.String.concat ~sep:", " path)
+                        (match body with `String s -> s | `Empty -> "empty" | _ -> "unknown") ) ;
+      (* Finally, send the response to the client *)
+      S.respond ~headers ~body ~status ()
+  end
+
+  module D1 = D(Mirage_fs_mem)
+  module D2 = D(FS_unix)
 
   (* Redirect to the same address, but in https. *)
   let redirect port request _body =
@@ -99,13 +104,17 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
     (* TODO naming *)
     let init_http port config fs =
       Http_log.info (fun f -> f "listening on %d/HTTP" port);
-      http (`TCP port) @@ serve (dispatch clock config fs)
+      http (`TCP port) @@ serve (match fs with
+          | `Unix fs -> D2.dispatch clock config fs
+          | `Apple fs -> D1.dispatch clock config fs)
     in
     let init_https port config fs =
       tls_init tls_keys >>= fun tls_config ->
       Http_log.info (fun f -> f "listening on %d/HTTPS" port);
       let tls = `TLS (tls_config, `TCP port) in
-      http tls @@ serve (dispatch clock config fs)
+      http tls @@ serve (match fs with
+          | `Unix fs -> D2.dispatch clock config fs
+          | `Apple fs -> D1.dispatch clock config fs)
     in
     let config host =
       let do_trust_on_first_use = Key_gen.tofu () in
@@ -114,8 +123,18 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
     let init_fs_for_runtime config =
       let dir = Key_gen.fs_root ()
       and admin_pass = Key_gen.admin_password ()
+      and apple_testable = Key_gen.apple_testable ()
       in
-      initialize_fs clock config dir admin_pass
+      if not apple_testable then
+        initialize_fs clock config dir admin_pass >|= fun fs ->
+        `Unix fs
+      else
+        let module Fs = Caldav.Webdav_fs.Make(Mirage_fs_mem) in
+        let module Dav = Caldav.Webdav_api.Make(Fs) in
+        let now = Ptime.v (Clock.now_d_ps clock) in
+        Mirage_fs_mem.connect "" >>= fun fs ->
+        Dav.initialize_fs_for_apple_testsuite fs now config >|= fun () ->
+        `Apple fs
     in
     let hostname = Key_gen.hostname () in
     match Key_gen.http_port (), Key_gen.https_port () with

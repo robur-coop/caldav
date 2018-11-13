@@ -42,43 +42,112 @@ DONE:
  - which path is a "new calendar" created in? unclear
  => man kann alles in ein verzeichnis dumpen, filenames sind uniqe
 - put all calendars into one dir, control access via acl
-
--- 31st August 2018:
-
-- implement ACL for writing acls, forbid to write acl in PROPPATCH / MKCOL / MKCALENDAR
-- a private calendar which should turn into a public one: how to adjust all the event ACLs? maybe DAV:inherited ACL?
+- fix deletion of calendars
 - Fs.to_string should return a leading /
-- curl commands to make calendar public/private/read-only/protected (freebusy only)
-- access control XML content when forbidden
 - client interoperability: android! create new todo lists and new calendars, use different users
+- attachments
+- automatic discovery of calendar url
+  - .well-known/caldav is supported
+  - DNS TXT record is out of scope for caldav
+- add group calendar, remove group calendar
+- persistent storage (irmin/git?) (mirage-fs-unix works for us!)
+- test read-only (group) calendar - check whether client report properly back that they can't create an event
+
+-- TODO before release
+
+- apache benchmark - how many requests per second are possible for GET/PUT/DELETE?
+  - many concurrent GETs of the same event --> 200
+    - 1000 requests, 1 connection: Requests per second: 40.71 [#/sec] (mean)
+    - 1000 requests, 5 connections: Requests per second: 71.81 [#/sec] (mean)
+    - 1000 requests, 10 connections: Requests per second: 74.98 [#/sec] (mean)
+    - 1000 requests, 15/17 connections: Requests per second: 74.45 [#/sec] (mean)
+    - 1000 requests, 20 connections: test aborted after 10 failures, 95 requests completed
+    - 1000 requests, 25 connections: test aborted after 10 failures
+    - 1000 requests, 50 connections: test aborted after 10 failures
+  - calendar with many events, listing (server has to append all events)
+    - 1000 events, timeout 30s
+    - 500 events, timeout 30s
+    - 224 events, timeout 30s
+    - 1 event, works fine
+    - response is different than expected, abort
+- how to set (Xml.robur_ns, "default_groups")?
+- configure default acl for calendars as "public" or "private"
+  - per user? per server?
+  - who can configure that?
+ - script to make calendar public / private
+  - curl commands to make calendar public/private/read-only/protected (freebusy only)
+  - a private calendar which should turn into a public one: how to adjust all the event ACLs? maybe DAV:inherited ACL?
+- make a running calendar server for robur internally
+- access control XML content when forbidden
+  - for a resource where GET is forbidden, check that PROPFIND is also forbidden
+- check that all exposed functions in webdav_api (HTTP requests) checks ACL before accessing data
+- test internationalisation (unicode)
+  - create and delete events with unicode data in summary
+  - umlauts, chinese characters, danish crossed o, japanese, indian
+  - right-to-left
+  - test properties: keys and values
+- report time-range: may have only one of start or end
+  - test: may lead to recurring events that occur forever -> DoS?
+  - limit how many days in recur_events (upper limit 500 days)
+  - limit how many events are returned by server
+  - limit how many events are in a calendar
+  - limit byte-size of each event before storing on disk (maybe 1MB)
+- rename calendars (displayname) to include hostname
+- warn that ics CLASS property not supported, "may lead to data leaks"
+  - describe workaround to set ACL via curl
+- describe we don't support EXDATE RDATE
+- report issue to cohttp:
+  http request with query parameter that is empty leads to an empty reply:
+   curl -v -X PUT "http://root:toor@127.0.0.1:8080/user?name=user5&password= &foo=bar"
+ - describe in our docs this known bug
+- revise client interop documentation
+  - davdroid needs to start with "http(s)://"
+  - FirefoxOS needs a trailing /calendars
+- document client behaviour for creating events in read-only calendars
+  - calendar.app on macos reports an error and lets me revert to server
+  - davdroid doesn't report an error, davdroid pretends it was written on the server even on sync
+  - ipad doesn't report an error, event disappears on sync
+
+-- TODO for sure after release
+
+- blackberry comma topic, debug with mato
+- KV updates for irmin/git, weekly check with thomas
+
+-- NICE to have
+
+- check TODOs in the code and fix
+- check assert false in the code and fix
 - research scope of implementing calendar sharing
-- internationalisation (unicode)
+ - calendar sharing
+  - free-busy-query report
+   - component_in_timerange implementations (todo/freebusy)
+  - inboxes
 - report text-match
 - icalendar CLASS property: public / private / ...
+  - do clients set this property? android davdroid can do this
+  - server may use this to infer whether an event should be shown
+  - we already support acl per event
+    - if acl changes, modify CLASS property
 - sync-collection (WebDAV) ctag
+  - faster sync
+  - less computational work for server
 - webUI
-- recurence exdate, rdate
-- calendar sharing
-  - free-busy-query report
-  - [locking (WebDAV)]
-  - inboxes
+- recurence exdate, rdate: for now, we don't support this
 - more tests from apple's test suite
-- component_in_timerange implementations (todo/freebusy)
 - preserve creation-date on write_component if it was already there
+  - when an event is modified, Webdav_api.write_component is used to write it to disk.
+    this function uses Properties.create, which records the current timestamp for
+    both creationTime and modificationTime.
+  - correct behaviour: set only modificationTime on modification
 - report CalDAV 7.8.6 - 7.8.10
-- attachments
+   - 7.8.6 Example: Retrieval of Event by UID
+   - 7.8.7.  Example: Retrieval of Events by PARTSTAT
+   - 7.8.8.  Example: Retrieval of Events Only
+   - 7.8.9.  Example: Retrieval of All Pending To-Dos
+   - 7.8.10. Example: Attempt to Query Unsupported Property
 - recurrence < daily
-- freebusy in timerange / todo in timerange
-- automatic discovery of calendar url
-- add group calendar, remove group calendar
 
-- persistent storage (irmin/git?) (mirage-fs-unix works for us!)
-- http request with query parameter that is empty leads to an empty reply:
- curl -v -X PUT "http://root:toor@127.0.0.1:8080/user?name=user5&password= &foo=bar"
+-- milestone supporting full WebDAV
 
--- 2nd November 2018
-
-- fix deletion of calendars
-- make a running calendar server for robur internally
-- blackberry comma topic
-- LATER: KV updates for irmin/git
+- implement ACL for writing acls, forbid to write acl in PROPPATCH / MKCOL / MKCALENDAR
+- locking (WebDAV)

@@ -215,6 +215,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
       | _ -> None
 
   (* we only take depth 1 into account when computing the overall last modified *)
+  (* this is correct, the same happens on a Unix filesystem *)
   (* careful: unsafe_find *)
   let last_modified_of_dir map fs (`Dir dir) =
     let start = match Properties.unsafe_find (Xml.dav_ns, "creationdate") map with
