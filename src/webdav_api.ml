@@ -708,7 +708,8 @@ module Make(Fs: Webdav_fs.S) = struct
     let is_match =
       String.equal comp_name (Icalendar.component_to_ics_key component)
     in
-    Format.printf "component matches filter %s %b (component key %s)\n" comp_name is_match (Icalendar.component_to_ics_key component) ;
+    Log.debug (fun m -> m "component matches filter %s %b (component key %s)"
+                  comp_name is_match (Icalendar.component_to_ics_key component)) ;
     match comp_filter, is_match with
     | `Is_defined, true -> true
     | `Is_not_defined, true -> false
@@ -855,7 +856,7 @@ module Make(Fs: Webdav_fs.S) = struct
             Ok (Some node)
           else match Icalendar.parse (Cstruct.to_string data) with
             | Error e ->
-              Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
+              Log.err (fun m -> m "Error %s while parsing %s" e (Cstruct.to_string data));
               Error `Bad_request
             | Ok ics ->
               match apply_to_vcalendar query ics props ~auth_user_props with
@@ -892,7 +893,7 @@ module Make(Fs: Webdav_fs.S) = struct
 
   let handle_calendar_multiget_report (transformation, filenames) fs host path ~auth_user_props =
     let report_one (filename : string) =
-      Printf.printf "calendar_multiget: filename %s\n%!" filename ;
+      Log.debug (fun m -> m "calendar_multiget: filename %s" filename) ;
       let file = Fs.file_from_string filename in
       Fs.read fs file >|= function
       | Error _ ->
@@ -913,7 +914,7 @@ module Make(Fs: Webdav_fs.S) = struct
         else
           match Icalendar.parse (Cstruct.to_string data) with
           | Error e ->
-            Printf.printf "Error %s while parsing %s\n" e (Cstruct.to_string data);
+            Log.err (fun m -> m "Error %s while parsing %s" e (Cstruct.to_string data));
             Error `Bad_request
           | Ok ics ->
             let xs = apply_transformation transformation ics props ~auth_user_props in
@@ -954,7 +955,7 @@ module Make(Fs: Webdav_fs.S) = struct
     let requirement, target_or_parent = Privileges.required http_verb ~target_exists in
     read_target_or_parent_properties fs path target_or_parent >|= fun propmap ->
     let privileges = Properties.privileges ~auth_user_props propmap in
-    Format.printf "privileges are %a\n%!" Fmt.(list ~sep:(unit "; ") Xml.pp_privilege) privileges ;
+    Log.debug (fun m -> m "privileges are %a" Fmt.(list ~sep:(unit "; ") Xml.pp_privilege) privileges) ;
     Privileges.is_met ~requirement privileges
 
   (* moved from Caldav_server *)

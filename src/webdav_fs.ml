@@ -60,6 +60,9 @@ sig
   val valid : t -> Webdav_config.config -> (unit, [> `Msg of string ]) result Lwt.t
 end
 
+let src = Logs.Src.create "webdav.fs" ~doc:"webdav fs logs"
+module Log = (val Logs.src_log src : Logs.LOG)
+
 module Make (Fs:Mirage_fs_lwt.S) = struct
 
   open Lwt.Infix
@@ -143,7 +146,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
     in
     let data = Properties.to_string map' in
     let filename = to_string (propfilename f_or_d) in
-    Printf.printf "writing property map %s: %s\n%!" filename data ;
+    Log.debug (fun m -> m "writing property map %s: %s" filename data) ;
     Fs.destroy fs filename >>= fun _ ->
     Fs.write fs filename 0 (Cstruct.of_string data)
 
@@ -186,13 +189,13 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
   let get_raw_property_map fs f_or_d =
     get_properties fs f_or_d >|= function
     | Error e ->
-      Format.printf "error while getting properties for %s %a\n%!" (to_string f_or_d) Fs.pp_error e ;
+      Log.err (fun m -> m "error while getting properties for %s %a" (to_string f_or_d) Fs.pp_error e) ;
       None
     | Ok data ->
       let str = Cstruct.(to_string @@ concat data) in
       match Xml.string_to_tree str with
       | None ->
-        Printf.printf "couldn't convert %s to xml tree\n%!" str ;
+        Log.err (fun m -> m "couldn't convert %s to xml tree" str) ;
         None
       | Some t -> Some (Properties.from_tree t)
 
@@ -200,15 +203,13 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
   (* careful: unsafe_find *)
   let last_modified_as_ptime fs f_or_d =
     get_raw_property_map fs f_or_d >|= function
-    | None ->
-      Printf.printf "invalid XML!\n" ;
-      None
+    | None -> None
     | Some map ->
       match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
       | Some (_, [ Xml.Pcdata last_modified ]) ->
         begin match Ptime.of_rfc3339 last_modified with
-          | Error _ ->
-            Printf.printf "invalid data!\n" ;
+          | Error (`RFC3339 (_, e)) ->
+            Log.err (fun m -> m "invalid timestamp (%s) %a" last_modified Ptime.pp_rfc3339_error e) ;
             None
           | Ok (ts, _, _) -> Some ts
         end
@@ -238,9 +239,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
   (* careful: unsafe_find *)
   let get_etag fs f_or_d =
     get_raw_property_map fs f_or_d >|= function
-    | None ->
-      Printf.printf "invalid XML!\n" ;
-      None
+    | None -> None
     | Some map -> match Properties.unsafe_find (Xml.dav_ns, "getetag") map with
       | Some (_, [ Xml.Pcdata etag ]) -> Some etag
       | _ -> Some (to_string f_or_d)
@@ -267,8 +266,8 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
         begin match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
           | Some (_, [ Xml.Pcdata rfc3339 ]) ->
             begin match Ptime.of_rfc3339 rfc3339 with
-              | Error _ ->
-                Printf.printf "invalid data on get property map!\n" ;
+              | Error (`RFC3339 (_, e)) ->
+                Log.err (fun m -> m "invalid timestamp (%s): %a" rfc3339 Ptime.pp_rfc3339_error e) ;
                 assert false
               | Ok (ts, _, _) ->
                 let http_date = Xml.ptime_to_http_date ts in

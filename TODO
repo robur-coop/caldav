@@ -53,6 +53,12 @@ DONE:
 - persistent storage (irmin/git?) (mirage-fs-unix works for us!)
 - test read-only (group) calendar - check whether client report properly back that they can't create an event
 
+-- TODO before internal use
+
+- make a running calendar server for robur internally
+- monitoring (status code, measure duration between request and reply)
+- rework Logging: less messages, more useful data
+
 -- TODO before release
 
 - apache benchmark - how many requests per second are possible for GET/PUT/DELETE?
@@ -65,11 +71,13 @@ DONE:
     - 1000 requests, 25 connections: test aborted after 10 failures
     - 1000 requests, 50 connections: test aborted after 10 failures
   - calendar with many events, listing (server has to append all events)
-    - 1000 events, timeout 30s
-    - 500 events, timeout 30s
-    - 224 events, timeout 30s
-    - 1 event, works fine
-    - response is different than expected, abort
+    - 1000 items, 10 requests, 1 connection: Time per request: 3595.288 [ms] (mean)
+  - while doing a big REPORT, others are waiting for this request to finish
+    - takes > 40s when one REPORT on 1000 items is done, and a single GET
+- profile why a report with 1000 ics files is slow (cpu bound? io bound? - test with mirage-fs-mem) find out which function is the bottleneck
+- SLA: 30s? how many items are allowed to meet this SLA? how to setup a limit?
+- replayable log to discover client usage of the HTTP endpoints
+  - design an experiment and warn users
 - how to set (Xml.robur_ns, "default_groups")?
 - configure default acl for calendars as "public" or "private"
   - per user? per server?
@@ -77,7 +85,6 @@ DONE:
  - script to make calendar public / private
   - curl commands to make calendar public/private/read-only/protected (freebusy only)
   - a private calendar which should turn into a public one: how to adjust all the event ACLs? maybe DAV:inherited ACL?
-- make a running calendar server for robur internally
 - access control XML content when forbidden
   - for a resource where GET is forbidden, check that PROPFIND is also forbidden
 - check that all exposed functions in webdav_api (HTTP requests) checks ACL before accessing data
@@ -112,6 +119,7 @@ DONE:
 
 - blackberry comma topic, debug with mato
 - KV updates for irmin/git, weekly check with thomas
+- getlastmodified is not being updated on a directory if a file in it is deleted
 
 -- NICE to have
 
