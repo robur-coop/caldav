@@ -261,7 +261,7 @@ module Make(Fs: Webdav_fs.S) = struct
     | _ -> Error `Bad_request
 
   let uri_string host f_or_d =
-    Uri.to_string @@ Uri.with_path host (Fs.to_string f_or_d)
+    Fs.to_string f_or_d
 
   let property_selector fs host propfind_request auth_user_props f_or_d =
     Fs.get_property_map fs f_or_d >|= fun resource_props ->
