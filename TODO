@@ -52,12 +52,18 @@ DONE:
 - add group calendar, remove group calendar
 - persistent storage (irmin/git?) (mirage-fs-unix works for us!)
 - test read-only (group) calendar - check whether client report properly back that they can't create an event
-
--- TODO before internal use
-
 - make a running calendar server for robur internally
 - monitoring (status code, measure duration between request and reply)
 - rework Logging: less messages, more useful data
+
+-- TODO next
+
+- getetag may not exist on disk, who updates it for directories when resources are modified?
+- add test to delete in directory, last-modified + etag of parent must change!
+- how to give ownership of a calendar to a group
+- how to modify robur_ns, "newgroups"
+- how to modify default policy for calendars?
+- relative path/urls, simplify Webdav_api.uri_string
 
 -- TODO before release
 

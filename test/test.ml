@@ -608,7 +608,7 @@ let test_report_7_8_1 () =
 <D:multistatus xmlns:D="DAV:"
               xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd2.ics</D:href>
+       <D:href>/bernard/work/abcd2.ics</D:href>
        <D:propstat>
          <D:prop>
            <D:getetag>"fffff-abcd2"</D:getetag>
@@ -660,7 +660,7 @@ END:VCALENDAR
     </D:propstat>
   </D:response>
   <D:response>
-    <D:href>http://cal.example.com/bernard/work/abcd3.ics</D:href>
+    <D:href>/bernard/work/abcd3.ics</D:href>
     <D:propstat>
       <D:prop>
         <D:getetag>"fffff-abcd3"</D:getetag>
@@ -711,7 +711,7 @@ let test_report_7_8_2 () =
    <D:multistatus xmlns:D="DAV:"
               xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd2.ics</D:href>
+       <D:href>/bernard/work/abcd2.ics</D:href>
        <D:propstat>
          <D:prop>
            <D:getetag>"fffff-abcd2"</D:getetag>
@@ -759,7 +759,7 @@ END:VCALENDAR
        </D:propstat>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd3.ics</D:href>
+       <D:href>/bernard/work/abcd3.ics</D:href>
        <D:propstat>
          <D:prop>
            <D:getetag>"fffff-abcd3"</D:getetag>
@@ -818,7 +818,7 @@ let test_report_7_8_3 () =
    <D:multistatus xmlns:D="DAV:"
               xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd2.ics</D:href>
+       <D:href>/bernard/work/abcd2.ics</D:href>
        <D:propstat>
          <D:prop>
            <D:getetag>"fffff-abcd2"</D:getetag>
@@ -848,7 +848,7 @@ END:VCALENDAR
        </D:propstat>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd3.ics</D:href>
+       <D:href>/bernard/work/abcd3.ics</D:href>
        <D:propstat>
          <D:prop>
            <D:getetag>"fffff-abcd3"</D:getetag>
@@ -889,7 +889,7 @@ let test_report_7_8_4 () =
 <D:multistatus xmlns:D="DAV:"
                   xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd8.ics</D:href>
+       <D:href>/bernard/work/abcd8.ics</D:href>
        <D:propstat>
          <D:prop>
            <D:getetag>"fffff-abcd8"</D:getetag>
@@ -924,7 +924,7 @@ let test_report_7_8_5 () =
 <D:multistatus xmlns:D="DAV:"
                   xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd5.ics</D:href>
+       <D:href>/bernard/work/abcd5.ics</D:href>
        <D:propstat>
          <D:prop>
            <D:getetag>"fffff-abcd5"</D:getetag>
@@ -1012,7 +1012,7 @@ let test_multiget_7_9_1 () =
    <D:multistatus xmlns:D="DAV:"
                   xmlns:C="urn:ietf:params:xml:ns:caldav">
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd1.ics</D:href>
+       <D:href>/bernard/work/abcd1.ics</D:href>
        <D:propstat>
          <D:prop>
            <D:getetag>"fffff-abcd1"</D:getetag>
@@ -1052,7 +1052,7 @@ END:VCALENDAR
        </D:propstat>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/mtg1.ics</D:href>
+       <D:href>/bernard/work/mtg1.ics</D:href>
        <D:status>HTTP/1.1 404 Not Found</D:status>
      </D:response>
    </D:multistatus>|}
@@ -1090,7 +1090,7 @@ let test_report_7_8_2_range () =
      [(Xml.Node ("DAV:", "response", [],
          [(Xml.Node ("DAV:", "href", [],
              [(Xml.Pcdata
-                 "http://cal.example.com/bernard/work/abcd1.ics")
+                 "/bernard/work/abcd1.ics")
                ]
              ));
            (Xml.Node ("DAV:", "propstat", [],
@@ -1241,7 +1241,7 @@ let delete_test () =
       let open Lwt.Infix in
       Mirage_fs_mem.connect "" >>= fun res_fs ->
       let content = {_|<?xml version="1.0" encoding="utf-8" ?>
-<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
+<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-11T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
       in
       Mirage_fs_mem.write res_fs ".prop.xml" 0
         (Cstruct.of_string content) >>= fun _ ->
@@ -1251,7 +1251,7 @@ let delete_test () =
       Mirage_fs_mem.connect "" >>= fun fs ->
       let now = Ptime.v (10, 0L) in
       let content' = {_|<?xml version="1.0" encoding="utf-8" ?>
-<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
+<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-11T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
       in
       Mirage_fs_mem.write fs ".prop.xml" 0
         (Cstruct.of_string content') >>= fun _ ->
@@ -1260,9 +1260,38 @@ let delete_test () =
   in
   Alcotest.(check state_testable __LOC__ res_fs r)
 
+let proppatch_success () =
+  let open Lwt.Infix in
+  let body = {|<?xml version="1.0" encoding="utf-8" ?>
+   <D:propertyupdate xmlns:D="DAV:">
+     <D:set>
+       <D:prop>
+         <D:displayname>Special Resource</D:displayname>
+       </D:prop>
+     </D:set>
+               </D:propertyupdate>|}
+  in
+  let res_fs, r =
+    Lwt_main.run (
+      let now = Ptime.v (1, 0L) in
+      Mirage_fs_mem.connect "" >>= fun res_fs ->
+      let properties = Properties.create_dir allow_all_acl now "home" in
+      let props = Properties.unsafe_add (Xml.dav_ns, "displayname") ([], [ Xml.Pcdata "Special Resource"]) properties in
+      Fs.mkdir res_fs (`Dir ["home"]) props >>= fun _ ->
+      Mirage_fs_mem.connect "" >>= fun fs ->
+      Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
+      Dav.proppatch fs config ~path:"home" ~user:"testuser" ~data:body >|= function
+      | Error e -> (res_fs, Error e)
+      | Ok _ -> (res_fs, Ok fs))
+  in
+  Alcotest.(check (result state_testable err_testable) __LOC__
+              (Ok res_fs) r)
+
+
 let webdav_api_tests = [
   "successful mkcol", `Quick, mkcol_success ;
-  "delete", `Quick, delete_test
+  "delete", `Quick, delete_test ;
+  "proppatch", `Quick, proppatch_success ;
 ]
 
 let principal_url principal = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; principal ]))
@@ -1320,7 +1349,9 @@ let grant_read_current_user_privilege_set =
   "grant for user read-current-user-privilege-set", [ (`Href url, `Grant [ `Read_current_user_privilege_set ]) ]
 
 let make_properties key prop =
-  Properties.unsafe_add key prop Properties.empty
+  Properties.unsafe_add (Xml.dav_ns, "getlastmodified")
+    ([], [ Xml.Pcdata (Ptime.to_rfc3339 (Ptime_clock.now ())) ])
+    (Properties.unsafe_add key prop Properties.empty)
 
 let user principal =
   principal,
@@ -1533,7 +1564,7 @@ let test_report_1_deny () =
   and expected =
     Xml.dav_node "multistatus" ~a:[(("http://www.w3.org/2000/xmlns/", "D"), "DAV:")]
       [ Xml.dav_node "response"
-          [ Xml.dav_node "href" [ Xml.Pcdata "http://cal.example.com/bernard/work/abcd1.ics" ] ;
+          [ Xml.dav_node "href" [ Xml.Pcdata "/bernard/work/abcd1.ics" ] ;
             Xml.dav_node "status" [ Xml.Pcdata "HTTP/1.1 403 Forbidden" ] ]]
   in
   Alcotest.(check (result t_tree string) __LOC__
@@ -1546,35 +1577,35 @@ let test_report_7_8_1_deny () =
   and expected = header ^ {|
 <D:multistatus xmlns:D="DAV:">
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd1.ics</D:href>
+       <D:href>/bernard/work/abcd1.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd2.ics</D:href>
+       <D:href>/bernard/work/abcd2.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd3.ics</D:href>
+       <D:href>/bernard/work/abcd3.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd4.ics</D:href>
+       <D:href>/bernard/work/abcd4.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd5.ics</D:href>
+       <D:href>/bernard/work/abcd5.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd6.ics</D:href>
+       <D:href>/bernard/work/abcd6.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd7.ics</D:href>
+       <D:href>/bernard/work/abcd7.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd8.ics</D:href>
+       <D:href>/bernard/work/abcd8.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
    </D:multistatus>
@@ -1590,35 +1621,35 @@ let test_report_7_8_2_deny () =
   and expected = header ^ {|
 <D:multistatus xmlns:D="DAV:">
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd1.ics</D:href>
+       <D:href>/bernard/work/abcd1.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd2.ics</D:href>
+       <D:href>/bernard/work/abcd2.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd3.ics</D:href>
+       <D:href>/bernard/work/abcd3.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd4.ics</D:href>
+       <D:href>/bernard/work/abcd4.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd5.ics</D:href>
+       <D:href>/bernard/work/abcd5.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd6.ics</D:href>
+       <D:href>/bernard/work/abcd6.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd7.ics</D:href>
+       <D:href>/bernard/work/abcd7.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd8.ics</D:href>
+       <D:href>/bernard/work/abcd8.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
    </D:multistatus>
@@ -1634,11 +1665,11 @@ let test_multiget_7_9_1_deny () =
   and expected = header ^ {|
    <D:multistatus xmlns:D="DAV:">
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/abcd1.ics</D:href>
+       <D:href>/bernard/work/abcd1.ics</D:href>
        <D:status>HTTP/1.1 403 Forbidden</D:status>
      </D:response>
      <D:response>
-       <D:href>http://cal.example.com/bernard/work/mtg1.ics</D:href>
+       <D:href>/bernard/work/mtg1.ics</D:href>
        <D:status>HTTP/1.1 404 Not Found</D:status>
      </D:response>
    </D:multistatus>|}

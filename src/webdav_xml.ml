@@ -764,4 +764,12 @@ let ptime_to_http_date ptime =
   | `Sun -> "Sun"
   and month = [|"Jan"; "Feb"; "Mar"; "Apr"; "May"; "Jun"; "Jul"; "Aug"; "Sep"; "Oct"; "Nov"; "Dec"|]
   in
-  Printf.sprintf "%s, %02d %s %04d %02d:%02d:%02d GMT" weekday d (Array.get month (m-1)) y hh mm ss 
+  Printf.sprintf "%s, %02d %s %04d %02d:%02d:%02d GMT" weekday d (Array.get month (m-1)) y hh mm ss
+
+let rfc3339_date_to_http_date rfc3339 =
+  match Ptime.of_rfc3339 rfc3339 with
+  | Error (`RFC3339 (_, e)) ->
+    Logs.err (fun m -> m "invalid timestamp (%s): %a" rfc3339 Ptime.pp_rfc3339_error e) ;
+    assert false
+  | Ok (ts, _, _) ->
+    ptime_to_http_date ts

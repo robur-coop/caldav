@@ -140,15 +140,28 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
         | _ -> name in
   *)
   let write_property_map fs f_or_d map =
-    let map' = match f_or_d with
-      | `File _ -> map
-      | `Dir _ -> Properties.prepare_for_disk map
-    in
-    let data = Properties.to_string map' in
-    let filename = to_string (propfilename f_or_d) in
-    Log.debug (fun m -> m "writing property map %s: %s" filename data) ;
-    Fs.destroy fs filename >>= fun _ ->
-    Fs.write fs filename 0 (Cstruct.of_string data)
+    match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
+    | None ->
+      Log.err (fun m -> m "map %s without getlastmodified" (to_string f_or_d)) ;
+      assert false
+    | Some (_, [Xml.Pcdata str]) ->
+      Log.debug (fun m -> m "found %s" str) ;
+      begin match Ptime.of_rfc3339 str with
+        | Error (`RFC3339 (_, e)) ->
+          Printf.printf "expected RFC3339, got %s\n%!" str ;
+          Log.err (fun m -> m "expected RFC3339 timestamp in map of %s, got %s (%a)"
+                      (to_string f_or_d) str Ptime.pp_rfc3339_error e) ;
+          assert false
+        | Ok _ ->
+          let data = Properties.to_string map in
+          let filename = to_string (propfilename f_or_d) in
+          Log.debug (fun m -> m "writing property map %s: %s" filename data) ;
+          Fs.destroy fs filename >>= fun _ ->
+          Fs.write fs filename 0 (Cstruct.of_string data)
+      end
+    | Some _ ->
+      Log.err (fun m -> m "map %s with non-singleton pcdata for getlastmodified" (to_string f_or_d)) ;
+      assert false
 
   let size fs (`File file) =
     let name = to_string (`File file) in
@@ -262,29 +275,18 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
     get_raw_property_map fs f_or_d >>= function
     | None -> Lwt.return Properties.empty
     | Some map -> match f_or_d with
-      | `File _ ->
-        begin match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
-          | Some (_, [ Xml.Pcdata rfc3339 ]) ->
-            begin match Ptime.of_rfc3339 rfc3339 with
-              | Error (`RFC3339 (_, e)) ->
-                Log.err (fun m -> m "invalid timestamp (%s): %a" rfc3339 Ptime.pp_rfc3339_error e) ;
-                assert false
-              | Ok (ts, _, _) ->
-                let http_date = Xml.ptime_to_http_date ts in
-                let map' =
-                  Properties.unsafe_add (Xml.dav_ns, "getlastmodified")
-                    ([], [ Xml.pcdata http_date ]) map
-                in
-                Lwt.return map'
-            end
-          | _ -> Lwt.return map
-        end
+      | `File _ -> Lwt.return map
       | `Dir d ->
-        last_modified_of_dir map fs (`Dir d) >>= fun last_modified ->
         etag_of_dir fs (`Dir d) >|= fun etag ->
-        (* inverse of Properties.prepare_for_disk *)
-        Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata last_modified ])
-          (Properties.unsafe_add (Xml.dav_ns, "getetag") ([], [ Xml.pcdata etag ]) map)
+        match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
+        | Some _ -> map
+        | None ->
+          let initial_date =
+            match Properties.unsafe_find (Xml.dav_ns, "creationdate") map with
+            | None -> ([], [ Xml.Pcdata (Ptime.to_rfc3339 Ptime.epoch) ])
+            | Some x -> x
+          in
+          Properties.unsafe_add (Xml.dav_ns, "getlastmodified") initial_date map
 
   let read fs (`File file) =
     let name = to_string (`File file) in

@@ -25,8 +25,6 @@ val unsafe_add : Xml.fqname -> property -> t -> t
 
 val unsafe_find : Xml.fqname -> t -> property option
 
-val prepare_for_disk : t -> t
-
 (* safe methods: ACL is verified for property, property is checked to be not in any exclusion list *)
 val create : ?initial_props:(Xml.fqname * property) list ->
   ?content_type:string -> ?language:string -> ?etag:string ->

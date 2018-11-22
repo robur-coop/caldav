@@ -20,10 +20,6 @@ let unsafe_add = PairMap.add
 (* not safe, not public *)
 let remove = PairMap.remove
 
-let prepare_for_disk map =
-  let map' = remove (Xml.dav_ns, "getetag") map in
-  remove (Xml.dav_ns, "getlastmodified") map'
-
 (* public and ok *)
 let empty = PairMap.empty
 
@@ -217,8 +213,15 @@ let find ~auth_user_props ~resource_props property_fqname =
     | Some v -> Ok v
   else Error `Forbidden
 
+let transform_lastmodified = function
+  | None -> None
+  | Some (attrs, [ Xml.Pcdata str ]) ->
+    Some (attrs, [ Xml.Pcdata (Xml.rfc3339_date_to_http_date str) ])
+  | Some _ -> assert false
+
 (* checks sufficient privileges for "current-user-privilege-set" and "read-acl" via can_read_prop *)
 let find_many ~auth_user_props ~resource_props property_names =
+  let resource_props = PairMap.update (Xml.dav_ns, "getlastmodified") transform_lastmodified resource_props in
   let props = List.map (find ~auth_user_props ~resource_props) property_names in
   let results = List.map2 (fun (ns, name) p -> p, match p with
     | Ok (a, c) -> Xml.node ~ns ~a name c
@@ -236,4 +239,6 @@ let names m =
   computed_properties @ keys m
 
 (* not really safe, but excludes from the not-returned-by-allprop list *)
-let all m = to_trees (List.fold_right remove not_returned_by_allprop m)
+let all m =
+  let m' = PairMap.update (Xml.dav_ns, "getlastmodified") transform_lastmodified m in
+  to_trees (List.fold_right remove not_returned_by_allprop m')

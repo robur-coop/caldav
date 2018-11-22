@@ -230,15 +230,13 @@ module Make(Fs: Webdav_fs.S) = struct
       (* TODO for a collection/directory, the last modified is defined as maximum last modified of
          all present files or directories. If the directory is empty, its creationdate is used.
          if we delete any file or directory in a directory, we need to update the getlastmodified property *)
-      let rec update_parent f_or_d =
+      let update_parent f_or_d =
         let (`Dir parent) = Fs.parent f_or_d in
         Fs.get_property_map fs (`Dir parent) >>= fun map ->
         let map' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
-        Fs.write_property_map fs (`Dir parent) map' >>= function
+        Fs.write_property_map fs (`Dir parent) map' >|= function
         | Error e -> assert false
-        | Ok () -> match parent with
-          | [] -> Lwt.return_unit
-          | dir -> update_parent (`Dir dir)
+        | Ok () -> ()
       in
       update_parent f_or_d >|= fun () ->
       true
@@ -995,7 +993,7 @@ let last_modified fs ~path =
     Fs.get_property_map fs f_or_d >|= fun map ->
     (* no special property, already checked for resource *)
     match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
-    | Some (_, [ Xml.Pcdata lm]) -> Some lm
+    | Some (_, [ Xml.Pcdata lm]) -> Some (Xml.rfc3339_date_to_http_date lm)
     | _ -> None
 
 let compute_etag fs ~path =
