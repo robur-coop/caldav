@@ -212,72 +212,16 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
         None
       | Some t -> Some (Properties.from_tree t)
 
-  (* property getlastmodified does not exist for directories *)
-  (* careful: unsafe_find *)
-  let last_modified_as_ptime fs f_or_d =
-    get_raw_property_map fs f_or_d >|= function
-    | None -> None
-    | Some map ->
-      match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
-      | Some (_, [ Xml.Pcdata last_modified ]) ->
-        begin match Ptime.of_rfc3339 last_modified with
-          | Error (`RFC3339 (_, e)) ->
-            Log.err (fun m -> m "invalid timestamp (%s) %a" last_modified Ptime.pp_rfc3339_error e) ;
-            None
-          | Ok (ts, _, _) -> Some ts
-        end
-      | _ -> None
-
-  (* we only take depth 1 into account when computing the overall last modified *)
-  (* this is correct, the same happens on a Unix filesystem *)
-  (* careful: unsafe_find *)
-  let last_modified_of_dir map fs (`Dir dir) =
-    let start = match Properties.unsafe_find (Xml.dav_ns, "creationdate") map with
-      | Some (_, [ Xml.Pcdata date ]) ->
-        begin match Ptime.of_rfc3339 date with
-          | Error _ -> assert false
-          | Ok (ts, _, _) -> ts
-        end
-      | _ -> Ptime.epoch
-    in
-    listdir fs (`Dir dir) >>= function
-    | Error _ -> Lwt.return (Xml.ptime_to_http_date start)
-    | Ok files ->
-      Lwt_list.map_p (last_modified_as_ptime fs) files >>= fun last_modifieds ->
-      let lms = List.fold_left (fun acc -> function None -> acc | Some lm -> lm :: acc) [] last_modifieds in
-      let max_mtime a b = if Ptime.is_later ~than:a b then b else a
-      in
-      Lwt.return (Xml.ptime_to_http_date @@ List.fold_left max_mtime start lms)
-
-  (* careful: unsafe_find *)
-  let get_etag fs f_or_d =
-    get_raw_property_map fs f_or_d >|= function
-    | None -> None
-    | Some map -> match Properties.unsafe_find (Xml.dav_ns, "getetag") map with
-      | Some (_, [ Xml.Pcdata etag ]) -> Some etag
-      | _ -> Some (to_string f_or_d)
-
-  (* careful: unsafe_find (when calling get_etag) *)
-  let etag_of_dir fs (`Dir dir) =
-    listdir fs (`Dir dir) >>= function
-    | Error _ -> Lwt.return ""
-    | Ok files ->
-      Lwt_list.map_p (get_etag fs) files >>= fun etags ->
-      let some_etags = List.fold_left (fun acc -> function None -> acc | Some x -> x :: acc) [] etags in
-      let data = String.concat ":" some_etags in
-      Lwt.return (Digest.to_hex @@ Digest.string data)
-
   (* let open_fs_error x =
    *   (x : ('a, Fs.error) result Lwt.t :> ('a, [> Fs.error ]) result Lwt.t) *)
 
   (* careful: unsafe_find, unsafe_add *)
   let get_property_map fs f_or_d =
-    get_raw_property_map fs f_or_d >>= function
-    | None -> Lwt.return Properties.empty
+    get_raw_property_map fs f_or_d >|= function
+    | None -> Properties.empty
     | Some map -> match f_or_d with
-      | `File _ -> Lwt.return map
+      | `File _ -> map
       | `Dir d ->
-        etag_of_dir fs (`Dir d) >|= fun etag ->
         match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
         | Some _ -> map
         | None ->

@@ -176,7 +176,7 @@ module Make(Fs: Webdav_fs.S) = struct
     let data = String.concat "\n" (List.map print_file files) in
     ("text/html", data)
 
-  let directory_etag fs (`Dir dir) =
+  let etag_of_dir fs (`Dir dir) =
     directory_as_html fs (`Dir dir) >|= fun (data, ct) ->
     etag_of_data data
 
