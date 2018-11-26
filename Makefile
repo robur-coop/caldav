@@ -1,5 +1,4 @@
 all:
-	opam reinstall caldav
 	cd mirage; make clean && mirage configure && make depend && make
 
 run:
