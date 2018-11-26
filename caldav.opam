@@ -30,6 +30,7 @@ depends: [
   "lwt"
   "ptime" 
   "cohttp-lwt-unix"
+  "nocrypto"
   "xmlm"
   "tyxml"
   "icalendar"
