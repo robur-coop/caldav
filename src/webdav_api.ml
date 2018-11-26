@@ -112,14 +112,18 @@ module Make(Fs: Webdav_fs.S) = struct
     let parent' = (parent :> Webdav_fs.file_or_dir) in
     Fs.dir_exists fs parent >>= function
     | false ->
-      Log.err (fun m -> m "parent directory of %s does not exist\n" (Fs.to_string file')) ;
+      Log.err (fun m -> m "parent directory of %s does not exist" (Fs.to_string file')) ;
       Lwt.return (Error `Conflict)
     | true ->
       acl fs config user parent' >>= function
-      | Error e -> Lwt.return @@ Error `Forbidden
+      | Error e -> 
+        Log.err (fun m -> m "acl check for user %s returned forbidden while trying to write file %s" user (Fs.to_string file')) ;
+        Lwt.return @@ Error `Forbidden
       | Ok acl ->
         is_calendar fs parent' >>= function
-        | false -> Lwt.return @@ Error `Bad_request
+        | false -> 
+          Log.err (fun m -> m "is_calendar was false when trying to write %s" (Fs.to_string file')) ;
+          Lwt.return @@ Error `Bad_request
         | true ->
           let etag = compute_etag ics in
           let props = Properties.create ~content_type ~etag

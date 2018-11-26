@@ -59,6 +59,10 @@ DONE:
 -- TODO next
 
 - getetag may not exist on disk, who updates it for directories when resources are modified?
+   - check on disk if parent updates lastmodified when kid writes 
+   - check on disk if parent updates lastmodified when kid deletes 
+   - check on disk if parent updates etag when kid writes
+   - check on disk if parent updates etag when kid deletes
 - add test to delete in directory, last-modified + etag of parent must change!
 - how to give ownership of a calendar to a group
 - how to modify robur_ns, "newgroups"

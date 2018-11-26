@@ -5,6 +5,9 @@ all:
 run:
 	mirage/main.native --data=/tmp/calendar --http=888 --admin=epsilon --host=192.168.42.84 --tofu
 
+propfind:
+	curl -d @curl/propfind.xml -v -u root:epsilon -X PROPFIND http://localhost:888/calendars/root -H "Depth: 1" -l \*:debug
+
 configure:
 	cd mirage; mirage configure
 

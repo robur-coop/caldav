@@ -1080,6 +1080,8 @@ let report_7_8_2_range =
      </C:filter>
                           </C:calendar-query>|}
 
+let ics_example = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Example Corp.//CalDAV Client//EN\nBEGIN:VTIMEZONE\nLAST-MODIFIED:20040110T032845Z\nTZID:US/Eastern\nBEGIN:DAYLIGHT\nDTSTART:20000404T020000\nRRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=4\nTZNAME:EDT\nTZOFFSETFROM:-0500\nTZOFFSETTO:-0400\nEND:DAYLIGHT\nBEGIN:STANDARD\nDTSTART:20001026T020000\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10\nTZNAME:EST\nTZOFFSETFROM:-0400\nTZOFFSETTO:-0500\nEND:STANDARD\nEND:VTIMEZONE\nBEGIN:VEVENT\nUID:74855313FA803DA593CD579A@example.com\nDTSTAMP:20060206T001102Z\nDTSTART;TZID=US/Eastern:20060102T100000\nDURATION:PT1H\nSUMMARY:Event #1\nDescription:Go Steelers!\nEND:VEVENT\nEND:VCALENDAR\n"
+
 let test_report_7_8_2_range () =
   let xml = report_7_8_2_range
   and expected = (Xml.Node ("DAV:", "multistatus",
@@ -1099,8 +1101,7 @@ let test_report_7_8_2_range () =
                       [(Xml.Pcdata "\"fffff-abcd1\"")]));
                     (Xml.Node ("urn:ietf:params:xml:ns:caldav",
                        "calendar-data", [],
-                       [(Xml.Pcdata
-                           "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Example Corp.//CalDAV Client//EN\nBEGIN:VTIMEZONE\nLAST-MODIFIED:20040110T032845Z\nTZID:US/Eastern\nBEGIN:DAYLIGHT\nDTSTART:20000404T020000\nRRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=4\nTZNAME:EDT\nTZOFFSETFROM:-0500\nTZOFFSETTO:-0400\nEND:DAYLIGHT\nBEGIN:STANDARD\nDTSTART:20001026T020000\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10\nTZNAME:EST\nTZOFFSETFROM:-0400\nTZOFFSETTO:-0500\nEND:STANDARD\nEND:VTIMEZONE\nBEGIN:VEVENT\nUID:74855313FA803DA593CD579A@example.com\nDTSTAMP:20060206T001102Z\nDTSTART;TZID=US/Eastern:20060102T100000\nDURATION:PT1H\nSUMMARY:Event #1\nDescription:Go Steelers!\nEND:VEVENT\nEND:VCALENDAR\n")
+                       [(Xml.Pcdata ics_example)
                          ]
                        ))
                     ]
@@ -1260,6 +1261,86 @@ let delete_test () =
   in
   Alcotest.(check state_testable __LOC__ res_fs r)
 
+let delete_and_update_parent_mtime () =
+  let res_fs, r =
+    Lwt_main.run (
+      let open Lwt.Infix in
+      Mirage_fs_mem.connect "" >>= fun res_fs ->
+      let dir_props = {_|<?xml version="1.0" encoding="utf-8" ?>
+<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-11T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
+      and file_props = {_|<?xml version="1.0" encoding="utf-8" ?>
+<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-11T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
+      in
+      Mirage_fs_mem.write res_fs ".prop.xml" 0
+        (Cstruct.of_string dir_props) >>= fun _ ->
+      Mirage_fs_mem.mkdir res_fs "parent" >>= fun _ ->
+      Mirage_fs_mem.write res_fs "parent/.prop.xml" 0
+        (Cstruct.of_string dir_props) >>= fun _ ->
+      Mirage_fs_mem.write res_fs "parent/child" 0
+        (Cstruct.of_string "Content of child file") >>= fun _ ->
+      Mirage_fs_mem.write res_fs "parent/child.prop.xml" 0
+        (Cstruct.of_string file_props) >>= fun _ ->
+      Mirage_fs_mem.connect "" >>= fun fs ->
+      let now = Ptime.v (20, 0L) in
+      let dir_props' = {_|<?xml version="1.0" encoding="utf-8" ?>
+<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/"><D:resourcetype><D:collection></D:collection><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-21T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate></D:prop>|_}
+      in
+      Mirage_fs_mem.write fs ".prop.xml" 0
+        (Cstruct.of_string dir_props) >>= fun _ ->
+      Mirage_fs_mem.mkdir fs "parent" >>= fun _ ->
+      Mirage_fs_mem.write fs "parent/.prop.xml" 0
+        (Cstruct.of_string dir_props') >>= fun _ ->
+      Dav.delete res_fs ~path:"parent/child" now >|= fun deleted ->
+      (fs, res_fs))
+  in
+  Alcotest.(check state_testable __LOC__ res_fs r)
+
+let write_and_update_parent_mtime () =
+  let res_fs, r =
+    Lwt_main.run (
+      let open Lwt.Infix in
+      Mirage_fs_mem.connect "" >>= fun res_fs ->
+      let acl = "<D:acl><D:ace><D:principal><D:all></D:all></D:principal><D:grant><D:privilege><D:all></D:all></D:privilege></D:grant></D:ace></D:acl>" in
+      let dir_props = {_|<?xml version="1.0" encoding="utf-8" ?>
+<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/" xmlns:C="|_} ^ Xml.caldav_ns ^ {_|"><D:resourcetype><D:collection></D:collection><C:calendar></C:calendar><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-11T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate>|_} ^ acl ^ "</D:prop>"
+      in
+      Mirage_fs_mem.write res_fs ".prop.xml" 0 (Cstruct.of_string dir_props) >>= fun _ ->
+      Mirage_fs_mem.mkdir res_fs "principals" >>= fun _ ->
+      Mirage_fs_mem.write res_fs "principals/.prop.xml" 0 (Cstruct.of_string dir_props) >>= fun _ ->
+      Mirage_fs_mem.mkdir res_fs "principals/root" >>= fun _ ->
+      Mirage_fs_mem.write res_fs "principals/root/.prop.xml" 0 (Cstruct.of_string dir_props) >>= fun _ ->
+      Mirage_fs_mem.mkdir res_fs "parent" >>= fun _ ->
+      Mirage_fs_mem.write res_fs "parent/.prop.xml" 0 (Cstruct.of_string dir_props) >>= fun _ ->
+      Mirage_fs_mem.connect "" >>= fun fs ->
+      let now = Ptime.v (20, 0L) in
+      let dir_props' = {_|<?xml version="1.0" encoding="utf-8" ?>
+<D:prop xmlns:D="DAV:" xmlns:A="http://example.com/ns/" xmlns:C="|_} ^ Xml.caldav_ns ^ {_|"><D:resourcetype><D:collection></D:collection><C:calendar></C:calendar><A:special-resource></A:special-resource></D:resourcetype><D:getlastmodified>1970-01-11T00:00:00-00:00</D:getlastmodified><D:getcontenttype>text/directory</D:getcontenttype><D:getcontentlength>0</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>Special Resource</D:displayname><D:creationdate>1970-01-02T00:00:00-00:00</D:creationdate>|_} ^ acl ^ "</D:prop>"
+      and file_props = {_|<?xml version="1.0" encoding="utf-8" ?>
+<D:prop xmlns:D="DAV:"><D:resourcetype></D:resourcetype><D:getlastmodified>1970-01-21T00:00:00-00:00</D:getlastmodified><D:getetag>fac1da4d0bf639292a15d5a98c9b02e8</D:getetag><D:getcontenttype>text/calendar</D:getcontenttype><D:getcontentlength>654</D:getcontentlength><D:getcontentlanguage>en</D:getcontentlanguage><D:displayname>/parent/child</D:displayname><D:creationdate>1970-01-21T00:00:00-00:00</D:creationdate><D:acl><D:ace><D:principal><D:all></D:all></D:principal><D:grant><D:privilege><D:all></D:all></D:privilege></D:grant></D:ace></D:acl></D:prop>|_}
+      in
+      Mirage_fs_mem.write fs ".prop.xml" 0 (Cstruct.of_string dir_props) >>= fun _ ->
+      Mirage_fs_mem.mkdir fs "principals" >>= fun _ ->
+      Mirage_fs_mem.write fs "principals/.prop.xml" 0 (Cstruct.of_string dir_props) >>= fun _ ->
+      Mirage_fs_mem.mkdir fs "principals/root" >>= fun _ ->
+      Mirage_fs_mem.write fs "principals/root/.prop.xml" 0 (Cstruct.of_string dir_props) >>= fun _ ->
+      Mirage_fs_mem.mkdir fs "parent" >>= fun _ ->
+      Mirage_fs_mem.write fs "parent/.prop.xml" 0 (Cstruct.of_string dir_props') >>= fun _ ->
+      Mirage_fs_mem.write fs "parent/child" 0 (Cstruct.of_string (Astring.String.fold_left (fun str -> function '\n' -> str ^ "\r\n" | c -> str ^ String.make 1 c ) "" ics_example)) >>= fun _ ->
+      Mirage_fs_mem.write fs "parent/child.prop.xml" 0 (Cstruct.of_string file_props) >>= fun _ ->
+      let user = "root" in
+      let data = ics_example in
+      Dav.write_component res_fs config ~content_type:"text/calendar" ~path:"parent/child" ~user ~data now >|= fun r ->
+      ( match r with
+      | Ok _ -> ()
+      | Error `Bad_request -> Printf.printf "bad request \n"
+      | Error `Conflict -> Printf.printf "conflict \n"
+      | Error `Forbidden -> Printf.printf "forbidden \n"
+      | Error `Internal_server_error -> Printf.printf "internal server error \n");
+      (fs, res_fs))
+  in
+  Alcotest.(check state_testable __LOC__ res_fs r)
+
+
 let proppatch_success () =
   let open Lwt.Infix in
   let body = {|<?xml version="1.0" encoding="utf-8" ?>
@@ -1291,6 +1372,8 @@ let proppatch_success () =
 let webdav_api_tests = [
   "successful mkcol", `Quick, mkcol_success ;
   "delete", `Quick, delete_test ;
+  "delete and update parent mtime", `Quick, delete_and_update_parent_mtime ;
+  "write and update parent mtime", `Quick, write_and_update_parent_mtime ;
   "proppatch", `Quick, proppatch_success ;
 ]
 
@@ -1777,5 +1860,6 @@ let tests = [
 ]
 
 let () =
+  Logs.set_reporter (Logs_fmt.reporter ());
   Printexc.record_backtrace true;
   Alcotest.run "WebDAV tests" tests
