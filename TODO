@@ -64,14 +64,17 @@ DONE:
 - add test to delete in directory, last-modified + etag of parent must change!
 - relative path/urls, simplify Webdav_api.uri_string
 
--- TODO next
+-- TODO before release
 
+- research threading/quotas: 
+   - lwt pick with timeout - when will cancel kill a task exactly?
+   - profiling data - which functions take how much time? -> optimize or add more yields
+   - does cohttp have a lwt task per request or connection? how does keepalive work with cohttp?
+- add a timeout
+- limit compute resource per request, per calendar entry, per calendar size
 - how to give ownership of a calendar to a group
 - how to modify robur_ns, "newgroups"
 - how to modify default policy for calendars?
-
--- TODO before release
-
 - apache benchmark - how many requests per second are possible for GET/PUT/DELETE?
   - many concurrent GETs of the same event --> 200
     - 1000 requests, 1 connection: Requests per second: 40.71 [#/sec] (mean)
