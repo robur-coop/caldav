@@ -58,8 +58,8 @@ let keys = List.map (fun (Any k) -> Key.abstract k) [Any http_port; Any https_po
 let main =
   let direct_dependencies = [
     package "uri" ;
-    package "webmachine" ;
-    package "caldav" ;
+    package ~pin:"git+https://github.com/roburio/ocaml-webmachine.git#webdav" "webmachine" ;
+    package ~pin:"git+https://github.com/roburio/caldav.git" "caldav" ;
     package "mirage-fs-unix" ;
     package "mirage-fs-mem" ;
     package "mirage-fs-lwt" ;

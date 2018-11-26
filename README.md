@@ -2,11 +2,8 @@
 
 To begin the installation, you need to `ssh` into your server.
 Then, you need to install [`opam`](https://opam.ocaml.org) via your package manager (e.g. `apt install opam`).
-
-Since some dependencies are not released via `opam` yet, they need to be manually pinned. To do this, run:
-
-    opam pin add webmachine https://github.com/roburio/ocaml-webmachine.git#webdav
-    opam pin add caldav https://github.com/roburio/caldav.git
+Make sure you have OCaml version `>=4.03.0`, and opam version `>=2.0.0` and mirage version `>=3.3.1` installed via your package manager.
+You can use `ocaml --version`, `opam --version`, and `mirage --version` to find out.
 
 Now we're ready to compile the CalDAV server. Let's get the code (don't worry that we already pinned caldav, we now need the source code of the unikernel):
 
@@ -15,7 +12,8 @@ Now we're ready to compile the CalDAV server. Let's get the code (don't worry th
     mirage configure
     make depend
     make
-    
+
+If the above commands fail while installing caldav, run `opam remove webmachine` and run `make depend` again.  
 The `make` command creates a `main.native` executable in `caldav/mirage`. This is the unikernel.
 We can see all its options:
 
