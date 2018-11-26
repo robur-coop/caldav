@@ -55,19 +55,20 @@ DONE:
 - make a running calendar server for robur internally
 - monitoring (status code, measure duration between request and reply)
 - rework Logging: less messages, more useful data
-- unit test: check on disk if parent updates lastmodified when kid writes 
-- unit test: check on disk if parent updates lastmodified when kid deletes 
+- getetag may not exist on disk, who updates it for directories when resources are modified?
+   - unit test: 
+    - check on disk if parent updates lastmodified when kid writes 
+    - check on disk if parent updates lastmodified when kid deletes 
+    - check on disk if parent updates etag when kid writes
+    - check on disk if parent updates etag when kid deletes
+- add test to delete in directory, last-modified + etag of parent must change!
 
 -- TODO next
 
-- getetag may not exist on disk, who updates it for directories when resources are modified?
-   - check on disk if parent updates etag when kid writes
-   - check on disk if parent updates etag when kid deletes
-- add test to delete in directory, last-modified + etag of parent must change!
+- relative path/urls, simplify Webdav_api.uri_string
 - how to give ownership of a calendar to a group
 - how to modify robur_ns, "newgroups"
 - how to modify default policy for calendars?
-- relative path/urls, simplify Webdav_api.uri_string
 
 -- TODO before release
 

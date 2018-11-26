@@ -1222,7 +1222,8 @@ let mkcol_success () =
       let props =
         let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
         let acl = [ (`Href (Uri.of_string "/principals/testuser/"), `Grant [`All])] in
-        Properties.create_dir ~resourcetype acl now "Special Resource"
+        let etag = [ ((Xml.dav_ns, "getetag"), ([], [ Xml.Pcdata "c5fcac20004bda4569187f24b207e558" ] )) ] in
+        Properties.create_dir ~initial_props:etag ~resourcetype acl now "Special Resource"
       in
       let properties = Properties.create_dir allow_all_acl now "home" in
       Fs.mkdir res_fs (`Dir ["home"]) properties >>= fun _ ->
@@ -1249,20 +1250,22 @@ let delete_test () =
       Mirage_fs_mem.connect "" >>= fun fs ->
       let updated_time = Ptime.v (10, 0L) in
       let dir_props' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Pcdata (Ptime.to_rfc3339 updated_time) ]) dir_props in
-      Fs.write_property_map fs (`Dir []) dir_props' >>= fun _ -> 
+      let dir_props'' = Properties.unsafe_add (Xml.dav_ns, "getetag") ([], [ Pcdata "01dd76faf69851ed6896ae419391363c" ]) dir_props' in
+      Fs.write_property_map fs (`Dir []) dir_props'' >>= fun _ -> 
       Dav.delete res_fs ~path:"parent" updated_time >|= fun deleted ->
       (fs, res_fs))
   in
   Alcotest.(check state_testable __LOC__ res_fs r)
 
-let delete_and_update_parent_mtime () =
+let delete_and_update_parent_mtime_and_etag () =
   let res_fs, r =
     Lwt_main.run (
       let open Lwt.Infix in
       Mirage_fs_mem.connect "" >>= fun res_fs ->
       let creation_time = Ptime.v (1, 0L) in
       let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
-      let dir_props = Properties.create_dir ~resourcetype [] creation_time "Special Resource"
+      let initial_props = [ ((Xml.dav_ns, "getetag"), ([], [Xml.Pcdata "myetag"]))] in
+      let dir_props = Properties.create_dir ~initial_props ~resourcetype [] creation_time "Special Resource"
       and file_props = Properties.create [] creation_time 0 "Special Resource" in 
       Fs.write_property_map res_fs (`Dir []) dir_props >>= fun _ -> 
       Fs.mkdir res_fs (`Dir ["parent"]) dir_props >>= fun _ ->
@@ -1270,8 +1273,9 @@ let delete_and_update_parent_mtime () =
       Mirage_fs_mem.connect "" >>= fun fs ->
       let updated_time = Ptime.v (10, 0L) in
       let dir_props' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Pcdata (Ptime.to_rfc3339 updated_time) ]) dir_props in
+      let dir_props'' = Properties.unsafe_add (Xml.dav_ns, "getetag") ([], [ Pcdata "01dd76faf69851ed6896ae419391363c" ]) dir_props' in
       Fs.write_property_map fs (`Dir []) dir_props >>= fun _ -> 
-      Fs.mkdir fs (`Dir ["parent"]) dir_props' >>= fun _ ->
+      Fs.mkdir fs (`Dir ["parent"]) dir_props'' >>= fun _ ->
       Dav.delete res_fs ~path:"parent/child" updated_time >|= fun deleted ->
       (fs, res_fs))
   in
@@ -1292,12 +1296,13 @@ let write_and_update_parent_mtime () =
       Mirage_fs_mem.connect "" >>= fun fs ->
       let updated_time = Ptime.v (20, 0L) in
       let dir_props' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.Pcdata (Ptime.to_rfc3339 updated_time) ]) dir_props in
+      let dir_props'' = Properties.unsafe_add (Xml.dav_ns, "getetag") ([], [ Xml.Pcdata "7f3af2eea3e815059f400874ebbad45c" ]) dir_props' in
       let initial_props = [ ((Xml.dav_ns, "getetag"), ([], [ Xml.Pcdata "fac1da4d0bf639292a15d5a98c9b02e8"])) ] in
       let file_props = Properties.create ~content_type:"text/calendar" ~initial_props allow_all_acl updated_time 654 "/parent/child" in 
       Fs.write_property_map fs (`Dir []) dir_props >>= fun _ -> 
       Fs.mkdir fs (`Dir ["principals"]) dir_props >>= fun _ ->
       Fs.mkdir fs (`Dir ["principals" ; "karl"]) dir_props >>= fun _ ->
-      Fs.mkdir fs (`Dir ["parent"]) dir_props' >>= fun _ -> (* getlastmodified needs to be updated since we wrote a child in parent *)
+      Fs.mkdir fs (`Dir ["parent"]) dir_props'' >>= fun _ -> (* getlastmodified needs to be updated since we wrote a child in parent *)
       let ics = Cstruct.of_string (Astring.String.fold_left (fun str -> function '\n' -> str ^ "\r\n" | c -> str ^ String.make 1 c ) "" ics_example) in
       Fs.write fs (`File ["parent"; "child"]) ics file_props >>= fun _ ->
       let user = "karl" in
@@ -1345,7 +1350,7 @@ let proppatch_success () =
 let webdav_api_tests = [
   "successful mkcol", `Quick, mkcol_success ;
   "delete", `Quick, delete_test ;
-  "delete and update parent mtime", `Quick, delete_and_update_parent_mtime ;
+  "delete and update parent mtime", `Quick, delete_and_update_parent_mtime_and_etag ;
   "write and update parent mtime", `Quick, write_and_update_parent_mtime ;
   "proppatch", `Quick, proppatch_success ;
 ]
