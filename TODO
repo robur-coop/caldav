@@ -62,10 +62,10 @@ DONE:
     - check on disk if parent updates etag when kid writes
     - check on disk if parent updates etag when kid deletes
 - add test to delete in directory, last-modified + etag of parent must change!
+- relative path/urls, simplify Webdav_api.uri_string
 
 -- TODO next
 
-- relative path/urls, simplify Webdav_api.uri_string
 - how to give ownership of a calendar to a group
 - how to modify robur_ns, "newgroups"
 - how to modify default policy for calendars?
