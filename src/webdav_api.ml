@@ -106,6 +106,16 @@ module Make(Fs: Webdav_fs.S) = struct
       let file = Fs.file_from_string path in
       Ok (ics, file)
 
+  (* When a resource is modified or deleted, its parent's getlastmodified property is updated to the current time. *)
+  let update_parent_after_child_write fs f_or_d now = 
+    let now = Ptime.to_rfc3339 now in
+    let (`Dir parent) = Fs.parent f_or_d in
+    Fs.get_property_map fs (`Dir parent) >>= fun map ->
+    let map' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
+    Fs.write_property_map fs (`Dir parent) map' >|= function
+    | Error e -> assert false
+    | Ok () -> ()
+
   let write_if_parent_exists fs config (file : Webdav_fs.file) timestamp content_type user ics =
     let file' = (file :> Webdav_fs.file_or_dir) in
     let parent = Fs.parent file' in
@@ -129,9 +139,10 @@ module Make(Fs: Webdav_fs.S) = struct
           let props = Properties.create ~content_type ~etag
               acl timestamp (String.length ics) (Fs.to_string file')
           in
-          Fs.write fs file (Cstruct.of_string ics) props >|= function
-          | Error e -> Error `Internal_server_error
-          | Ok () -> Ok etag
+          Fs.write fs file (Cstruct.of_string ics) props >>= function
+          | Error e -> Lwt.return @@ Error `Internal_server_error
+          | Ok () -> update_parent_after_child_write fs file' timestamp >|= fun () ->
+                     Ok etag
 
   let write_component fs config ~path ~user timestamp ~content_type ~data =
     match parse_calendar ~path data with
@@ -224,25 +235,12 @@ module Make(Fs: Webdav_fs.S) = struct
         | _ -> "text/calendar" in
       Ok (ct, Cstruct.to_string data)
 
-
   let delete fs ~path now =
     Fs.from_string fs path >>= function
     | Error _ -> Lwt.return false
     | Ok f_or_d ->
       Fs.destroy fs f_or_d >>= fun res ->
-      let now = Ptime.to_rfc3339 now in
-      (* TODO for a collection/directory, the last modified is defined as maximum last modified of
-         all present files or directories. If the directory is empty, its creationdate is used.
-         if we delete any file or directory in a directory, we need to update the getlastmodified property *)
-      let update_parent f_or_d =
-        let (`Dir parent) = Fs.parent f_or_d in
-        Fs.get_property_map fs (`Dir parent) >>= fun map ->
-        let map' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.pcdata now ]) map in
-        Fs.write_property_map fs (`Dir parent) map' >|= function
-        | Error e -> assert false
-        | Ok () -> ()
-      in
-      update_parent f_or_d >|= fun () ->
+      update_parent_after_child_write fs f_or_d now >|= fun () ->
       true
 
   let statuscode_to_string res =

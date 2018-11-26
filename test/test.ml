@@ -1277,7 +1277,6 @@ let delete_and_update_parent_mtime () =
   in
   Alcotest.(check state_testable __LOC__ res_fs r)
 
-(* TODO wrong to make it pass for now *)
 let write_and_update_parent_mtime () =
   let res_fs, r =
     Lwt_main.run (
@@ -1298,7 +1297,7 @@ let write_and_update_parent_mtime () =
       Fs.write_property_map fs (`Dir []) dir_props >>= fun _ -> 
       Fs.mkdir fs (`Dir ["principals"]) dir_props >>= fun _ ->
       Fs.mkdir fs (`Dir ["principals" ; "karl"]) dir_props >>= fun _ ->
-      Fs.mkdir fs (`Dir ["parent"]) dir_props >>= fun _ ->
+      Fs.mkdir fs (`Dir ["parent"]) dir_props' >>= fun _ -> (* getlastmodified needs to be updated since we wrote a child in parent *)
       let ics = Cstruct.of_string (Astring.String.fold_left (fun str -> function '\n' -> str ^ "\r\n" | c -> str ^ String.make 1 c ) "" ics_example) in
       Fs.write fs (`File ["parent"; "child"]) ics file_props >>= fun _ ->
       let user = "karl" in

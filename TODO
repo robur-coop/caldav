@@ -55,12 +55,12 @@ DONE:
 - make a running calendar server for robur internally
 - monitoring (status code, measure duration between request and reply)
 - rework Logging: less messages, more useful data
+- unit test: check on disk if parent updates lastmodified when kid writes 
+- unit test: check on disk if parent updates lastmodified when kid deletes 
 
 -- TODO next
 
 - getetag may not exist on disk, who updates it for directories when resources are modified?
-   - check on disk if parent updates lastmodified when kid writes 
-   - check on disk if parent updates lastmodified when kid deletes 
    - check on disk if parent updates etag when kid writes
    - check on disk if parent updates etag when kid deletes
 - add test to delete in directory, last-modified + etag of parent must change!
