@@ -58,7 +58,7 @@ module Make(Fs: Webdav_fs.S) = struct
 
   type state = Fs.t
 
-  let compute_etag str = Digest.to_hex @@ Digest.string str
+  let etag_of_data str = Digest.to_hex @@ Digest.string str
 
   let is_calendar fs file =
     Fs.get_property_map fs file >|= fun map ->
@@ -135,7 +135,7 @@ module Make(Fs: Webdav_fs.S) = struct
           Log.err (fun m -> m "is_calendar was false when trying to write %s" (Fs.to_string file')) ;
           Lwt.return @@ Error `Bad_request
         | true ->
-          let etag = compute_etag ics in
+          let etag = etag_of_data ics in
           let props = Properties.create ~content_type ~etag
               acl timestamp (String.length ics) (Fs.to_string file')
           in
@@ -178,7 +178,7 @@ module Make(Fs: Webdav_fs.S) = struct
 
   let directory_etag fs (`Dir dir) =
     directory_as_html fs (`Dir dir) >|= fun (data, ct) ->
-    compute_etag data
+    etag_of_data data
 
   let directory_as_ics fs (`Dir dir) =
     let calendar_components = function
