@@ -1,11 +1,6 @@
 all:
-	cd mirage; make clean && mirage configure && make depend && make
-
-run:
-	mirage/main.native --data=/tmp/calendar --http=888 --admin=epsilon --host=192.168.42.84 --tofu
-
-propfind:
-	curl -d @curl/propfind.xml -v -u root:epsilon -X PROPFIND http://localhost:888/calendars/root -H "Depth: 1" -l \*:debug
+	opam reinstall caldav
+	cd mirage; make
 
 configure:
 	cd mirage; mirage configure
@@ -24,3 +19,9 @@ user:
 
 acl:
 	curl -v -X PROPPATCH -d @curl/change-acl.xml "http://test:password@127.0.0.1:8080/calendars/test/calendar"
+
+standalone:
+	jbuilder build app/caldav_server.exe
+
+run-standalone:
+	_build/default/app/caldav_server.exe
