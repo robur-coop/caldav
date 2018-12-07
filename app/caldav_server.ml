@@ -105,22 +105,22 @@ let () =  Lwt_main.run (main ())
 open Lwt.Infix
 open OUnit
 open Cohttp
-open Cohttp_lwt_unix
 open Cohttp_lwt_unix_test
 
+module Http_server = Cohttp_lwt_unix.Server
 module Body = Cohttp_lwt.Body
 
 let message = "Hello sanity!"
 
 let server =
   List.map const [ (* t *)
-    Server.respond_string ~status:`OK ~body:message ();
+    Http_server.respond ~status:`OK ~body:(`String message) ();
   ] |> response_sequence
 
 let ts =
   Cohttp_lwt_unix_test.test_server_s server begin fun uri ->
     let t () =
-      Client.get uri >>= fun (_, body) ->
+      Cohttp_lwt_unix.Client.get uri >>= fun (_, body) ->
       body |> Body.to_string >|= fun body ->
       assert_equal body message in
     [ "sanity test", t ]
