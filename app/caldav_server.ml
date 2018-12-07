@@ -110,13 +110,19 @@ open Cohttp_lwt_unix_test
 module Http_server = Cohttp_lwt_unix.Server
 module Body = Cohttp_lwt.Body
 
-module Webdav_server = Caldav.Webdav_server.Make(Mirage_random_test)(Pclock)(Caldav.Webdav_fs.Make(Mirage_fs_mem))(Http_server)
+module Dav_fs = Caldav.Webdav_fs.Make(Mirage_fs_mem)
+
+module Webdav_server = Caldav.Webdav_server.Make(Mirage_random_test)(Pclock)(Dav_fs)(Http_server)
+
+module Api = Caldav.Webdav_api.Make(Mirage_random_test)(Pclock)(Dav_fs)
+
 
 let message = "Hello sanity!"
 
+let config = Caldav.Webdav_config.config ~do_trust_on_first_use:true (Uri.of_string "localhost")
+
 let server fs =
-  let config = Caldav.Webdav_config.config (Uri.of_string "localhost") in
-  let request, body = Request.make ~meth:`HEAD (Uri.of_string "/"), `Empty in
+  let request, body = Request.make ~meth:`GET (Uri.of_string "/calendars/root"), `Empty in
   List.map const [ (* t *)
     Webdav_server.dispatch config fs request body
     (* Http_server.respond ~status:`OK ~body:(`String message) (); *)
@@ -127,11 +133,62 @@ let ts fs =
     let t () =
       Cohttp_lwt_unix.Client.get uri >>= fun (_, body) ->
       body |> Body.to_string >|= fun body ->
+      Logs.debug (fun m -> m "found %s" body) ;
       assert_equal body message in
     [ "sanity test", t ]
   end
 
+let data = Cstruct.of_string
+{|BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VTIMEZONE
+LAST-MODIFIED:20040110T032845Z
+TZID:US/Eastern
+BEGIN:DAYLIGHT
+DTSTART:20000404T020000
+RRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=4
+TZNAME:EDT
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0400
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20001026T020000
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10
+TZNAME:EST
+TZOFFSETFROM:-0400
+TZOFFSETTO:-0500
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+DTSTAMP:20060206T001102Z
+DTSTART;TZID=US/Eastern:20060102T100000
+DURATION:PT1H
+SUMMARY:Event #1
+Description:Go Steelers!
+UID:74855313FA803DA593CD579A@example.com
+END:VEVENT
+END:VCALENDAR
+|}
+
 let () =
   ignore (Lwt_main.run (
+      Logs.set_reporter (Logs_fmt.reporter ~dst:Format.std_formatter ()) ;
+      Logs.set_level (Some Logs.Debug);
       Mirage_fs_mem.connect "" >>= fun fs ->
+      let now = Ptime.epoch in
+      Api.connect fs config (Some "foo") >>= fun _fs ->
+      let rec go = function
+        | 0 -> Lwt.return_unit
+        | n ->
+          let name = string_of_int n ^ ".ics" in
+          let filename = Dav_fs.create_file (`Dir ["calendars" ; "root"]) name in
+          let props = Caldav.Properties.create
+              ~content_type:"text/calendar"
+              [(`All, `Grant [ `All ])] now (Cstruct.len data) name
+          in
+          Dav_fs.write fs filename data props >>= fun _ ->
+          go (pred n)
+      in
+      go 1000 >>= fun () ->
       run_async_tests (ts fs)))

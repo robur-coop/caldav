@@ -46,6 +46,10 @@ sig
 
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
   val initialize_fs_for_apple_testsuite : state -> Ptime.t -> config -> unit Lwt.t
+
+  val generate_salt : unit -> Cstruct.t
+
+  val connect : state -> config -> string option -> state Lwt.t
 end
 
-module Make (Fs: Webdav_fs.S) : S with type state = Fs.t
+module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) : S with type state = Fs.t

@@ -48,12 +48,16 @@ sig
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
   val initialize_fs_for_apple_testsuite : state -> Ptime.t -> config -> unit Lwt.t
 
+  val generate_salt : unit -> Cstruct.t
+
+  val connect : state -> config -> string option -> state Lwt.t
+
 end
 
 let src = Logs.Src.create "webdav.robur.io" ~doc:"webdav api logs"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module Make(Fs: Webdav_fs.S) = struct
+module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) = struct
   open Lwt.Infix
 
   type state = Fs.t
@@ -1247,5 +1251,24 @@ let make_group fs now config name members =
   make_principal [] fs now config name >>= fun principal_uri ->
   Lwt_list.iter_s (fun member -> enroll fs config ~member ~group:name) members >|= fun () ->
   principal_uri
+
+  let generate_salt () = R.generate 15
+
+  let connect fs config admin_pass =
+    let now = Ptime.v (Clock.now_d_ps ()) in
+    Fs.valid fs config >>= fun fs_is_valid ->
+    match fs_is_valid, admin_pass with
+    | Error (`Msg msg), None ->
+      Lwt.fail_with ("got an uninitalized file system (error: " ^ msg ^ "), please provide admin password")
+    | Error _, Some password ->
+      initialize_fs fs now config >>= fun () ->
+      let salt = generate_salt () in
+      make_user fs now config ~name:"root" ~password ~salt >|= fun _ ->
+      fs
+    | Ok (), None -> Lwt.return fs
+    | Ok (), Some password ->
+      let salt = generate_salt () in
+      change_user_password fs config ~name:"root" ~password ~salt >|= fun _ ->
+      fs
 
 end

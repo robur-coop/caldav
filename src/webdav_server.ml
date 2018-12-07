@@ -69,7 +69,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
 
   module Wm = Webmachine.Make(Lwt)(WmClock)
 
-  module Dav = Webdav_api.Make(Fs)
+  module Dav = Webdav_api.Make(R)(Clock)(Fs)
 
   class handler config fs now generate_salt = object(self)
     inherit [Cohttp_lwt.Body.t] Wm.resource
@@ -516,8 +516,6 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
     ("/" ^ config.calendars ^ "/*", fun () -> new handler config fs now generate_salt) ;
   ]
 
-  let generate_salt () = R.generate 15
-
   let dispatch config fs request body =
     (* Perform route dispatch. If [None] is returned, then the URI path did not
      * match any of the route patterns. In this case the server should return a
@@ -529,7 +527,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
                         (Cohttp.Request.resource request));
     Access_log.debug (fun m -> m "request headers %s"
                          (Cohttp.Header.to_string (Cohttp.Request.headers request)) );
-    Wm.dispatch' (routes config fs now generate_salt) ~body ~request
+    Wm.dispatch' (routes config fs now Dav.generate_salt) ~body ~request
     >|= begin function
       | None        -> (`Not_found, Cohttp.Header.init (), `String "Not found", [])
       | Some result -> result
@@ -548,5 +546,4 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
                            (match body with `String s -> s | `Empty -> "empty" | _ -> "unknown") ) ; *)
     (* Finally, send the response to the client *)
     S.respond ~headers ~body ~status ()
-
 end

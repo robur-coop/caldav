@@ -14,25 +14,6 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
   module Webdav_server1 = Caldav.Webdav_server.Make(R)(Clock)(Caldav.Webdav_fs.Make(Mirage_fs_mem))(S)
   module Webdav_server2 = Caldav.Webdav_server.Make(R)(Clock)(Caldav.Webdav_fs.Make(FS_unix))(S)
 
-  let initialize_fs clock config data_dir admin_pass =
-    let now = Ptime.v (Clock.now_d_ps clock) in
-    let module Fs = Caldav.Webdav_fs.Make(FS_unix) in
-    let module Dav = Caldav.Webdav_api.Make(Fs) in
-    FS_unix.connect data_dir >>= fun fs ->
-    Fs.valid fs config >>= fun fs_is_valid ->
-    match fs_is_valid, admin_pass with
-    | Error (`Msg msg), None ->
-      Lwt.fail_with ("got an uninitalized file system (error: " ^ msg ^ "), please provide admin password")
-    | Error _, Some password ->
-      Dav.initialize_fs fs now config >>= fun () ->
-      let salt = Webdav_server1.generate_salt () in
-      Dav.make_user fs now config ~name:"root" ~password ~salt >|= fun _ ->
-      fs
-    | Ok (), None -> Lwt.return fs
-    | Ok (), Some password ->
-      let salt = Webdav_server1.generate_salt () in
-      Dav.change_user_password fs config ~name:"root" ~password ~salt >|= fun _ ->
-      fs
 
   let tls_init kv =
     Lwt.catch (fun () ->
@@ -91,11 +72,14 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
       and apple_testable = Key_gen.apple_testable ()
       in
       if not apple_testable then
-        initialize_fs clock config dir admin_pass >|= fun fs ->
+        FS_unix.connect dir >>= fun fs ->
+        let module Fs = Caldav.Webdav_fs.Make(FS_unix) in
+        let module Dav = Caldav.Webdav_api.Make(R)(Clock)(Fs) in
+        Dav.connect fs config dir admin_pass >|= fun fs ->
         `Unix fs
       else
         let module Fs = Caldav.Webdav_fs.Make(Mirage_fs_mem) in
-        let module Dav = Caldav.Webdav_api.Make(Fs) in
+        let module Dav = Caldav.Webdav_api.Make(R)(Clock)(Fs) in
         let now = Ptime.v (Clock.now_d_ps clock) in
         Mirage_fs_mem.connect "" >>= fun fs ->
         Dav.initialize_fs_for_apple_testsuite fs now config >|= fun () ->

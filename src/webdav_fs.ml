@@ -155,7 +155,7 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
         | Ok _ ->
           let data = Properties.to_string map in
           let filename = to_string (propfilename f_or_d) in
-          Log.debug (fun m -> m "writing property map %s: %s" filename data) ;
+          (* Log.debug (fun m -> m "writing property map %s: %s" filename data) ; *)
           Fs.destroy fs filename >>= fun _ ->
           Fs.write fs filename 0 (Cstruct.of_string data)
       end
@@ -290,6 +290,5 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
     with
     | Some _, Some _ -> Ok ()
     | _ -> Error (`Msg "root user does not have password and salt")
-
 
 end
