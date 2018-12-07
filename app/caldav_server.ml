@@ -116,33 +116,12 @@ module Webdav_server = Caldav.Webdav_server.Make(Mirage_random_test)(Pclock)(Dav
 
 module Api = Caldav.Webdav_api.Make(Mirage_random_test)(Pclock)(Dav_fs)
 
-
-let message = "Hello sanity!"
-
-let config = Caldav.Webdav_config.config ~do_trust_on_first_use:true (Uri.of_string "localhost")
-
-let server fs =
-  let request, body = Request.make ~meth:`GET (Uri.of_string "/calendars/root"), `Empty in
-  List.map const [ (* t *)
-    Webdav_server.dispatch config fs request body
-    (* Http_server.respond ~status:`OK ~body:(`String message) (); *)
-  ] |> response_sequence
-
-let ts fs =
-  Cohttp_lwt_unix_test.test_server_s (server fs) begin fun uri ->
-    let t () =
-      Cohttp_lwt_unix.Client.get uri >>= fun (_, body) ->
-      body |> Body.to_string >|= fun body ->
-      Logs.debug (fun m -> m "found %s" body) ;
-      assert_equal body message in
-    [ "sanity test", t ]
-  end
-
-let data = Cstruct.of_string
+let header, content, footer =
 {|BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
-BEGIN:VTIMEZONE
+|},
+{|BEGIN:VTIMEZONE
 LAST-MODIFIED:20040110T032845Z
 TZID:US/Eastern
 BEGIN:DAYLIGHT
@@ -161,20 +140,61 @@ TZOFFSETTO:-0500
 END:STANDARD
 END:VTIMEZONE
 BEGIN:VEVENT
+UID:74855313FA803DA593CD579A@example.com
 DTSTAMP:20060206T001102Z
 DTSTART;TZID=US/Eastern:20060102T100000
 DURATION:PT1H
 SUMMARY:Event #1
 Description:Go Steelers!
-UID:74855313FA803DA593CD579A@example.com
 END:VEVENT
-END:VCALENDAR
+|},
+{|END:VCALENDAR
 |}
+
+let data = Cstruct.of_string (header ^ content ^ footer)
+
+let rec repeat n s =
+  if n = 0 then "" else s ^ repeat (pred n) s
+
+let convert_nl_to_cr_nl str =
+  let re = Re.compile ( Re.Perl.re "\n" ) in
+  Re.replace_string ~all:true re ~by:"\r\n" str
+
+let expected =
+  convert_nl_to_cr_nl
+    ({|BEGIN:VCALENDAR
+PRODID:-//ROBUR.IO//EN
+VERSION:2.0
+X-WR-CALNAME:root
+|} ^ repeat 1000 content ^ footer)
+
+let config = Caldav.Webdav_config.config ~do_trust_on_first_use:true (Uri.of_string "localhost")
+
+let server fs =
+  let headers =
+    let auth_header = "Basic " ^ Cstruct.to_string (Nocrypto.Base64.encode (Cstruct.of_string "root:foo")) in
+    Cohttp.Header.add (Cohttp.Header.init ()) "Authorization" auth_header
+  in
+  let request, body = Request.make ~headers ~meth:`GET (Uri.of_string "/calendars/root"), `Empty in
+  List.map const [ (* t *)
+    Webdav_server.dispatch config fs request body
+    (* Http_server.respond ~status:`OK ~body:(`String message) (); *)
+  ] |> response_sequence
+
+let ts fs =
+  Cohttp_lwt_unix_test.test_server_s (server fs) begin fun uri ->
+    let t () =
+      Cohttp_lwt_unix.Client.get uri >>= fun (_, body) ->
+      body |> Body.to_string >|= fun body ->
+      Logs.debug (fun m -> m "found %s" body) ;
+      assert_equal body expected in
+    [ "sanity test", t ]
+  end
 
 let () =
   ignore (Lwt_main.run (
       Logs.set_reporter (Logs_fmt.reporter ~dst:Format.std_formatter ()) ;
-      Logs.set_level (Some Logs.Debug);
+      Logs.set_level (Some Logs.Info);
       Mirage_fs_mem.connect "" >>= fun fs ->
       let now = Ptime.epoch in
       Api.connect fs config (Some "foo") >>= fun _fs ->
