@@ -110,15 +110,20 @@ open Cohttp_lwt_unix_test
 module Http_server = Cohttp_lwt_unix.Server
 module Body = Cohttp_lwt.Body
 
+module Webdav_server = Caldav.Webdav_server.Make(Mirage_random_test)(Pclock)(Caldav.Webdav_fs.Make(Mirage_fs_mem))(Http_server)
+
 let message = "Hello sanity!"
 
-let server =
+let server fs =
+  let config = Caldav.Webdav_config.config (Uri.of_string "localhost") in
+  let request, body = Request.make ~meth:`HEAD (Uri.of_string "/"), `Empty in
   List.map const [ (* t *)
-    Http_server.respond ~status:`OK ~body:(`String message) ();
+    Webdav_server.dispatch config fs request body
+    (* Http_server.respond ~status:`OK ~body:(`String message) (); *)
   ] |> response_sequence
 
-let ts =
-  Cohttp_lwt_unix_test.test_server_s server begin fun uri ->
+let ts fs =
+  Cohttp_lwt_unix_test.test_server_s (server fs) begin fun uri ->
     let t () =
       Cohttp_lwt_unix.Client.get uri >>= fun (_, body) ->
       body |> Body.to_string >|= fun body ->
@@ -126,4 +131,7 @@ let ts =
     [ "sanity test", t ]
   end
 
-let () = ignore (Lwt_main.run (run_async_tests ts))
+let () =
+  ignore (Lwt_main.run (
+      Mirage_fs_mem.connect "" >>= fun fs ->
+      run_async_tests (ts fs)))

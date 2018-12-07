@@ -1,6 +1,6 @@
 (executables
  ((names (caldav_server))
-  (libraries (logs logs.fmt caldav webmachine nocrypto lwt ptime ptime.clock.os cohttp cohttp-lwt-unix mirage-fs-unix rresult oUnit))))
+  (libraries (logs logs.fmt caldav webmachine nocrypto lwt ptime ptime.clock.os cohttp cohttp-lwt-unix mirage-fs-unix rresult oUnit mirage-fs-mem mirage-random-test mirage-clock-unix))))
 
 (install
  ((section bin)
