@@ -23,6 +23,9 @@ depends: [
   "ocaml" {>= "4.05.0"}
   "dune" {build}
   "alcotest" {with-test}
+  "ounit" {with-test}
+  "mirage-random-test" {with-test}
+  "mirage-clock-unix" {with-test}
   "mirage-fs-mem" {with-test}
   "mirage-fs-unix" {>="1.5.0"}
   "ppx_deriving" {build}

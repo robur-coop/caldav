@@ -8,6 +8,9 @@ configure:
 test: clean
 	jbuilder runtest --no-buffer -j 1 test
 
+depend:
+	opam install -t --deps-only .
+
 clean:
 	jbuilder clean
 
