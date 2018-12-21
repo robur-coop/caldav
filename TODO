@@ -64,9 +64,31 @@ DONE:
 - add test to delete in directory, last-modified + etag of parent must change!
 - relative path/urls, simplify Webdav_api.uri_string
 
+-- PROFILING
+
+- single calendar with 10 000 ics files in /root/calendar on X250
+ - GET /root/calendar takes ~3s to run
+ - profiling with landmarks shows that most time is spent in Webdav_xml.tree (87%)
+   - this is our call into Xmlm
+ -> what should our SLA be?
+ -> bottleneck is not in our code!
+ - using s-expression instead of XMLM reduces the time spend in reading metadata from 87% to 2.5%
+
 -- TODO before release
 
-- research threading/quotas: 
+- compute 95th percentile from log output:
+  grep response\ time output.20181120 | cut -d ' ' -f10 | perl -pe 's/([[:digit:]].+)ms/$1*1000/e' | sed -E 's/us//g' | sort -n | awk '{all[NR] = $0} END{print all[int(NR*0.95 - 0.5)]}'
+
+
+- from output to a histogram:
+  (a) grep response\ time output.20181120 | cut -d ' ' -f10 | perl -pe 's/([[:digit:]].+)us/int($1*0.001)/e' | perl -pe 's/([[:digit:]].+)ms/int($1)/e' > durations-ms.txt
+  (b) cat durations-ms.txt  | sort -n | uniq -c | awk '{print $2,$1}' | sort -n | less
+  (c) awk '{$2=sprintf("%-*s", $2, ""); gsub(" ", "=", $2); printf("%-10s%s\n", $1, $2)}' durations-ms-total.txt  > data.out
+- method for the future
+  - request id, request method, resource, duration, response status
+  - request id, request body
+
+- research threading/quotas:
    - lwt pick with timeout - when will cancel kill a task exactly?
    - profiling data - which functions take how much time? -> optimize or add more yields
    - does cohttp have a lwt task per request or connection? how does keepalive work with cohttp?

@@ -2,15 +2,16 @@ open Rresult.R.Infix
 
 module M = Map.Make(String)
 
-type namespace = string [@@deriving show, eq]
-type name = string [@@deriving show, eq]
-type fqname = namespace * name [@@deriving show, eq]
-type attribute = fqname * string [@@deriving show, eq]
+open Sexplib.Conv
+type namespace = string [@@deriving sexp, show, eq]
+type name = string [@@deriving sexp, show, eq]
+type fqname = namespace * name [@@deriving sexp, show, eq]
+type attribute = fqname * string [@@deriving sexp, show, eq]
 
 type tree =
   | Pcdata of string
   | Node of namespace * name * attribute list * tree list
-  [@@deriving show, eq]
+  [@@deriving sexp, show, eq]
 
 type propfind = [
   | `All_prop of string list

@@ -153,7 +153,8 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
                       (to_string f_or_d) str Ptime.pp_rfc3339_error e) ;
           assert false
         | Ok _ ->
-          let data = Properties.to_string map in
+          (*    let data = Properties.to_string map in *)
+          let data = Sexplib.Sexp.to_string (Properties.to_sexp map) in
           let filename = to_string (propfilename f_or_d) in
           (* Log.debug (fun m -> m "writing property map %s: %s" filename data) ; *)
           Fs.destroy fs filename >>= fun _ ->
@@ -206,14 +207,16 @@ module Make (Fs:Mirage_fs_lwt.S) = struct
       None
     | Ok data ->
       let str = Cstruct.(to_string @@ concat data) in
-      match Xml.string_to_tree str with
-      | None ->
-        Log.err (fun m -> m "couldn't convert %s to xml tree" str) ;
-        None
-      | Some t -> Some (Properties.from_tree t)
+      Some (Properties.of_sexp (Sexplib.Sexp.of_string str))
+
+      (* match Xml.string_to_tree str with
+         | None ->
+           Log.err (fun m -> m "couldn't convert %s to xml tree" str) ;
+           None
+         | Some t -> Some (Properties.from_tree t) *)
 
   (* let open_fs_error x =
-   *   (x : ('a, Fs.error) result Lwt.t :> ('a, [> Fs.error ]) result Lwt.t) *)
+       (x : ('a, Fs.error) result Lwt.t :> ('a, [> Fs.error ]) result Lwt.t) *)
 
   (* careful: unsafe_find, unsafe_add *)
   let get_property_map fs f_or_d =

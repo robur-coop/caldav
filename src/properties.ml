@@ -7,9 +7,21 @@ module PairMap = Map.Make (struct
       | x -> x
 end)
 
-type property = Xml.attribute list * Xml.tree list
+open Sexplib.Conv
+type property = Xml.attribute list * Xml.tree list [@@deriving sexp]
 
 type t = property PairMap.t
+
+type foo = ((string * string) * property) list [@@deriving sexp]
+
+let to_sexp t =
+  let bindings = PairMap.bindings t in
+  sexp_of_foo bindings
+
+let of_sexp s =
+  let bindings = foo_of_sexp s in
+  List.fold_left (fun map (k, v) ->
+      PairMap.add k v map) PairMap.empty bindings
 
 (* not safe *)
 let unsafe_find = PairMap.find_opt

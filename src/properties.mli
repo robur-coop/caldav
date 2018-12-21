@@ -6,6 +6,9 @@ type t
 
 type property = Xml.attribute list * Xml.tree list
 
+val to_sexp : t -> Sexplib.Sexp.t
+val of_sexp : Sexplib.Sexp.t -> t
+
 val pp : t Fmt.t
 
 val equal : t -> t -> bool
