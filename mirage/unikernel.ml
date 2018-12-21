@@ -75,7 +75,7 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
         FS_unix.connect dir >>= fun fs ->
         let module Fs = Caldav.Webdav_fs.Make(FS_unix) in
         let module Dav = Caldav.Webdav_api.Make(R)(Clock)(Fs) in
-        Dav.connect fs config dir admin_pass >|= fun fs ->
+        Dav.connect fs config admin_pass >|= fun fs ->
         `Unix fs
       else
         let module Fs = Caldav.Webdav_fs.Make(Mirage_fs_mem) in
