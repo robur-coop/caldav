@@ -40,6 +40,10 @@ depends: [
   "rresult"
 ]
 
+pin-depends: [
+  ["mirage-clock.dev" "git+https://github.com/hannesm/mirage-clock.git#t-is-unit"]
+]
+
 synopsis: "A CalDAV server"
 description: """
 A CalDAV server. Supports everything from the roburio/icalendar library.
