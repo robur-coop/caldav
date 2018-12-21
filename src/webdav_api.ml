@@ -1,3 +1,5 @@
+[@@@landmark "auto"]
+
 module Xml = Webdav_xml
 open Webdav_config
 type tree = Xml.tree

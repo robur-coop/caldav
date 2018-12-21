@@ -1,3 +1,5 @@
+[@@@landmark "auto"]
+
 module Xml = Webdav_xml
 
 module PairMap = Map.Make (struct

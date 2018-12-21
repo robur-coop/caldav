@@ -1,3 +1,5 @@
+[@@@landmark "auto"]
+
 open Rresult.R.Infix
 
 module M = Map.Make(String)
@@ -241,22 +243,22 @@ let is_whitespace_node = function
   | Pcdata str -> Astring.String.for_all (function ' ' | '\n' | '\r' | '\t' -> true | _ -> false) str
   | Node _ -> false
 
+let strip node children tail =
+  if is_whitespace_node node
+  then tail
+  else match node with
+    | Pcdata str -> Pcdata str :: tail
+    | Node (ns, name, attrs, _) -> Node (ns, name, attrs, children) :: tail
+
 let string_to_tree str =
   let data str = Pcdata str
   and el ((ns, name), attrs) children = node ~ns ~a:attrs name children
   in
   try
-    let input = Xmlm.make_input (`String (0, str)) in
+    let[@landmark] input = Xmlm.make_input (`String (0, str)) in
     ignore (Xmlm.input input) ; (* ignore DTD *)
-    let tree = Xmlm.input_tree ~el ~data input in
-    let strip node children tail =
-      if is_whitespace_node node
-      then tail
-      else match node with
-        | Pcdata str -> Pcdata str :: tail
-        | Node (ns, name, attrs, _) -> Node (ns, name, attrs, children) :: tail
-    in
-    let stripped_tree = tree_fold_right strip [] [ tree ] in
+    let[@landmark] tree = Xmlm.input_tree ~el ~data input in
+    let[@landmark] stripped_tree = tree_fold_right strip [] [ tree ] in
     Some (List.hd stripped_tree)
   with _ -> None
 

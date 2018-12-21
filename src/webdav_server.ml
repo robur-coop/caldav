@@ -1,3 +1,5 @@
+[@@@landmark "auto"]
+
 open Webdav_config
 
 open Lwt.Infix

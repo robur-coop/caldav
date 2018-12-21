@@ -1,3 +1,5 @@
+[@@@landmark "auto"]
+
 type file = [ `File of string list ]
 
 type dir = [ `Dir of string list ]

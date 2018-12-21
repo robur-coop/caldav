@@ -1,5 +1,6 @@
 (library
   (name        caldav)
   (public_name caldav)
-  (preprocess (pps ppx_deriving.std ppx_sexp_conv))
-  (libraries logs lwt ptime cohttp mirage-fs-lwt xmlm tyxml icalendar rresult nocrypto webmachine cohttp-lwt mirage-clock mirage-random))
+  (preprocess (pps ppx_deriving.std ppx_sexp_conv landmarks.ppx))
+  (libraries landmarks logs lwt ptime cohttp mirage-fs-lwt xmlm tyxml icalendar rresult nocrypto webmachine cohttp-lwt mirage-clock mirage-random)
+)
