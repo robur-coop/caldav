@@ -1,7 +1,0 @@
-(executables
- ((names (caldav_server))
-  (libraries (logs logs.fmt caldav webmachine nocrypto lwt ptime ptime.clock.os cohttp cohttp-lwt-unix mirage-fs-unix rresult oUnit mirage-fs-mem mirage-random-test mirage-clock-unix))))
-
-(install
- ((section bin)
-  (files ((caldav_server.exe as caldav_server)))))
