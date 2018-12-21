@@ -8,6 +8,8 @@ module Xml = Webdav_xml
 
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
+let response_time_src = Logs.Src.create "http.time" ~doc:"HTTP request response time"
+module Time_log = (val Logs.src_log response_time_src : Logs.LOG)
 
 let sane username =
   username <> "" && Astring.String.for_all Astring.Char.Ascii.is_alphanum username
@@ -542,6 +544,11 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
                          (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
                          (Uri.path (Cohttp.Request.uri request))
                          (Astring.String.concat ~sep:", " path)) ;
+    Time_log.info (fun m -> m "%s\t%s\t%d\t%f" 
+                         (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
+                         (Cohttp.Request.resource request)
+                         (Cohttp.Code.code_of_status status)
+                         (Ptime.Span.to_float_s diff)) ;
     (*      Access_log.debug (fun m -> m "body: %s"
                            (match body with `String s -> s | `Empty -> "empty" | _ -> "unknown") ) ; *)
     (* Finally, send the response to the client *)
