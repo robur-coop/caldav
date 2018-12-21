@@ -76,9 +76,15 @@ DONE:
 
 -- TODO before release
 
-- compute 95th percentile from log output:
+- compute 95th percentile of response time, in miliseconds, from log output:
   grep response\ time output.20181120 | cut -d ' ' -f10 | perl -pe 's/([[:digit:]].+)ms/$1*1000/e' | sed -E 's/us//g' | sort -n | awk '{all[NR] = $0} END{print all[int(NR*0.95 - 0.5)]}'
+  => baseline is 102 seconds, from where we want to improve 
 
+- measure more? (median, durchschnitt, 90th perc, 99 perc?)
+
+- improve log message style: constant time unit of duration, group request + response time + response code, tab separate fields 
+- add other log prefix/source called measurement, containing the above line
+- deploy the improved code with s-expressions, see if 95th percentile got faster
 
 - from output to a histogram:
   (a) grep response\ time output.20181120 | cut -d ' ' -f10 | perl -pe 's/([[:digit:]].+)us/int($1*0.001)/e' | perl -pe 's/([[:digit:]].+)ms/int($1)/e' > durations-ms.txt
