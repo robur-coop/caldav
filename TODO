@@ -74,29 +74,37 @@ DONE:
  -> bottleneck is not in our code!
  - using s-expression instead of XMLM reduces the time spend in reading metadata from 87% to 2.5%
 
--- TODO before release
+-- ENDE NOTIZEN
+
+- improve log message style: constant time unit of duration, group request + response time + response code, tab separate fields 
+- add other log prefix/source called measurement, containing the above line
+- deploy the improved code with s-expressions 
 
 - compute 95th percentile of response time, in miliseconds, from log output:
   grep response\ time output.20181120 | cut -d ' ' -f10 | perl -pe 's/([[:digit:]].+)ms/$1*1000/e' | sed -E 's/us//g' | sort -n | awk '{all[NR] = $0} END{print all[int(NR*0.95 - 0.5)]}'
   => baseline is 102 seconds, from where we want to improve 
-
-- measure more? (median, durchschnitt, 90th perc, 99 perc?)
-
-- improve log message style: constant time unit of duration, group request + response time + response code, tab separate fields 
-- add other log prefix/source called measurement, containing the above line
-- deploy the improved code with s-expressions, see if 95th percentile got faster
-
 - from output to a histogram:
   (a) grep response\ time output.20181120 | cut -d ' ' -f10 | perl -pe 's/([[:digit:]].+)us/int($1*0.001)/e' | perl -pe 's/([[:digit:]].+)ms/int($1)/e' > durations-ms.txt
   (b) cat durations-ms.txt  | sort -n | uniq -c | awk '{print $2,$1}' | sort -n | less
   (c) awk '{$2=sprintf("%-*s", $2, ""); gsub(" ", "=", $2); printf("%-10s%s\n", $1, $2)}' durations-ms-total.txt  > data.out
-- method for the future
-  - request id, request method, resource, duration, response status
-  - request id, request body
+
+- profiling data - which functions take how much time? -> optimize or add more yields
+  => landmarks library, ppx preprocessor, env variable OCAML_LANDMARKS="auto,format=json,output=output.json,allocation"
+  open "$(ocamlfind query landmarks-viewer)/landmarks_viewer.html"
+
+^ DONE ----------------------------------
+-- TODO before release ------------------
+
+- rename xml files
+- version number for our property data format "robur:fileformat"
+- take a look at the logs again: 
+ - which type of request is exceptionally slow (95th percentile)
+ - measure more? metrics library (median, durchschnitt, 90th perc, 99 perc?)
+
+- add request id?
 
 - research threading/quotas:
    - lwt pick with timeout - when will cancel kill a task exactly?
-   - profiling data - which functions take how much time? -> optimize or add more yields
    - does cohttp have a lwt task per request or connection? how does keepalive work with cohttp?
 - add a timeout
 - limit compute resource per request, per calendar entry, per calendar size
