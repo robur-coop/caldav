@@ -9,11 +9,11 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
-module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_types_lwt.KV_RO) (S: HTTP) = struct
+module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_clock.MCLOCK) (KEYS: Mirage_types_lwt.KV_RO) (STACK: Mirage_types_lwt.STACKV4) (S: HTTP) = struct
   module X509 = Tls_mirage.X509(KEYS)(Clock)
   module Webdav_server1 = Caldav.Webdav_server.Make(R)(Clock)(Caldav.Webdav_fs.Make(Mirage_fs_mem))(S)
   module Webdav_server2 = Caldav.Webdav_server.Make(R)(Clock)(Caldav.Webdav_fs.Make(FS_unix))(S)
-
+  module Metrics_reporter = Metrics_mirage.Influx(Mclock)(STACK)
 
   let tls_init kv =
     Lwt.catch (fun () ->
@@ -46,7 +46,32 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_typ
     in
     S.make ~conn_closed ~callback ()
 
-  let start _random clock tls_keys http =
+  let gc_quick_stat = Metrics.gc_quick_stat ~tags:Metrics.Tags.[]
+  let gc_stat = Metrics.gc_stat ~tags:Metrics.Tags.[]
+
+  let monitor_gc ?(quick = true) delay =
+  let id x = x in
+  let f () =
+    if quick then Metrics.add gc_quick_stat id (fun d -> d ())
+    else Metrics.add gc_stat id (fun d -> d ())
+  in
+  let rec loop () =
+    f ();
+    OS.Time.sleep_ns (Duration.of_f delay) >>= fun () -> loop ()
+  in
+  Lwt.async loop
+
+  let start _random clock mclock tls_keys net http =
+    (match Key_gen.monitor () with
+    | None -> Lwt.return_unit 
+    | Some monitor -> 
+      Metrics.enable_all ();
+      monitor_gc 0.1;
+      let hostname = Key_gen.hostname () in
+      Metrics_reporter.create mclock net ~hostname (Ipaddr.V4.of_string_exn monitor) () 
+      >|= function
+      | Error () -> assert false
+      | Ok reporter -> Metrics.set_reporter reporter) >>= fun () ->
     (* TODO naming *)
     let init_http port config fs =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);

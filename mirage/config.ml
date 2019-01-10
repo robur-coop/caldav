@@ -35,6 +35,10 @@ let hostname =
   let doc = Key.Arg.info ~doc:"Hostname to use." [ "host" ] ~docv:"STRING" in
   Key.(create "hostname" Arg.(required string doc))
 
+let monitor =
+  let doc = Key.Arg.info ~doc:"Hostname to use for monitoring." [ "monitor" ] ~docv:"STRING" in
+  Key.(create "monitor" Arg.(opt (some string) None doc))
+
 let apple_testable =
   let doc = Key.Arg.info ~doc:"Configure the server to use with Apple CCS CalDAVtester." [ "apple-testable" ] in
   Key.(create "apple_testable" Arg.(flag doc))
@@ -60,6 +64,9 @@ let main =
     package "uri" ;
     package ~pin:"git+https://github.com/roburio/ocaml-webmachine.git#webdav" "webmachine" ;
     package ~pin:"git+https://github.com/roburio/caldav.git" "caldav" ;
+    package ~pin:"git+https://github.com/hannesm/metrics.git#influx-mirage" "metrics" ;
+    package ~pin:"git+https://github.com/hannesm/metrics.git#influx-mirage" "metrics-mirage" ;
+    package ~pin:"git+https://github.com/hannesm/metrics.git#influx-mirage" "metrics-influx" ;
     package "mirage-fs-unix" ;
     package "mirage-fs-mem" ;
     package "mirage-fs-lwt" ;
@@ -67,11 +74,12 @@ let main =
   let keys =
     [ Key.abstract http_port ; Key.abstract https_port ;
       Key.abstract admin_password ; Key.abstract fs_root ;
-      Key.abstract tofu ; Key.abstract hostname ; Key.abstract apple_testable ]
+      Key.abstract tofu ; Key.abstract hostname ; 
+      Key.abstract monitor ; Key.abstract apple_testable ]
   in
   foreign
     ~packages:direct_dependencies ~keys
-    "Unikernel.Main" (random @-> pclock @-> kv_ro @-> http @-> job)
+    "Unikernel.Main" (random @-> pclock @-> mclock @-> kv_ro @-> stackv4 @-> http @-> job)
 
 let () =
-  register "caldav" [main $ default_random $ default_posix_clock $ certs $ http_srv]
+  register "caldav" [main $ default_random $ default_posix_clock $default_monotonic_clock $ certs $ net $ http_srv]
