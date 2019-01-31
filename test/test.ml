@@ -1,6 +1,6 @@
 module Xml = Caldav.Webdav_xml
 module Fs = Caldav.Webdav_fs.Make(Mirage_fs_mem)
-module Dav = Caldav.Webdav_api.Make(Fs)
+module Dav = Caldav.Webdav_api.Make(Mirage_random_test)(Pclock)(Fs)
 module Properties = Caldav.Properties
 
 open Caldav.Webdav_config
