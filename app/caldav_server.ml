@@ -123,7 +123,8 @@ open Cohttp_lwt_unix_test
 module Http_server = Cohttp_lwt_unix.Server
 module Body = Cohttp_lwt.Body
 
-module Dav_fs = Caldav.Webdav_fs.Make(Mirage_fs_mem)
+module KV_mem = Mirage_fs_mem.Make(Pclock)
+module Dav_fs = Caldav.Webdav_fs.Make(KV_mem)
 
 module Webdav_server = Caldav.Webdav_server.Make(Mirage_random_test)(Pclock)(Dav_fs)(Http_server)
 
@@ -164,7 +165,7 @@ END:VEVENT
 {|END:VCALENDAR
 |}
 
-let data = Cstruct.of_string (header ^ content ^ footer)
+let data = header ^ content ^ footer
 
 let rec repeat n s =
   if n = 0 then "" else s ^ repeat (pred n) s
@@ -208,7 +209,7 @@ let () =
   ignore (Lwt_main.run (
       Logs.set_reporter (Logs_fmt.reporter ~dst:Format.std_formatter ()) ;
       Logs.set_level (Some Logs.Info);
-      Mirage_fs_mem.connect "" >>= fun fs ->
+      KV_mem.connect "" >>= fun fs ->
       let now = Ptime.epoch in
       Api.connect fs config (Some "foo") >>= fun _fs ->
       let rec go = function
@@ -218,7 +219,7 @@ let () =
           let filename = Dav_fs.create_file (`Dir ["calendars" ; "root"]) name in
           let props = Caldav.Properties.create
               ~content_type:"text/calendar"
-              [(`All, `Grant [ `All ])] now (Cstruct.len data) name
+              [(`All, `Grant [ `All ])] now (String.length data) name
           in
           Dav_fs.write fs filename data props >>= fun _ ->
           go (pred n)
