@@ -100,6 +100,7 @@ DONE:
 - take a look at the logs again: 
  - which type of request is exceptionally slow (95th percentile)
  - measure more? metrics library (median, durchschnitt, 90th perc, 99 perc?)
+- a key in the KV store should not know about segments
 
 - add request id?
 
