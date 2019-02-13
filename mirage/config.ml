@@ -61,6 +61,7 @@ let main =
     package "irmin-git" ;
     package "irmin-mirage" ;
     package "caldav" ;
+    package "mirage-kv-mem" ;
 (*    package ~pin:"git+https://github.com/roburio/ocaml-webmachine.git#webdav" "webmachine" ;
       package ~pin:"git+https://github.com/roburio/caldav.git" "caldav" ; *)
   ] in
