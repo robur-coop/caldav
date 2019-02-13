@@ -64,12 +64,14 @@ let main =
     package "uri" ;
     package ~pin:"git+https://github.com/roburio/ocaml-webmachine.git#webdav" "webmachine" ;
     package ~pin:"git+https://github.com/roburio/caldav.git" "caldav" ;
-    package ~pin:"git+https://github.com/hannesm/metrics.git#influx-mirage" "metrics" ;
+(*    package ~pin:"git+https://github.com/hannesm/metrics.git#influx-mirage" "metrics" ;
     package ~pin:"git+https://github.com/hannesm/metrics.git#influx-mirage" "metrics-mirage" ;
     package ~pin:"git+https://github.com/hannesm/metrics.git#influx-mirage" "metrics-influx" ;
-    package "mirage-fs-unix" ;
-    package "mirage-fs-mem" ;
-    package "mirage-fs-lwt" ;
+*)
+    package "irmin-git" ;
+    package "irmin-mirage" ;
+    package "caldav" ;
+    package "mirage-kv-mem" ;
   ] in
   let keys =
     [ Key.abstract http_port ; Key.abstract https_port ;
@@ -79,7 +81,7 @@ let main =
   in
   foreign
     ~packages:direct_dependencies ~keys
-    "Unikernel.Main" (random @-> pclock @-> mclock @-> kv_ro @-> stackv4 @-> http @-> job)
+    "Unikernel.Main" (random @-> pclock @-> mclock @-> kv_ro @-> http @-> resolver @-> conduit @-> job)
 
 let () =
-  register "caldav" [main $ default_random $ default_posix_clock $default_monotonic_clock $ certs $ net $ http_srv]
+  register "caldav" [main $ default_random $ default_posix_clock $ default_monotonic_clock $ certs $ http_srv $ resolver_dns net $ conduit_direct ~tls:true net ]
