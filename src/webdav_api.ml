@@ -100,6 +100,10 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
       let aces' = List.map Xml.xml_to_ace aces in
       Ok (List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces')
 
+  let privilege_met fs requirement ~auth_user_props resource_props =
+    let privileges = Properties.privileges ~auth_user_props resource_props in
+    if not (Privileges.is_met ~requirement privileges) then `Forbidden else `Ok
+    
   let parse_calendar ~path data =
     match Icalendar.parse data with
     | Error e ->
@@ -162,24 +166,20 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
       Log.err (fun m -> m "parent directory of %s does not exist" (Fs.to_string file')) ;
       Lwt.return (Error `Conflict)
     | true ->
-      acl fs config user parent' >>= function
-      | Error e ->
-        Log.err (fun m -> m "acl check for user %s returned forbidden while trying to write file %s" user (Fs.to_string file')) ;
-        Lwt.return @@ Error `Forbidden
-      | Ok acl ->
-        is_calendar fs parent' >>= function
-        | false ->
-          Log.err (fun m -> m "is_calendar was false when trying to write %s" (Fs.to_string file')) ;
-          Lwt.return @@ Error `Bad_request
-        | true ->
-          let etag = etag_of_data ics in
-          let props = Properties.create ~content_type ~etag
-              acl timestamp (String.length ics) (Fs.to_string file')
-          in
-          Fs.write fs file ics props >>= function
-          | Error e -> Lwt.return @@ Error `Internal_server_error
-          | Ok () -> update_parent_after_child_write fs file' timestamp >|= fun () ->
-                     Ok etag
+      is_calendar fs parent' >>= function
+      | false ->
+        Log.err (fun m -> m "is_calendar was false when trying to write %s" (Fs.to_string file')) ;
+        Lwt.return @@ Error `Bad_request
+      | true ->
+        let etag = etag_of_data ics in
+        let acl = [(`All, `Grant [], Some (`Inherited (Uri.of_string (Fs.to_string parent'))))] in
+        let props = Properties.create ~content_type ~etag
+            acl timestamp (String.length ics) (Fs.to_string file')
+        in
+        Fs.write fs file ics props >>= function
+        | Error e -> Lwt.return @@ Error `Internal_server_error
+        | Ok () -> update_parent_after_child_write fs file' timestamp >|= fun () ->
+                    Ok etag
 
   let write_component fs config ~path ~user timestamp ~content_type ~data =
     match parse_calendar ~path data with
@@ -268,10 +268,10 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
 
   let property_selector fs propfind_request auth_user_props f_or_d =
     Fs.get_property_map fs f_or_d >|= fun resource_props ->
-    let privileges = Properties.privileges ~auth_user_props resource_props in
-    if not (Privileges.is_met ~requirement:`Read privileges) 
-    then `Forbidden
-    else if resource_props = Properties.empty
+    match privilege_met fs `Read ~auth_user_props resource_props with
+    | `Forbidden -> `Forbidden
+    | `Ok -> 
+      if resource_props = Properties.empty
       then `Not_found
       else
         (* results for props, grouped by code *)
@@ -851,20 +851,20 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
       | `File f ->
         Fs.read fs (`File f) >|= function
         | Error _ -> Error `Bad_request
-        | Ok (data, props) ->
-          let privileges = Properties.privileges ~auth_user_props props in
-          if not (Privileges.is_met ~requirement:`Read privileges) then
+        | Ok (data, resource_props) ->
+          match privilege_met fs `Read ~auth_user_props resource_props with
+          | `Forbidden -> 
             let node = Xml.dav_node "response"
                 [ Xml.dav_node "href" [ Xml.pcdata (Fs.to_string (`File f)) ] ;
                   Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
             in
             Ok (Some node)
-          else match Icalendar.parse data with
+          | `Ok -> match Icalendar.parse data with
             | Error e ->
               Log.err (fun m -> m "Error %s while parsing %s" e data);
               Error `Bad_request
             | Ok ics ->
-              match apply_to_vcalendar query ics props ~auth_user_props with
+              match apply_to_vcalendar query ics resource_props ~auth_user_props with
               | [] -> Ok None
               | xs ->
                 let node =
@@ -908,21 +908,21 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
               Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Not_found) ] ]
         in
         Ok node
-      | Ok (data, props) ->
-        let privileges = Properties.privileges auth_user_props props in
-        if not (Privileges.is_met ~requirement:`Read privileges) then
+      | Ok (data, resource_props) ->
+        match privilege_met fs `Read ~auth_user_props resource_props with
+        | `Forbidden -> 
           let node = Xml.dav_node "response"
               [ Xml.dav_node "href" [ Xml.pcdata (Fs.to_string (file :> Webdav_fs.file_or_dir)) ] ;
                 Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
           in
           Ok node
-        else
+        | `Ok ->
           match Icalendar.parse data with
           | Error e ->
             Log.err (fun m -> m "Error %s while parsing %s" e data);
             Error `Bad_request
           | Ok ics ->
-            let xs = apply_transformation transformation ics props ~auth_user_props in
+            let xs = apply_transformation transformation ics resource_props ~auth_user_props in
             let node =
               Xml.dav_node "response"
                 (Xml.dav_node "href" [ Xml.pcdata (Fs.to_string (file :> Webdav_fs.file_or_dir)) ]
@@ -958,10 +958,10 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     properties_for_current_user fs config user >>= fun auth_user_props ->
     Fs.exists fs path >>= fun target_exists ->
     let requirement, target_or_parent = Privileges.required http_verb ~target_exists in
-    read_target_or_parent_properties fs path target_or_parent >|= fun propmap ->
-    let privileges = Properties.privileges ~auth_user_props propmap in
-    Log.debug (fun m -> m "privileges are %a" Fmt.(list ~sep:(unit "; ") Xml.pp_privilege) privileges) ;
-    Privileges.is_met ~requirement privileges
+    read_target_or_parent_properties fs path target_or_parent >|= fun resource_props ->
+    match privilege_met fs requirement ~auth_user_props resource_props with
+    | `Forbidden -> false
+    | `Ok -> true
 
   (* moved from Caldav_server *)
 
