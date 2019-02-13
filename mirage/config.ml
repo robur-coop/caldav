@@ -59,6 +59,7 @@ let keys = List.map (fun (Any k) -> Key.abstract k) [Any http_port; Any https_po
 let main =
   let direct_dependencies = [
     package "uri" ;
+    package "mirage-kv-unix" ;
     package ~pin:"git+https://github.com/roburio/caldav.git" "caldav" ;
     package ~pin:"git+https://github.com/hannesm/ocaml-crunch.git#kv-ng" "crunch" ;
     package ~pin:"git+https://github.com/mirage/mirage-kv-mem.git" "mirage-kv-mem" ;

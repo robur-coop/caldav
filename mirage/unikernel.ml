@@ -15,7 +15,15 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
   module Dav_fs = Caldav.Webdav_fs.Make(Store)
   module Dav = Caldav.Webdav_api.Make(R)(Clock)(Dav_fs)
   module Webdav_server1 = Caldav.Webdav_server.Make(R)(Clock)(Dav_fs)(S)
-  module Webdav_server2 = Caldav.Webdav_server.Make(R)(Clock)(Dav_fs)(S)
+
+  module Dav_fs2 = Caldav.Webdav_fs.Make(Mirage_kv_unix)
+  module Dav2 = Caldav.Webdav_api.Make(R)(Clock)(Dav_fs2)
+  module Webdav_server2 = Caldav.Webdav_server.Make(R)(Clock)(Dav_fs2)(S)
+
+  module KV_mem = Mirage_kv_mem.Make(Clock)
+  module Dav_fs3 = Caldav.Webdav_fs.Make(KV_mem)
+  module Dav3 = Caldav.Webdav_api.Make(R)(Clock)(Dav_fs3)
+  module Webdav_server3 = Caldav.Webdav_server.Make(R)(Clock)(Dav_fs3)(S)
 (*
   module Metrics_reporter = Metrics_mirage.Influx(Mclock)(STACK)
 *)
@@ -86,7 +94,8 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
       http (`TCP port) @@ serve (match fs with
           | `Unix fs -> Webdav_server2.dispatch config fs
-          | `Apple fs -> Webdav_server1.dispatch config fs)
+          | `Apple fs -> Webdav_server1.dispatch config fs
+          | `Mem fs -> Webdav_server3.dispatch config fs)
     in
     let init_https port config fs =
       tls_init tls_keys >>= fun tls_config ->
@@ -94,17 +103,19 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       let tls = `TLS (tls_config, `TCP port) in
       http tls @@ serve (match fs with
           | `Unix fs -> Webdav_server2.dispatch config fs
-          | `Apple fs -> Webdav_server1.dispatch config fs)
+          | `Apple fs -> Webdav_server1.dispatch config fs
+          | `Mem fs -> Webdav_server3.dispatch config fs)
     in
     let config host =
       let do_trust_on_first_use = Key_gen.tofu () in
       Caldav.Webdav_config.config ~do_trust_on_first_use host
     in
     let init_fs_for_runtime config =
-      let _dir = Key_gen.fs_root ()
+      let dir = Key_gen.fs_root ()
       and admin_pass = Key_gen.admin_password ()
       and apple_testable = Key_gen.apple_testable ()
       in
+      (*
       Irmin_git.Mem.v (Fpath.v "bla") >>= function
       | Error _ -> assert false
       | Ok git ->
@@ -118,6 +129,13 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
         let now = Ptime.v (Clock.now_d_ps clock) in
         Dav.initialize_fs_for_apple_testsuite fs now config >|= fun () ->
         `Apple fs
+      KV_mem.connect () >>= fun fs ->
+      Dav3.connect fs config admin_pass >|= fun fs ->
+      `Mem fs 
+      *)
+      Mirage_kv_unix.connect dir >>= fun fs ->
+      Dav2.connect fs config admin_pass >|= fun fs ->
+      `Unix fs
     in
     let hostname = Key_gen.hostname () in
     match Key_gen.http_port (), Key_gen.https_port () with

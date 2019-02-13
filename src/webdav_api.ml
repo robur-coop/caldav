@@ -104,13 +104,19 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     let privileges = Properties.privileges ~auth_user_props resource_props in
     (match Properties.inherited_acls ~auth_user_props resource_props with
     | [ url ] -> 
+      Log.debug (fun m -> m "Inherited %s" (Uri.to_string url)) ;
       (Fs.from_string fs (Uri.to_string url) >>= function
-      | Error e -> Lwt.return []
+      | Error e -> 
+      Log.warn (fun m -> m "privilege_met: Could not convert to file %a" Fs.pp_error e) ;
+      Lwt.return []
       | Ok inherited -> 
       Fs.get_property_map fs inherited >|= fun inherited_props ->
       Properties.privileges ~auth_user_props inherited_props)
-    | _ -> Lwt.return []) >|= fun inherited_privileges ->
+    | urls -> 
+      Log.debug (fun m -> m "Inherited %s" (String.concat "\n" @@ List.map Uri.to_string urls)) ;
+     Lwt.return []) >|= fun inherited_privileges ->
     let privileges = privileges @ inherited_privileges in 
+    Log.debug (fun m -> m "Privileges size: %d " (List.length privileges)) ;
     if not (Privileges.is_met ~requirement privileges) then `Forbidden else `Ok
     
   let parse_calendar ~path data =
