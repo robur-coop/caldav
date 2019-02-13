@@ -26,7 +26,7 @@ depends: [
   "ounit" {with-test}
   "mirage-random-test" {with-test}
   "mirage-clock-unix" {with-test}
-  "mirage-fs-mem" {with-test}
+  "mirage-kv-mem" {with-test}
   "ppx_deriving" {build}
   "webmachine"
   "lwt"

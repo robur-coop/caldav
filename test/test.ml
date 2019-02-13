@@ -1,5 +1,5 @@
 module Xml = Caldav.Webdav_xml
-module KV_mem = Mirage_fs_mem.Make(Pclock)
+module KV_mem = Mirage_kv_mem.Make(Pclock)
 module Fs = Caldav.Webdav_fs.Make(KV_mem)
 module Dav = Caldav.Webdav_api.Make(Mirage_random_test)(Pclock)(Fs)
 module Properties = Caldav.Properties
@@ -545,7 +545,7 @@ let appendix_b_data acl =
   let open Lwt.Infix in
   Lwt_main.run (
     let now = Ptime.v (1, 0L) in
-    KV_mem.connect "/tmp/caldavtest" >>= fun res_fs ->
+    KV_mem.connect () >>= fun res_fs ->
     let props name = Properties.create_dir acl now name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
@@ -563,7 +563,7 @@ let appendix_b_1_data acl =
   let open Lwt.Infix in
   Lwt_main.run (
     let now = Ptime.v (1, 0L) in
-    KV_mem.connect "" >>= fun res_fs ->
+    KV_mem.connect () >>= fun res_fs ->
     let props name = Properties.create_dir acl now name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
@@ -1220,7 +1220,7 @@ let mkcol_success () =
   let res_fs, r =
     Lwt_main.run (
       let now = Ptime.v (1, 0L) in
-      KV_mem.connect "" >>= fun res_fs ->
+      KV_mem.connect () >>= fun res_fs ->
       let props =
         let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
         let acl = [ (`Href (Uri.of_string "/principals/testuser/"), `Grant [`All])] in
@@ -1230,7 +1230,7 @@ let mkcol_success () =
       let properties = Properties.create_dir allow_all_acl now "home" in
       Fs.mkdir res_fs (`Dir ["home"]) properties >>= fun _ ->
       Fs.mkdir res_fs (`Dir [ "home" ; "special" ]) props >>= fun _ ->
-      KV_mem.connect "" >>= fun fs ->
+      KV_mem.connect () >>= fun fs ->
       Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
       Dav.mkcol fs config ~path:"home/special/" ~user:"testuser" (`Other "MKCOL") now ~data:body >|= function
       | Error e -> (res_fs, Error e)
@@ -1243,13 +1243,13 @@ let delete_test () =
   let res_fs, r =
     Lwt_main.run (
       let open Lwt.Infix in
-      KV_mem.connect "" >>= fun res_fs ->
+      KV_mem.connect () >>= fun res_fs ->
       let creation_time = Ptime.v (1, 0L) in
       let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
       let dir_props = Properties.create_dir ~resourcetype [] creation_time "Special Resource" in
       Fs.write_property_map res_fs (`Dir []) dir_props >>= fun _ -> 
       Fs.mkdir res_fs (`Dir ["parent"]) dir_props >>= fun _ ->
-      KV_mem.connect "" >>= fun fs ->
+      KV_mem.connect () >>= fun fs ->
       let updated_time = Ptime.v (10, 0L) in
       let dir_props' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Pcdata (Ptime.to_rfc3339 updated_time) ]) dir_props in
       let dir_props'' = Properties.unsafe_add (Xml.dav_ns, "getetag") ([], [ Pcdata "01dd76faf69851ed6896ae419391363c" ]) dir_props' in
@@ -1263,7 +1263,7 @@ let delete_and_update_parent_mtime_and_etag () =
   let res_fs, r =
     Lwt_main.run (
       let open Lwt.Infix in
-      KV_mem.connect "" >>= fun res_fs ->
+      KV_mem.connect () >>= fun res_fs ->
       let creation_time = Ptime.v (1, 0L) in
       let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
       let initial_props = [ ((Xml.dav_ns, "getetag"), ([], [Xml.Pcdata "myetag"]))] in
@@ -1272,7 +1272,7 @@ let delete_and_update_parent_mtime_and_etag () =
       Fs.write_property_map res_fs (`Dir []) dir_props >>= fun _ -> 
       Fs.mkdir res_fs (`Dir ["parent"]) dir_props >>= fun _ ->
       Fs.write res_fs (`File ["parent" ; "child"]) "" file_props >>= fun _ ->
-      KV_mem.connect "" >>= fun fs ->
+      KV_mem.connect () >>= fun fs ->
       let updated_time = Ptime.v (10, 0L) in
       let dir_props' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Pcdata (Ptime.to_rfc3339 updated_time) ]) dir_props in
       let dir_props'' = Properties.unsafe_add (Xml.dav_ns, "getetag") ([], [ Pcdata "01dd76faf69851ed6896ae419391363c" ]) dir_props' in
@@ -1287,7 +1287,7 @@ let write_and_update_parent_mtime () =
   let res_fs, r =
     Lwt_main.run (
       let open Lwt.Infix in
-      KV_mem.connect "" >>= fun res_fs ->
+      KV_mem.connect () >>= fun res_fs ->
       let creation_time = Ptime.v (1, 0L) in
       let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ; Xml.node ~ns:Xml.caldav_ns "calendar" [] ] in
       let dir_props = Properties.create_dir ~resourcetype allow_all_acl creation_time "Special Resource" in
@@ -1295,7 +1295,7 @@ let write_and_update_parent_mtime () =
       Fs.mkdir res_fs (`Dir ["principals"]) dir_props >>= fun _ ->
       Fs.mkdir res_fs (`Dir ["principals" ; "karl"]) dir_props >>= fun _ ->
       Fs.mkdir res_fs (`Dir ["parent"]) dir_props >>= fun _ ->
-      KV_mem.connect "" >>= fun fs ->
+      KV_mem.connect () >>= fun fs ->
       let updated_time = Ptime.v (20, 0L) in
       let dir_props' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.Pcdata (Ptime.to_rfc3339 updated_time) ]) dir_props in
       let dir_props'' = Properties.unsafe_add (Xml.dav_ns, "getetag") ([], [ Xml.Pcdata "7f3af2eea3e815059f400874ebbad45c" ]) dir_props' in
@@ -1335,11 +1335,11 @@ let proppatch_success () =
   let res_fs, r =
     Lwt_main.run (
       let now = Ptime.v (1, 0L) in
-      KV_mem.connect "" >>= fun res_fs ->
+      KV_mem.connect () >>= fun res_fs ->
       let properties = Properties.create_dir allow_all_acl now "home" in
       let props = Properties.unsafe_add (Xml.dav_ns, "displayname") ([], [ Xml.Pcdata "Special Resource"]) properties in
       Fs.mkdir res_fs (`Dir ["home"]) props >>= fun _ ->
-      KV_mem.connect "" >>= fun fs ->
+      KV_mem.connect () >>= fun fs ->
       Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
       Dav.proppatch fs config ~path:"home" ~user:"testuser" ~data:body >|= function
       | Error e -> (res_fs, Error e)
@@ -1361,7 +1361,7 @@ let principal_url principal = Uri.with_path config.host (Fs.to_string (`Dir [ co
 
 let test_fs_with_acl path acl user user_props = Lwt_main.run (
   let open Lwt.Infix in
-  KV_mem.connect "" >>= fun fs ->
+  KV_mem.connect () >>= fun fs ->
   let props = Properties.create_dir acl (Ptime_clock.now ()) path in
   Fs.mkdir fs (`Dir [path]) props >>= fun _ ->
   Fs.mkdir fs (`Dir [config.principals ; user] ) user_props >|= fun _ ->

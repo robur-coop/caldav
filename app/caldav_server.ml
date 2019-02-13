@@ -123,7 +123,7 @@ open Cohttp_lwt_unix_test
 module Http_server = Cohttp_lwt_unix.Server
 module Body = Cohttp_lwt.Body
 
-module KV_mem = Mirage_fs_mem.Make(Pclock)
+module KV_mem = Mirage_kv_mem.Make(Pclock)
 module Dav_fs = Caldav.Webdav_fs.Make(KV_mem)
 
 module Webdav_server = Caldav.Webdav_server.Make(Mirage_random_test)(Pclock)(Dav_fs)(Http_server)
@@ -209,7 +209,7 @@ let () =
   ignore (Lwt_main.run (
       Logs.set_reporter (Logs_fmt.reporter ~dst:Format.std_formatter ()) ;
       Logs.set_level (Some Logs.Info);
-      KV_mem.connect "" >>= fun fs ->
+      KV_mem.connect () >>= fun fs ->
       let now = Ptime.epoch in
       Api.connect fs config (Some "foo") >>= fun _fs ->
       let rec go = function

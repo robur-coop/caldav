@@ -1,3 +1,3 @@
 (test
  (name caldav_server)
- (libraries checkseum.ocaml digestif.ocaml logs logs.fmt caldav webmachine nocrypto lwt ptime ptime.clock.os cohttp cohttp-lwt-unix mirage-kv-lwt rresult oUnit mirage-clock-unix irmin-mirage io-page-unix mirage-conduit tcpip tcpip.stack-socket mirage-random-test mirage-fs-mem))
+ (libraries checkseum.ocaml digestif.ocaml logs logs.fmt caldav webmachine nocrypto lwt ptime ptime.clock.os cohttp cohttp-lwt-unix mirage-kv-lwt rresult oUnit mirage-clock-unix irmin-mirage io-page-unix mirage-conduit tcpip tcpip.stack-socket mirage-random-test mirage-kv-mem))
