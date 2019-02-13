@@ -539,7 +539,7 @@ let config = {
   do_trust_on_first_use = false ;
 }
 
-let allow_all_acl = [ (`All, `Grant [ `All ]) ]
+let allow_all_acl = [ (`All, `Grant [ `All ], None) ]
 
 let appendix_b_data acl =
   let open Lwt.Infix in
@@ -1223,7 +1223,7 @@ let mkcol_success () =
       KV_mem.connect () >>= fun res_fs ->
       let props =
         let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
-        let acl = [ (`Href (Uri.of_string "/principals/testuser/"), `Grant [`All])] in
+        let acl = [ (`Href (Uri.of_string "/principals/testuser/"), `Grant [`All], None)] in
         let etag = [ ((Xml.dav_ns, "getetag"), ([], [ Xml.Pcdata "c5fcac20004bda4569187f24b207e558" ] )) ] in
         Properties.create_dir ~initial_props:etag ~resourcetype acl now "Special Resource"
       in
@@ -1367,48 +1367,48 @@ let test_fs_with_acl path acl user user_props = Lwt_main.run (
   Fs.mkdir fs (`Dir [config.principals ; user] ) user_props >|= fun _ ->
   fs)
 
-let deny_all = "deny all", [ (`All, `Deny [ `All ]) ]
-let grant_all ="grant all",  [ (`All, `Grant [ `All ]) ]
+let deny_all = "deny all", [ (`All, `Deny [ `All ], None) ]
+let grant_all ="grant all",  [ (`All, `Grant [ `All ], None) ]
 
 let grant_read_write =
   let url = principal_url "read-write" in
-  "grant for user test", [ (`Href url, `Grant [ `Read ]) ; (`Href url, `Grant [ `Write ]) ]
+  "grant for user test", [ (`Href url, `Grant [ `Read ], None) ; (`Href url, `Grant [ `Write ], None) ]
 
 let grant_read =
   let url = principal_url "read" in
-  "grant for user read", [ (`Href url, `Grant [ `Read ]) ]
+  "grant for user read", [ (`Href url, `Grant [ `Read ], None) ]
 
 let grant_read_acl =
   let url = principal_url "read-acl" in
-  "grant for user read-acl", [ (`Href url, `Grant [ `Read_acl ]) ]
+  "grant for user read-acl", [ (`Href url, `Grant [ `Read_acl ], None) ]
 
 let grant_bind =
   let url = principal_url "bind" in
-  "grant for user bind", [ (`Href url, `Grant [ `Bind ]) ]
+  "grant for user bind", [ (`Href url, `Grant [ `Bind ], None) ]
 
 let grant_unbind =
   let url = principal_url "unbind" in
-  "grant for user unbind", [ (`Href url, `Grant [ `Unbind ]) ]
+  "grant for user unbind", [ (`Href url, `Grant [ `Unbind ], None) ]
 
 let grant_write =
   let url = principal_url "write" in
-  "grant for user write", [ (`Href url, `Grant [ `Write ]) ]
+  "grant for user write", [ (`Href url, `Grant [ `Write ], None) ]
 
 let grant_write_properties =
   let url = principal_url "write-props" in
-  "grant for user write-props", [ (`Href url, `Grant [ `Write_properties ]) ]
+  "grant for user write-props", [ (`Href url, `Grant [ `Write_properties ], None) ]
 
 let grant_write_content =
   let url = principal_url "write-content" in
-  "grant for user write-content", [ (`Href url, `Grant [ `Write_content ]) ]
+  "grant for user write-content", [ (`Href url, `Grant [ `Write_content ], None) ]
 
 let grant_write_acl =
   let url = principal_url "write-acl" in
-  "grant for user write-acl", [ (`Href url, `Grant [ `Write_acl ]) ]
+  "grant for user write-acl", [ (`Href url, `Grant [ `Write_acl ], None) ]
 
 let grant_read_current_user_privilege_set =
   let url = principal_url "read-current-user-privilege-set" in
-  "grant for user read-current-user-privilege-set", [ (`Href url, `Grant [ `Read_current_user_privilege_set ]) ]
+  "grant for user read-current-user-privilege-set", [ (`Href url, `Grant [ `Read_current_user_privilege_set ], None) ]
 
 let make_properties key prop =
   Properties.unsafe_add (Xml.dav_ns, "getlastmodified")

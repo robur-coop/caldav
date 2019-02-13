@@ -5,11 +5,11 @@ let list ~identities aces =
   let aces' = List.map Xml.xml_to_ace aces in
   let aces'' = List.fold_left (fun acc -> function Ok ace -> ace :: acc | Error _ -> acc) [] aces' in (* TODO malformed ace? *)
   let aces''' = List.filter (function
-      | `All, _ -> true
-      | `Href principal, _ -> List.exists (Uri.equal principal) identities
+      | `All, _, _ -> true
+      | `Href principal, _, _ -> List.exists (Uri.equal principal) identities
       | _ -> assert false) aces''
   in
-  List.flatten @@ List.map (function `Grant ps -> ps | `Deny _ -> []) (List.map snd aces''')
+  List.flatten @@ List.map (function `Grant ps -> ps | `Deny _ -> []) (List.map (fun (_, b, _) -> b) aces''')
 
 (* TODO maybe move to own module *)
 let is_met ~requirement privileges =
