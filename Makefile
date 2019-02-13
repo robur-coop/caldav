@@ -3,7 +3,7 @@ all:
 	cd mirage; make
 
 test: clean
-	dune runtest --no-buffer -j 1 test
+	dune runtest --no-buffer -j 1 test --profile=release
 
 configure:
 	cd mirage; mirage configure

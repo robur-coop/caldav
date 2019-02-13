@@ -61,6 +61,8 @@ end
 let src = Logs.Src.create "webdav.fs" ~doc:"webdav fs logs"
 module Log = (val Logs.src_log src : Logs.LOG)
 
+let propfile_ext = ".prop" 
+
 module Make (Fs:Mirage_kv_lwt.RW) = struct
 
   open Lwt.Infix
@@ -129,11 +131,10 @@ module Make (Fs:Mirage_kv_lwt.RW) = struct
     | `File f -> parent f
 
   let propfilename f_or_d =
-    let ext = ".prop.xml" in
     let segments = match f_or_d with
-    | `Dir data -> data @ [ ext ]
+    | `Dir data -> data @ [ propfile_ext ]
     | `File data -> match List.rev data with
-      | filename :: path -> List.rev path @ [ filename ^ ext ]
+      | filename :: path -> List.rev path @ [ filename ^ propfile_ext ]
       | [] -> assert false (* no file without a name *) in
     List.fold_left Mirage_kv.Key.add Mirage_kv.Key.empty segments
 
@@ -198,7 +199,7 @@ module Make (Fs:Mirage_kv_lwt.RW) = struct
     | Error e -> Error e
     | Ok files ->
       let files = List.fold_left (fun acc (step, kind) ->
-          if Astring.String.is_suffix ~affix:".prop.xml" step then
+          if Astring.String.is_suffix ~affix:propfile_ext step then
             acc
           else
             (* TODO check whether step is the entire path, or dir needs to be included *)
