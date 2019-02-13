@@ -2,17 +2,20 @@ all:
 	opam reinstall caldav
 	cd mirage; make
 
+test: clean
+	dune runtest --no-buffer -j 1 test
+
 configure:
 	cd mirage; mirage configure
-
-test: clean
-	jbuilder runtest --no-buffer -j 1 test
 
 depend:
 	opam install -t --deps-only .
 
+pin:
+	opam pin add caldav .
+
 clean:
-	jbuilder clean
+	dune clean
 
 utop:
 	dune utop src --profile=release
@@ -23,8 +26,3 @@ user:
 acl:
 	curl -v -X PROPPATCH -d @curl/change-acl.xml "http://test:password@127.0.0.1:8080/calendars/test/calendar"
 
-standalone:
-	jbuilder build app/caldav_server.exe
-
-run-standalone:
-	_build/default/app/caldav_server.exe

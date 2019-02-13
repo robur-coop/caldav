@@ -77,7 +77,7 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (*(KEYS: Mirage_t
       Caldav.Webdav_config.config ~do_trust_on_first_use host
     in
     let init_fs_for_runtime config =
-      let dir = Key_gen.fs_root ()
+      let _dir = Key_gen.fs_root ()
       and admin_pass = Key_gen.admin_password ()
       and apple_testable = Key_gen.apple_testable ()
       in
@@ -108,8 +108,8 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (*(KEYS: Mirage_t
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port ~hostname () in
       init_fs_for_runtime config >>=
       init_http port config
+    | Some _http_port, Some _https_port -> assert false (*TODO*)
     (*
-    | Some http_port, Some https_port ->
       Server_log.info (fun f -> f "redirecting on %d/HTTP to %d/HTTPS" http_port https_port);
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname () in
       init_fs_for_runtime config >>= fun fs ->
