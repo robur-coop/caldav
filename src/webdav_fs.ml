@@ -265,9 +265,7 @@ module Make (Fs:Mirage_kv_lwt.RW) = struct
   (* careful: unsafe_find *)
   let get_etag fs f_or_d =
     get_raw_property_map fs f_or_d >|= function
-    | None ->
-      Printf.printf "invalid XML!\n" ;
-      None
+    | None -> None
     | Some map -> match Properties.unsafe_find (Xml.dav_ns, "getetag") map with
       | Some (_, [ Xml.Pcdata etag ]) -> Some etag
       | _ -> Some (to_string f_or_d)
