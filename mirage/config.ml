@@ -17,9 +17,7 @@ let https_port =
   let doc = Key.Arg.info ~doc:"Listening HTTPS port." ["https"] ~docv:"PORT" in
   Key.(create "https_port" Arg.(opt (some int) None doc))
 
-(*
 let certs = generic_kv_ro ~key:Key.(value @@ kv_ro ()) "tls"
-*)
 
 let admin_password =
   let doc = Key.Arg.info ~doc:"Password for the administrator." ["admin-password"] ~docv:"STRING" in
@@ -73,7 +71,7 @@ let main =
   in
   foreign
     ~packages:direct_dependencies ~keys
-    "Unikernel.Main" (random @-> pclock @-> (*kv_ro @->*) http @-> resolver @-> conduit @-> job)
+    "Unikernel.Main" (random @-> pclock @-> kv_ro @-> http @-> resolver @-> conduit @-> job)
 
 let () =
-  register "caldav" [main $ default_random $ default_posix_clock (*$ certs*) $ http_srv $ resolver_dns net $ conduit_direct ~tls:true net ]
+  register "caldav" [main $ default_random $ default_posix_clock $ certs $ http_srv $ resolver_dns net $ conduit_direct ~tls:true net ]

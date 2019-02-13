@@ -9,10 +9,8 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
-module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (*(KEYS: Mirage_types_lwt.KV_RO)*) (S: HTTP) (Resolver : Resolver_lwt.S) (Conduit : Conduit_mirage.S) = struct
-  (*
+module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (KEYS: Mirage_types_lwt.KV_RO) (S: HTTP) (Resolver : Resolver_lwt.S) (Conduit : Conduit_mirage.S) = struct
   module X509 = Tls_mirage.X509(KEYS)(Clock)
-  *)
   module Store = Irmin_mirage.Git.KV_RW(Irmin_git.Mem)(Clock)
 
   module Dav_fs = Caldav.Webdav_fs.Make(Store)
@@ -21,7 +19,6 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (*(KEYS: Mirage_t
   module Webdav_server2 = Caldav.Webdav_server.Make(R)(Clock)(Dav_fs)(S)
 
 
-  (*
   let tls_init kv =
     Lwt.catch (fun () ->
         X509.certificate kv `Default >|= fun cert ->
@@ -29,7 +26,6 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (*(KEYS: Mirage_t
       (function
         | Failure _ -> Lwt.fail_with "Could not find server.pem and server.key in the <working directory>/tls."
         | e -> Lwt.fail e)
-  *)
 
   (* Redirect to the same address, but in https. *)
   let redirect port request _body =
@@ -54,7 +50,7 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (*(KEYS: Mirage_t
     in
     S.make ~conn_closed ~callback ()
 
-  let start _random clock (*tls_keys*) http resolver conduit =
+  let start _random clock tls_keys http resolver conduit =
     (* TODO naming *)
     let init_http port config fs =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
@@ -62,7 +58,6 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (*(KEYS: Mirage_t
           | `Unix fs -> Webdav_server2.dispatch config fs
           | `Apple fs -> Webdav_server1.dispatch config fs)
     in
-    (*
     let init_https port config fs =
       tls_init tls_keys >>= fun tls_config ->
       Server_log.info (fun f -> f "listening on %d/HTTPS" port);
@@ -71,7 +66,6 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (*(KEYS: Mirage_t
           | `Unix fs -> Webdav_server2.dispatch config fs
           | `Apple fs -> Webdav_server1.dispatch config fs)
     in
-    *)
     let config host =
       let do_trust_on_first_use = Key_gen.tofu () in
       Caldav.Webdav_config.config ~do_trust_on_first_use host
@@ -86,7 +80,7 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (*(KEYS: Mirage_t
       | Ok git ->
         Store.connect git ~conduit ~author:"caldav" ~resolver
           ~msg:(fun _ -> "a calendar change") ()
-          "https://user:password@github.com/roburio/testcalendar.git" >>= fun fs ->
+          "https://github.com/roburio/testcalendar.git" >>= fun fs ->
       if not apple_testable then
         Dav.connect fs config admin_pass >|= fun fs ->
         `Unix fs
@@ -107,9 +101,8 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (*(KEYS: Mirage_t
     | None, Some port ->
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port ~hostname () in
       init_fs_for_runtime config >>=
-      init_http port config
-    | Some _http_port, Some _https_port -> assert false (*TODO*)
-    (*
+      init_https port config
+    | Some http_port, Some https_port ->
       Server_log.info (fun f -> f "redirecting on %d/HTTP to %d/HTTPS" http_port https_port);
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname () in
       init_fs_for_runtime config >>= fun fs ->
@@ -117,5 +110,4 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (*(KEYS: Mirage_t
         http (`TCP http_port) @@ serve (redirect https_port) ;
         init_https https_port config fs
       ]
-    *)
 end
