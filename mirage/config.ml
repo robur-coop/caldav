@@ -1,9 +1,6 @@
 open Mirage
 
-let net =
-  if_impl Key.is_unix
-    (socket_stackv4 [Ipaddr.V4.any])
-    (static_ipv4_stack ~arp:farp default_network)
+let net = generic_stackv4 default_network
 
 (* set ~tls to false to get a plain-http server *)
 let http_srv = http_server @@ conduit_direct ~tls:true net
@@ -62,16 +59,22 @@ let keys = List.map (fun (Any k) -> Key.abstract k) [Any http_port; Any https_po
 let main =
   let direct_dependencies = [
     package "uri" ;
-    package ~pin:"git+https://github.com/roburio/ocaml-webmachine.git#webdav" "webmachine" ;
     package ~pin:"git+https://github.com/roburio/caldav.git" "caldav" ;
+    package ~pin:"git+https://github.com/hannesm/ocaml-crunch.git#kv-ng" "crunch" ;
+    package ~pin:"git+https://github.com/mirage/mirage-kv-mem.git" "mirage-kv-mem" ;
+    package ~pin:"git+https://github.com/samoht/ocaml-tls.git#ro-ng" "tls" ;
+    package ~pin:"git+https://github.com/samoht/ocaml-dns.git#ro-ng" "mirage-dns" ;
+    package ~pin:"git+https://github.com/samoht/ocaml-cohttp.git#ro-ng" "cohttp-mirage" ;
+    package ~pin:"git+https://github.com/samoht/irmin.git#ro-ng" "irmin" ;
+    package ~pin:"git+https://github.com/samoht/irmin.git#ro-ng" "irmin-mirage" ;
+    package ~pin:"git+https://github.com/samoht/irmin.git#ro-ng" "irmin-git" ;
+    package ~pin:"git+https://github.com/samoht/irmin.git#ro-ng" "irmin-mem" ;
+    package ~max:"0.8.0" "graphql-cohttp" ;
+    package ~pin:"git+https://github.com/hannesm/mirage-fs.git#ro-ng" "mirage-fs-lwt" ;
 (*    package ~pin:"git+https://github.com/hannesm/metrics.git#influx-mirage" "metrics" ;
     package ~pin:"git+https://github.com/hannesm/metrics.git#influx-mirage" "metrics-mirage" ;
     package ~pin:"git+https://github.com/hannesm/metrics.git#influx-mirage" "metrics-influx" ;
 *)
-    package "irmin-git" ;
-    package "irmin-mirage" ;
-    package "caldav" ;
-    package "mirage-kv-mem" ;
   ] in
   let keys =
     [ Key.abstract http_port ; Key.abstract https_port ;
