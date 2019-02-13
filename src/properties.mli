@@ -22,6 +22,7 @@ val to_string : t -> string
 val from_tree : Xml.tree -> t
 
 val privileges : auth_user_props:t -> t -> Xml.privilege list
+val inherited_acls : auth_user_props:t -> t -> Uri.t list
 
 (* unsafe methods *)
 val unsafe_add : Xml.fqname -> property -> t -> t

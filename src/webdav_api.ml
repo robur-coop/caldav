@@ -102,6 +102,15 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
 
   let privilege_met fs requirement ~auth_user_props resource_props =
     let privileges = Properties.privileges ~auth_user_props resource_props in
+    (match Properties.inherited_acls ~auth_user_props resource_props with
+    | [ url ] -> 
+      (Fs.from_string fs (Uri.to_string url) >>= function
+      | Error e -> Lwt.return []
+      | Ok inherited -> 
+      Fs.get_property_map fs inherited >|= fun inherited_props ->
+      Properties.privileges ~auth_user_props inherited_props)
+    | _ -> Lwt.return []) >|= fun inherited_privileges ->
+    let privileges = privileges @ inherited_privileges in 
     if not (Privileges.is_met ~requirement privileges) then `Forbidden else `Ok
     
   let parse_calendar ~path data =
@@ -267,8 +276,8 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     | _ -> Error `Bad_request
 
   let property_selector fs propfind_request auth_user_props f_or_d =
-    Fs.get_property_map fs f_or_d >|= fun resource_props ->
-    match privilege_met fs `Read ~auth_user_props resource_props with
+    Fs.get_property_map fs f_or_d >>= fun resource_props ->
+    privilege_met fs `Read ~auth_user_props resource_props >|= function
     | `Forbidden -> `Forbidden
     | `Ok -> 
       if resource_props = Properties.empty
@@ -849,10 +858,10 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     let report_one query = function
       | `Dir _ -> Lwt.return (Error `Bad_request)
       | `File f ->
-        Fs.read fs (`File f) >|= function
-        | Error _ -> Error `Bad_request
+        Fs.read fs (`File f) >>= function
+        | Error _ -> Lwt.return @@ Error `Bad_request
         | Ok (data, resource_props) ->
-          match privilege_met fs `Read ~auth_user_props resource_props with
+          privilege_met fs `Read ~auth_user_props resource_props >|= function
           | `Forbidden -> 
             let node = Xml.dav_node "response"
                 [ Xml.dav_node "href" [ Xml.pcdata (Fs.to_string (`File f)) ] ;
@@ -900,16 +909,16 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     let report_one (filename : string) =
       Log.debug (fun m -> m "calendar_multiget: filename %s" filename) ;
       let file = Fs.file_from_string filename in
-      Fs.read fs file >|= function
+      Fs.read fs file >>= function
       | Error _ ->
         let node =
           Xml.dav_node "response"
             [ Xml.dav_node "href" [ Xml.pcdata (Fs.to_string (file :> Webdav_fs.file_or_dir)) ] ;
               Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Not_found) ] ]
         in
-        Ok node
+        Lwt.return @@ Ok node
       | Ok (data, resource_props) ->
-        match privilege_met fs `Read ~auth_user_props resource_props with
+        privilege_met fs `Read ~auth_user_props resource_props >|= function
         | `Forbidden -> 
           let node = Xml.dav_node "response"
               [ Xml.dav_node "href" [ Xml.pcdata (Fs.to_string (file :> Webdav_fs.file_or_dir)) ] ;
@@ -958,8 +967,8 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     properties_for_current_user fs config user >>= fun auth_user_props ->
     Fs.exists fs path >>= fun target_exists ->
     let requirement, target_or_parent = Privileges.required http_verb ~target_exists in
-    read_target_or_parent_properties fs path target_or_parent >|= fun resource_props ->
-    match privilege_met fs requirement ~auth_user_props resource_props with
+    read_target_or_parent_properties fs path target_or_parent >>= fun resource_props ->
+    privilege_met fs requirement ~auth_user_props resource_props >|= function
     | `Forbidden -> false
     | `Ok -> true
 

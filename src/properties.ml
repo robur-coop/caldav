@@ -191,6 +191,13 @@ let privileges ~auth_user_props resource_props =
   in
   Privileges.list ~identities:(identities auth_user_props) aces
 
+let inherited_acls ~auth_user_props resource_props =
+  let aces = match unsafe_find (Xml.dav_ns, "acl") resource_props with
+    | None -> []
+    | Some (_, aces) -> aces
+  in
+  Privileges.inherited_acls ~identities:(identities auth_user_props) aces
+
 (* helper computing "current-user-privilege-set", not public *)
 let current_user_privilege_set ~auth_user_props map =
   let make_node p = Xml.dav_node "privilege" [ Xml.priv_to_xml p ] in
