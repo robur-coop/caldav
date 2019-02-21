@@ -187,7 +187,7 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         Lwt.return @@ Error `Bad_request
       | true ->
         let etag = etag_of_data ics in
-        let acl = [(`All, `Grant [], Some (`Inherited (Uri.of_string (Fs.to_string parent'))))] in
+        let acl = [(`All, `Inherited (Uri.of_string (Fs.to_string parent')))] in
         let props = Properties.create ~content_type ~etag
             acl timestamp (String.length ics) (Fs.to_string file')
         in
@@ -420,7 +420,7 @@ module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
           if resource_is_calendar && parent_is_calendar
           then Lwt.return @@ Error `Conflict
           else 
-            let acl = [ ( `Href (Uri.of_string (Fs.to_string (`Dir [config.principals ; user]))), `Grant [`All] , None)] in
+            let acl = [ ( `Href (Uri.of_string (Fs.to_string (`Dir [config.principals ; user]))), `Grant [`All])] in
             create_collection_dir fs acl set_props now resourcetype dir
 
   let check_in_bounds p s e = true
@@ -1080,7 +1080,7 @@ let create_calendar fs now acl name =
   make_dir_if_not_present fs now acl ~resourcetype ~props name
 
 let initialize_fs_for_apple_testsuite fs now config =
-  let acl = [ (`All, `Grant [ `All ], None) ] in
+  let acl = [ (`All, `Grant [ `All ]) ] in
   let calendars_properties =
     let url =
       Uri.with_path config.host
@@ -1130,7 +1130,7 @@ let make_principal props fs now config name =
     :: props
   in
   let principal_url = Uri.of_string principal_url_string in
-  let acl = (`Href principal_url, `Grant [ `All ], None) in
+  let acl = (`Href principal_url, `Grant [ `All ]) in
   unsafe_read_acl fs (`Dir [config.principals]) >>= fun principal_acl ->
   (* maybe only allow root to write principal_dir (for password reset) *)
   make_dir_if_not_present fs now (acl :: principal_acl) ~resourcetype ~props:props' principal_dir >>= fun _ ->

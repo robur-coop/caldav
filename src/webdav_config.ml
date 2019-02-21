@@ -6,13 +6,13 @@ type config = {
 }
 
 let admin_acl config = [
-  (`Href (Uri.of_string @@ "/" ^ config.principals ^ "/root/"), `Grant [ `All ], None) ;
-  (`All, `Grant [ `Read ], None)
+  (`Href (Uri.of_string @@ "/" ^ config.principals ^ "/root/"), `Grant [ `All ]) ;
+  (`All, `Grant [ `Read ])
 ]
 
 let calendars_acl config = [
-  (`Href (Uri.of_string @@ "/" ^ config.principals ^ "/root/"), `Grant [ `All ], None) ;
-  (`All, `Grant [ `Read ; `Bind ; `Unbind ], None)
+  (`Href (Uri.of_string @@ "/" ^ config.principals ^ "/root/"), `Grant [ `All ]) ;
+  (`All, `Grant [ `Read ; `Bind ; `Unbind ])
 ]
 
 let host ?(scheme = "http") ?(port = 8080) ?(hostname = "127.0.0.1") () =

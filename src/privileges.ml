@@ -5,25 +5,25 @@ let aces_for_identities ~identities aces =
   let aces'' = List.fold_left (fun acc -> function Ok ace -> ace :: acc | Error _ -> acc) [] aces' in (* TODO malformed ace? *)
   Logs.debug (fun m -> m "aces'' for identities are %d" (List.length aces''));
   List.filter (function
-  | `All, _, _ -> true
-  | `Href principal, _, _ -> List.exists (Uri.equal principal) identities
+  | `All, _ -> true
+  | `Href principal, _ -> List.exists (Uri.equal principal) identities
   | _ -> assert false) aces''
 
 let inherited_acls ~identities aces =
   let aces' = aces_for_identities ~identities aces in
   Logs.debug ( fun m -> m "aces for identities are %d" (List.length aces'));
-  let get_inherited (_, _, c) = match c with
-  | None -> []
-  | Some (`Inherited url) -> [url]
+  let get_inherited (_, c) = match c with
+  | `Inherited url -> [url]
+  | _ -> []
   in
   List.flatten @@ List.map get_inherited aces'
 
 (* user_privileges_for_resource: user properties and resource properties as input, output is the list of granted privileges *)
 let list ~identities aces =
   let aces' = aces_for_identities ~identities aces in
-  let get_grants (_, b, _) = match b with
-  | `Deny _ -> []
+  let get_grants (_, b) = match b with
   | `Grant ps -> ps
+  | _ -> []
   in
   List.flatten @@ List.map get_grants aces'
 

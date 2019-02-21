@@ -98,8 +98,14 @@ type privilege = [
   | `All
 ] [@@deriving show]
 
+(* internal rep on storage *)
 type ace = 
-  principal * [ `Grant of privilege list | `Deny of privilege list ] * [`Inherited of Uri.t ] option
+  principal * [ `Grant of privilege list | `Deny of privilege list | `Inherited of Uri.t ]
+[@@deriving show]
+
+(* rep for client *)
+type webdav_ace = 
+  principal * [ `Grant of privilege list | `Deny of privilege list ] * [ `Inherited of Uri.t ] option
 [@@deriving show]
 
 let caldav_ns = "urn:ietf:params:xml:ns:caldav"
@@ -400,14 +406,14 @@ let xml_to_ace : tree -> (ace, string) result =
   tree_lift (fun _ c ->
       match List.partition (function `Principal _ -> true | _ -> false) c with
       | [ `Principal p ], rest ->
-        let inherited_opt = match List.partition (function `Inherited _ -> true | _ -> false) c with
-        | [ `Inherited uri ], _ -> Some (`Inherited uri)
-        | _ -> None 
-        in
-        begin match List.partition (function `Grant_or_deny _ -> true | _ -> false) c with
-          | [ `Grant_or_deny grant_or_deny ], rest' -> Ok (p, grant_or_deny, inherited_opt)
+        begin
+        match List.partition (function `Inherited _ -> true | _ -> false) c with
+        | [ `Inherited uri ], _ -> Ok (p, `Inherited uri)
+        | _ -> begin match List.partition (function `Grant_or_deny _ -> true | _ -> false) c with
+          | [ `Grant_or_deny grant_or_deny ], rest' -> Ok (p, grant_or_deny)
           | _ -> Error "couldn't parse ace"
         end
+      end
       | _ -> Error "couldn't find principal in ace")
     (name_ns "ace" dav_ns)
     (principal ||| (grant_or_deny >>~ fun g_or_d -> Ok (`Grant_or_deny g_or_d)) ||| inherited )
@@ -440,19 +446,17 @@ let priv_to_xml p =
   in
   dav_node name []
 
-let ace_to_xml (principal, grant_or_deny, inherited_opt) =
-  let g_or_d_node =
-    let name, privs = match grant_or_deny with
-      | `Grant privs -> "grant", privs
-      | `Deny privs -> "deny", privs
+let ace_to_xml (principal, privilege) =
+  let priv_node privs = dav_node "privilege" (List.map priv_to_xml privs) in
+  let node =
+    let name, privs = match privilege with
+      | `Grant privs -> "grant", priv_node privs
+      | `Deny privs -> "deny", priv_node privs
+      | `Inherited url -> "inherited", dav_node "href" [ pcdata (Uri.to_string url) ]
     in
-    let privs' = dav_node "privilege" (List.map priv_to_xml privs) in
-    dav_node name [ privs' ]
-  and inherited = match inherited_opt with
-  | None -> []
-  | Some (`Inherited url) -> [ dav_node "inherited" [ dav_node "href" [ pcdata (Uri.to_string url) ] ]]
+    dav_node name [ privs ]
   in
-  dav_node "ace" ([ principal_to_xml principal ; g_or_d_node ] @ inherited)
+  dav_node "ace" [ principal_to_xml principal ; node ]
 
 let propfind_prop_parser : tree -> ([ propfind | `Include of string list ], string) result =
   ((tree_lift
