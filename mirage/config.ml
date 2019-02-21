@@ -20,9 +20,26 @@ let admin_password =
   let doc = Key.Arg.info ~doc:"Password for the administrator." ["admin-password"] ~docv:"STRING" in
   Key.(create "admin_password" Arg.(opt (some string) None doc))
 
-let fs_root =
-  let doc = Key.Arg.info ~doc:"Location of calendar data." [ "data" ] ~docv:"DIR" in
-  Key.(create "fs_root" Arg.(required string doc))
+let unix_dir =
+  let doc = Key.Arg.info ~doc:"Location of calendar data." [ "unix-dir" ] ~docv:"DIR" in
+  Key.(create "unix_dir" Arg.(opt (some string) None doc))
+
+let storage =
+  let parser, printer =
+    Cmdliner.Arg.enum [
+      "git", `Git;
+      "filesystem", `Filesystem;
+      "memory", `Memory;
+  ] in
+  let serialize ppf = function
+  | `Git -> Fmt.string ppf "`Git"
+  | `Filesystem -> Fmt.string ppf "`Filesystem"
+  | `Memory -> Fmt.string ppf "`Memory"
+  in
+  let doc = Key.Arg.info ~doc:"Choice of storage backend, options: git, filesystem, memory" [ "storage" ] in
+  let default_mem = `Memory in
+  let converter = Key.Arg.conv ~conv:(parser, printer) ~serialize ~runtime_conv:"storage" in
+  Key.(create "storage" Arg.(opt ~stage:`Configure converter default_mem doc))
 
 let tofu =
   let doc = Key.Arg.info ~doc:"If a user does not exist, create them and give them a new calendar." [ "tofu" ] in
@@ -71,6 +88,22 @@ let kv_mem = impl @@ object
     method! connect _ modname _ = Fmt.strf "%s.connect ()" modname
   end
 
+let kv_unix = 
+  let key = Key.abstract unix_dir in
+  object
+    inherit base_configurable
+    method ty = kv_rw
+    method name = "mirage-kv-unix"
+    method module_name = "Mirage_kv_unix" 
+    method! keys = [ key ]
+    method! packages =
+      Key.pure [
+        package "mirage-kv-unix";
+      ]
+    method! connect _ modname _ = Fmt.strf "%s.connect (match %a with Some x -> x | None -> assert false)" modname Key.serialize_call key 
+  end
+
+
 let main =
   let direct_dependencies = [
     package "uri" ;
@@ -94,7 +127,7 @@ let main =
   ] in
   let keys =
     [ Key.abstract http_port ; Key.abstract https_port ;
-      Key.abstract admin_password ; Key.abstract fs_root ;
+      Key.abstract admin_password ; Key.abstract unix_dir ;(* Key.abstract storage;*)
       Key.abstract tofu ; Key.abstract hostname ; 
       Key.abstract monitor ; Key.abstract apple_testable ]
   in
@@ -102,7 +135,36 @@ let main =
     ~packages:direct_dependencies ~keys
     "Unikernel.Main" (random @-> pclock @-> mclock @-> kv_ro @-> http @-> resolver @-> conduit @-> kv_rw @-> job)
 
-let store = kv_mem $ default_posix_clock
+(*
+let store = 
+  let choose target unix_dir =
+    match target, unix_dir with
+    | (`Unix | `MacOSX), Some dir -> `Kv_unix
+    | _, _ -> `Kv_mem
+  in
+  let p = Functoria_key.((pure choose)
+          $ Key.(value target)
+          $ Key.value unix_dir
+          ) in
+  match_impl p [
+    `Kv_unix, impl kv_unix;
+    `Kv_mem, kv_mem $ default_posix_clock;
+  ] ~default:(kv_mem $ default_posix_clock)
+*)
+
+
+let store = 
+  match_impl (Key.value unix_dir) [
+   None, kv_mem $ default_posix_clock ;
+  ] ~default:(impl kv_unix)
+
+(*
+let store key = 
+  match_impl (Key.value key) [
+   `Memory, kv_mem $ default_posix_clock ;
+   `Filesystem, impl kv_unix
+  ] ~default:(kv_mem $ default_posix_clock)
+*)
 
 let () =
   register "caldav" [main $ default_random $ default_posix_clock $ default_monotonic_clock $ certs $ http_srv $ resolver_dns net $ conduit_direct ~tls:true net $ store ]
