@@ -56,6 +56,21 @@ type any_key = Any : 'a Key.key -> any_key
 let keys = List.map (fun (Any k) -> Key.abstract k) [Any http_port; Any https_port; Any admin_password]
 *)
 
+type kv_rw = KV_RW
+let kv_rw = Type KV_RW
+
+let kv_mem = impl @@ object
+    inherit base_configurable
+    method ty = pclock @-> kv_rw
+    method name = "mirage-kv-mem"
+    method module_name = "Mirage_kv_mem.Make" 
+    method! packages =
+      Key.pure [
+        package "mirage-kv-mem";
+      ]
+    method! connect _ modname _ = Fmt.strf "%s.connect ()" modname
+  end
+
 let main =
   let direct_dependencies = [
     package "uri" ;
@@ -85,7 +100,9 @@ let main =
   in
   foreign
     ~packages:direct_dependencies ~keys
-    "Unikernel.Main" (random @-> pclock @-> mclock @-> kv_ro @-> http @-> resolver @-> conduit @-> job)
+    "Unikernel.Main" (random @-> pclock @-> mclock @-> kv_ro @-> http @-> resolver @-> conduit @-> kv_rw @-> job)
+
+let store = kv_mem $ default_posix_clock
 
 let () =
-  register "caldav" [main $ default_random $ default_posix_clock $ default_monotonic_clock $ certs $ http_srv $ resolver_dns net $ conduit_direct ~tls:true net ]
+  register "caldav" [main $ default_random $ default_posix_clock $ default_monotonic_clock $ certs $ http_srv $ resolver_dns net $ conduit_direct ~tls:true net $ store ]
