@@ -3,6 +3,7 @@ module Xml = Webdav_xml
 let aces_for_identities ~identities aces =
   let aces' = List.map Xml.xml_to_ace aces in
   let aces'' = List.fold_left (fun acc -> function Ok ace -> ace :: acc | Error _ -> acc) [] aces' in (* TODO malformed ace? *)
+  Logs.debug (fun m -> m "aces'' for identities are %d" (List.length aces''));
   List.filter (function
   | `All, _, _ -> true
   | `Href principal, _, _ -> List.exists (Uri.equal principal) identities
@@ -10,6 +11,7 @@ let aces_for_identities ~identities aces =
 
 let inherited_acls ~identities aces =
   let aces' = aces_for_identities ~identities aces in
+  Logs.debug ( fun m -> m "aces for identities are %d" (List.length aces'));
   let get_inherited (_, _, c) = match c with
   | None -> []
   | Some (`Inherited url) -> [url]

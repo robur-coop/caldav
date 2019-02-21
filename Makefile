@@ -1,6 +1,6 @@
 all:
 	opam reinstall caldav
-	cd mirage; make
+	cd mirage; mirage clean; mirage configure; make
 
 test: clean
 	dune runtest --no-buffer -j 1 test --profile=release

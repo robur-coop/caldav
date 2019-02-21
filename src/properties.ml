@@ -196,7 +196,10 @@ let inherited_acls ~auth_user_props resource_props =
     | None -> []
     | Some (_, aces) -> aces
   in
-  Privileges.inherited_acls ~identities:(identities auth_user_props) aces
+  Logs.debug (fun m -> m "inherited aces size %d" (List.length aces));
+  let inherited = Privileges.inherited_acls ~identities:(identities auth_user_props) aces in
+  Logs.debug (fun m -> m "inherited size %d" (List.length inherited));
+  inherited
 
 (* helper computing "current-user-privilege-set", not public *)
 let current_user_privilege_set ~auth_user_props map =
