@@ -23,6 +23,8 @@ utop:
 user:
 	curl -v -X PUT "http://root:toor@127.0.0.1:8080/user?name=user1&password=1"
 
-acl:
-	curl -v -X PROPPATCH -d @curl/change-acl.xml "http://test:password@127.0.0.1:8080/calendars/test/calendar"
+public:
+	curl -v -X PROPPATCH -d @curl/acl_public_readonly.xml "http://root:epsilon@127.0.0.1:8080/calendars/root"
 
+private:
+	curl -v -X PROPPATCH -d @curl/acl_private.xml "http://root:epsilon@127.0.0.1:8080/calendars/root"

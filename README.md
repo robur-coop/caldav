@@ -95,3 +95,46 @@ You might want to remove a member from a group.
 You might want to delete a group. Root can do this.
 
     curl -v -u root:somecoolpassword -X DELETE "https://calendar.example.com/groups/somenewgroup"
+
+### Make calendar public
+
+Make the private calendar `TESTCALENDAR` publicly readable for everybody, while keeping all privileges for the `OWNER`.
+
+    curl -v -u root:somecoolpassword -X PROPPATCH -d '<?xml version="1.0" encoding="utf-8" ?>
+    <D:propertyupdate xmlns:D="DAV:">
+      <D:set>
+        <D:prop>
+          <D:acl>
+            <D:ace>
+              <D:principal><D:href>/principals/OWNER/</D:href></D:principal>
+              <D:grant><D:privilege><D:all/></D:privilege></D:grant>
+            </D:ace>
+            <D:ace>
+              <D:principal><D:all/></D:principal>
+              <D:grant><D:privilege><D:read/></D:privilege></D:grant>
+            </D:ace>
+          </D:acl>
+        </D:prop>
+      </D:set>
+    </D:propertyupdate>' "https://calendar.example.com/calendars/TESTCALENDAR"
+
+### Make calendar private
+
+Make the calendar `TESTCALENDAR` private, only accessible for the `OWNER`.
+
+    curl -v -u root:somecoolpassword -X PROPPATCH -d '<?xml version="1.0" encoding="utf-8" ?>
+    <D:propertyupdate xmlns:D="DAV:">
+      <D:set>
+        <D:prop>
+          <D:acl>
+            <D:ace>
+              <D:principal><D:href>/principals/OWNER/</D:href></D:principal>
+              <D:grant><D:privilege><D:all/></D:privilege></D:grant>
+            </D:ace>
+          </D:acl>
+        </D:prop>
+      </D:set>
+    </D:propertyupdate>' "https://calendar.example.com/calendars/TESTCALENDAR"
+
+
+
