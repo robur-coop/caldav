@@ -1,15 +1,31 @@
 module Xml = Webdav_xml
 
-(* user_privileges_for_resource: user properties and resource properties as input, output is the list of granted privileges *)
-let list ~identities aces =
+let aces_for_identities ~identities aces =
   let aces' = List.map Xml.xml_to_ace aces in
   let aces'' = List.fold_left (fun acc -> function Ok ace -> ace :: acc | Error _ -> acc) [] aces' in (* TODO malformed ace? *)
-  let aces''' = List.filter (function
-      | `All, _ -> true
-      | `Href principal, _ -> List.exists (Uri.equal principal) identities
-      | _ -> assert false) aces''
+  Logs.debug (fun m -> m "aces'' for identities are %d" (List.length aces''));
+  List.filter (function
+  | `All, _ -> true
+  | `Href principal, _ -> List.exists (Uri.equal principal) identities
+  | _ -> assert false) aces''
+
+let inherited_acls ~identities aces =
+  let aces' = aces_for_identities ~identities aces in
+  Logs.debug ( fun m -> m "aces for identities are %d" (List.length aces'));
+  let get_inherited (_, c) = match c with
+  | `Inherited url -> [url]
+  | _ -> []
   in
-  List.flatten @@ List.map (function `Grant ps -> ps | `Deny _ -> []) (List.map snd aces''')
+  List.flatten @@ List.map get_inherited aces'
+
+(* user_privileges_for_resource: user properties and resource properties as input, output is the list of granted privileges *)
+let list ~identities aces =
+  let aces' = aces_for_identities ~identities aces in
+  let get_grants (_, b) = match b with
+  | `Grant ps -> ps
+  | _ -> []
+  in
+  List.flatten @@ List.map get_grants aces'
 
 (* TODO maybe move to own module *)
 let is_met ~requirement privileges =

@@ -38,9 +38,7 @@ sig
 
   val size : t -> file -> (int64, error) result Lwt.t
 
-  val read : t -> file -> (Cstruct.t * Properties.t, error) result Lwt.t
-
-  val stat : t -> file_or_dir -> (Mirage_fs.stat, error) result Lwt.t
+  val read : t -> file -> (string * Properties.t, error) result Lwt.t
 
   val exists : t -> string -> bool Lwt.t
 
@@ -50,9 +48,9 @@ sig
 
   val mkdir : t -> dir -> Properties.t -> (unit, write_error) result Lwt.t
 
-  val write : t -> file -> Cstruct.t -> Properties.t -> (unit, write_error) result Lwt.t
+  val write : t -> file -> string -> Properties.t -> (unit, write_error) result Lwt.t
 
-  val destroy : ?recursive:bool -> t -> file_or_dir -> (unit, write_error) result Lwt.t
+  val destroy : t -> file_or_dir -> (unit, write_error) result Lwt.t
 
   val pp_error : error Fmt.t
 
@@ -61,4 +59,4 @@ sig
   val valid : t -> Webdav_config.config -> (unit, [> `Msg of string ]) result Lwt.t
 end
 
-module Make (Fs: Mirage_fs_lwt.S) : S with type t = Fs.t and type error = Fs.error and type write_error = Fs.write_error
+module Make (Fs: Mirage_kv_lwt.RW) : S with type t = Fs.t 

@@ -1,5 +1,7 @@
 module Xml = Webdav_xml
 
+let prop_version = [ Xml.pcdata "0" ]
+
 module PairMap = Map.Make (struct
     type t = string * string
     let compare (a1, a2) (b1, b2) = match String.compare a1 b1 with
@@ -12,14 +14,14 @@ type property = Xml.attribute list * Xml.tree list [@@deriving sexp]
 
 type t = property PairMap.t
 
-type foo = ((string * string) * property) list [@@deriving sexp]
+type property_list = ((string * string) * property) list [@@deriving sexp]
 
 let to_sexp t =
   let bindings = PairMap.bindings t in
-  sexp_of_foo bindings
+  sexp_of_property_list bindings
 
 let of_sexp s =
-  let bindings = foo_of_sexp s in
+  let bindings = property_list_of_sexp s in
   List.fold_left (fun map (k, v) ->
       PairMap.add k v map) PairMap.empty bindings
 
@@ -42,6 +44,7 @@ let keys m = List.map fst (PairMap.bindings m)
 let count = PairMap.cardinal
 
 let not_returned_by_allprop = [
+  (Xml.robur_ns, "prop_version");
   (Xml.dav_ns, "owner");
   (Xml.dav_ns, "group");
   (Xml.dav_ns, "supported-privilege-set");
@@ -66,6 +69,7 @@ let not_returned_by_allprop = [
 ]
 
 let write_protected = [
+  (Xml.robur_ns, "prop_version");
   (Xml.dav_ns, "principal-URL");
   (Xml.dav_ns, "group-membership");
   (Xml.dav_ns, "resourcetype");
@@ -134,6 +138,7 @@ let create ?(initial_props = []) ?(content_type = "text/html") ?(language = "en"
   let etag' m = match etag with None -> m | Some e -> unsafe_add (Xml.dav_ns, "getetag") ([], [ Xml.Pcdata e ]) m in
   let timestamp' = Ptime.to_rfc3339 timestamp in
   let propmap = etag' @@
+    unsafe_add (Xml.robur_ns, "prop_version") ([], prop_version) @@
     unsafe_add (Xml.dav_ns, "acl") ([], List.map Xml.ace_to_xml acl) @@
     unsafe_add (Xml.dav_ns, "creationdate") ([], [ Xml.Pcdata timestamp' ]) @@
     unsafe_add (Xml.dav_ns, "displayname") ([], [ Xml.Pcdata filename ]) @@
@@ -185,6 +190,16 @@ let privileges ~auth_user_props resource_props =
     | Some (_, aces) -> aces
   in
   Privileges.list ~identities:(identities auth_user_props) aces
+
+let inherited_acls ~auth_user_props resource_props =
+  let aces = match unsafe_find (Xml.dav_ns, "acl") resource_props with
+    | None -> []
+    | Some (_, aces) -> aces
+  in
+  Logs.debug (fun m -> m "inherited aces size %d" (List.length aces));
+  let inherited = Privileges.inherited_acls ~identities:(identities auth_user_props) aces in
+  Logs.debug (fun m -> m "inherited size %d" (List.length inherited));
+  inherited
 
 (* helper computing "current-user-privilege-set", not public *)
 let current_user_privilege_set ~auth_user_props map =

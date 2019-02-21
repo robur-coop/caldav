@@ -9,11 +9,14 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
-module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_clock.MCLOCK) (KEYS: Mirage_types_lwt.KV_RO) (STACK: Mirage_types_lwt.STACKV4) (S: HTTP) = struct
+module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_clock.MCLOCK) (KEYS: Mirage_types_lwt.KV_RO) (S: HTTP) (Resolver : Resolver_lwt.S) (Conduit : Conduit_mirage.S) (Store : Mirage_kv_lwt.RW) = struct
   module X509 = Tls_mirage.X509(KEYS)(Clock)
-  module Webdav_server1 = Caldav.Webdav_server.Make(R)(Clock)(Caldav.Webdav_fs.Make(Mirage_fs_mem))(S)
-  module Webdav_server2 = Caldav.Webdav_server.Make(R)(Clock)(Caldav.Webdav_fs.Make(FS_unix))(S)
+  module Dav_fs = Caldav.Webdav_fs.Make(Store)
+  module Dav = Caldav.Webdav_api.Make(R)(Clock)(Dav_fs)
+  module Webdav_server = Caldav.Webdav_server.Make(R)(Clock)(Dav_fs)(S)
+(*
   module Metrics_reporter = Metrics_mirage.Influx(Mclock)(STACK)
+*)
 
   let tls_init kv =
     Lwt.catch (fun () ->
@@ -46,6 +49,7 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
     in
     S.make ~conn_closed ~callback ()
 
+(*
   let gc_quick_stat = Metrics.gc_quick_stat ~tags:Metrics.Tags.[]
   let gc_stat = Metrics.gc_stat ~tags:Metrics.Tags.[]
 
@@ -60,8 +64,10 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
     OS.Time.sleep_ns (Duration.of_f delay) >>= fun () -> loop ()
   in
   Lwt.async loop
+*)
 
-  let start _random clock mclock tls_keys net http =
+  let start _random clock mclock tls_keys http resolver conduit store =
+(*
     (match Key_gen.monitor () with
     | None -> Lwt.return_unit 
     | Some monitor -> 
@@ -72,43 +78,32 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       >|= function
       | Error () -> assert false
       | Ok reporter -> Metrics.set_reporter reporter) >>= fun () ->
+*)
     (* TODO naming *)
-    let init_http port config fs =
+    let init_http port config store =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
-      http (`TCP port) @@ serve (match fs with
-          | `Unix fs -> Webdav_server2.dispatch config fs
-          | `Apple fs -> Webdav_server1.dispatch config fs)
+      http (`TCP port) @@ serve @@ Webdav_server.dispatch config store
     in
-    let init_https port config fs =
+    let init_https port config store =
       tls_init tls_keys >>= fun tls_config ->
       Server_log.info (fun f -> f "listening on %d/HTTPS" port);
       let tls = `TLS (tls_config, `TCP port) in
-      http tls @@ serve (match fs with
-          | `Unix fs -> Webdav_server2.dispatch config fs
-          | `Apple fs -> Webdav_server1.dispatch config fs)
+      http tls @@ serve @@ Webdav_server.dispatch config store
     in
     let config host =
       let do_trust_on_first_use = Key_gen.tofu () in
       Caldav.Webdav_config.config ~do_trust_on_first_use host
     in
-    let init_fs_for_runtime config =
-      let dir = Key_gen.fs_root ()
-      and admin_pass = Key_gen.admin_password ()
+    let init_store_for_runtime config =
+      let admin_pass = Key_gen.admin_password ()
       and apple_testable = Key_gen.apple_testable ()
       in
-      if not apple_testable then
-        FS_unix.connect dir >>= fun fs ->
-        let module Fs = Caldav.Webdav_fs.Make(FS_unix) in
-        let module Dav = Caldav.Webdav_api.Make(R)(Clock)(Fs) in
-        Dav.connect fs config admin_pass >|= fun fs ->
-        `Unix fs
+      if not apple_testable 
+      then Dav.connect store config admin_pass 
       else
-        let module Fs = Caldav.Webdav_fs.Make(Mirage_fs_mem) in
-        let module Dav = Caldav.Webdav_api.Make(R)(Clock)(Fs) in
         let now = Ptime.v (Clock.now_d_ps clock) in
-        Mirage_fs_mem.connect "" >>= fun fs ->
-        Dav.initialize_fs_for_apple_testsuite fs now config >|= fun () ->
-        `Apple fs
+        Dav.initialize_fs_for_apple_testsuite store now config >|= fun () -> 
+        store
     in
     let hostname = Key_gen.hostname () in
     match Key_gen.http_port (), Key_gen.https_port () with
@@ -117,18 +112,18 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       Lwt.return_unit
     | Some port, None ->
       let config = config @@ Caldav.Webdav_config.host ~port ~hostname () in
-      init_fs_for_runtime config >>=
+      init_store_for_runtime config >>=
       init_http port config
     | None, Some port ->
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port ~hostname () in
-      init_fs_for_runtime config >>=
+      init_store_for_runtime config >>=
       init_https port config
     | Some http_port, Some https_port ->
       Server_log.info (fun f -> f "redirecting on %d/HTTP to %d/HTTPS" http_port https_port);
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname () in
-      init_fs_for_runtime config >>= fun fs ->
+      init_store_for_runtime config >>= fun store ->
       Lwt.pick [
         http (`TCP http_port) @@ serve (redirect https_port) ;
-        init_https https_port config fs
+        init_https https_port config store
       ]
 end

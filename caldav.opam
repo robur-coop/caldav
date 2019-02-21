@@ -1,6 +1,7 @@
 opam-version: "2.0"
 maintainer: [
   "Stefanie Schirmer @linse"
+  "Hannes Mehnert"
 ]
 authors: [
   "Stefanie Schirmer @linse"
@@ -19,6 +20,13 @@ build: [
   ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]
 
+pin-depends: [ 
+  ["webmachine.dev" "git+https://github.com/roburio/ocaml-webmachine.git#webdav"]
+  ["mirage-kv-mem.dev" "git+https://github.com/mirage/mirage-kv-mem.git"]
+  ["mirage-kv.dev" "git+https://github.com/samoht/mirage-kv.git#rw"]
+  ["mirage-kv-lwt.dev" "git+https://github.com/samoht/mirage-kv.git#rw"]
+]
+
 depends: [
   "ocaml" {>= "4.05.0"}
   "dune" {build}
@@ -26,22 +34,17 @@ depends: [
   "ounit" {with-test}
   "mirage-random-test" {with-test}
   "mirage-clock-unix" {with-test}
-  "mirage-fs-mem" {with-test}
-  "mirage-fs-unix" {>="1.5.0"}
+  "mirage-kv-mem" {with-test}
   "ppx_deriving" {build}
-  "webmachine"
+  "webmachine" 
   "lwt"
-  "ptime" 
+  "ptime"
   "cohttp-lwt-unix"
   "nocrypto"
   "xmlm"
   "tyxml"
   "icalendar"
   "rresult"
-]
-
-pin-depends: [
-  ["mirage-clock.dev" "git+https://github.com/hannesm/mirage-clock.git#t-is-unit"]
 ]
 
 synopsis: "A CalDAV server"

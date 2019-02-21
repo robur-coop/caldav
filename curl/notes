@@ -1,0 +1,23 @@
+create user
+IST ? /user ? name="username" & password = "pasword"
+SOLL PUT /users/otto&password="password"
+
+create or update group 
+IST PUT groups ? name = "meinegruppe" & members = [a, b, c] 
+SOLL PUT /groups/name &members=a,b,c => CREATED
+
+delete user
+IST DELETE /user ? name="username"
+DELETE /users/otto
+
+delete group
+IST DELETE /group ? name = "name"
+DELETE /groups/48
+
+add user to group
+IST not supported
+SOLL PUT /groups/48/users/otto
+
+remove user from group
+IST not supported
+SOLL DELETE /groups/48/users/otto
