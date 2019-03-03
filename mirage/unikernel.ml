@@ -9,14 +9,12 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
-module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_clock.MCLOCK) (KEYS: Mirage_types_lwt.KV_RO) (S: HTTP) (Resolver : Resolver_lwt.S) (Conduit : Conduit_mirage.S) (Store : Mirage_kv_lwt.RW) = struct
+module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_clock.MCLOCK) (KEYS: Mirage_types_lwt.KV_RO) (S: HTTP) (Resolver : Resolver_lwt.S) (Conduit : Conduit_mirage.S) = struct
   module X509 = Tls_mirage.X509(KEYS)(Clock)
+  module Store = Irmin_mirage.Git.KV_RW(Irmin_git.Mem)(Clock)
   module Dav_fs = Caldav.Webdav_fs.Make(Store)
   module Dav = Caldav.Webdav_api.Make(R)(Clock)(Dav_fs)
   module Webdav_server = Caldav.Webdav_server.Make(R)(Clock)(Dav_fs)(S)
-(*
-  module Metrics_reporter = Metrics_mirage.Influx(Mclock)(STACK)
-*)
 
   let tls_init kv =
     Lwt.catch (fun () ->
@@ -49,37 +47,7 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
     in
     S.make ~conn_closed ~callback ()
 
-(*
-  let gc_quick_stat = Metrics.gc_quick_stat ~tags:Metrics.Tags.[]
-  let gc_stat = Metrics.gc_stat ~tags:Metrics.Tags.[]
-
-  let monitor_gc ?(quick = true) delay =
-  let id x = x in
-  let f () =
-    if quick then Metrics.add gc_quick_stat id (fun d -> d ())
-    else Metrics.add gc_stat id (fun d -> d ())
-  in
-  let rec loop () =
-    f ();
-    OS.Time.sleep_ns (Duration.of_f delay) >>= fun () -> loop ()
-  in
-  Lwt.async loop
-*)
-
-  let start _random clock mclock tls_keys http resolver conduit store =
-(*
-    (match Key_gen.monitor () with
-    | None -> Lwt.return_unit 
-    | Some monitor -> 
-      Metrics.enable_all ();
-      monitor_gc 0.1;
-      let hostname = Key_gen.hostname () in
-      Metrics_reporter.create mclock net ~hostname (Ipaddr.V4.of_string_exn monitor) () 
-      >|= function
-      | Error () -> assert false
-      | Ok reporter -> Metrics.set_reporter reporter) >>= fun () ->
-*)
-    (* TODO naming *)
+  let start _random clock mclock tls_keys http resolver conduit =
     let init_http port config store =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
       http (`TCP port) @@ serve @@ Webdav_server.dispatch config store
@@ -95,15 +63,14 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       Caldav.Webdav_config.config ~do_trust_on_first_use host
     in
     let init_store_for_runtime config =
-      let admin_pass = Key_gen.admin_password ()
-      and apple_testable = Key_gen.apple_testable ()
-      in
-      if not apple_testable 
-      then Dav.connect store config admin_pass 
-      else
-        let now = Ptime.v (Clock.now_d_ps clock) in
-        Dav.initialize_fs_for_apple_testsuite store now config >|= fun () -> 
-        store
+      let admin_pass = Key_gen.admin_password () in
+      Irmin_git.Mem.v (Fpath.v "bla") >>= function
+      | Error _ -> assert false
+      | Ok git ->
+        Store.connect git ~conduit ~author:"caldav" ~resolver
+          ~msg:(fun _ -> "a calendar change") ()
+          (Key_gen.remote ()) >>= fun store ->
+        Dav.connect store config admin_pass
     in
     let hostname = Key_gen.hostname () in
     match Key_gen.http_port (), Key_gen.https_port () with
