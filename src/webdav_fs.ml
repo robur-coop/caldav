@@ -165,7 +165,7 @@ module Make (Fs:Mirage_kv_lwt.RW) = struct
           let data = Sexplib.Sexp.to_string (Properties.to_sexp map) in
           let filename = propfilename f_or_d in
           (* Log.debug (fun m -> m "writing property map %s: %s" filename data) ; *)
-          Fs.set fs filename data
+          Fs.set fs filename data >|= fun _ -> Ok ()
       end
     | Some _ ->
       Log.err (fun m -> m "map %s with non-singleton pcdata for getlastmodified" (to_string f_or_d)) ;
@@ -313,9 +313,11 @@ module Make (Fs:Mirage_kv_lwt.RW) = struct
 
   let write fs (`File file) value propmap =
     let kv_file = data @@ to_string (`File file) in
-    Fs.set fs kv_file value >>= function
+    Fs.set fs kv_file value >>= fun _ ->
+    write_property_map fs (`File file) propmap
+    (*Fs.set fs kv_file value >>= function
     | Error e -> Lwt.return (Error e)
-    | Ok () -> write_property_map fs (`File file) propmap
+    | Ok () -> write_property_map fs (`File file) propmap *)
 
   let destroy_file_or_empty_dir fs f_or_d =
     (* TODO could a propfile influence the right to deletion if it gets deleted first? *)
