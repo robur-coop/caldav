@@ -323,11 +323,10 @@ module Make (Fs:Mirage_kv_lwt.RW) = struct
     (* TODO could a propfile influence the right to deletion if it gets deleted first? *)
     (* TODO use Mirage_kv.RW.batch! *)
     let propfile = propfilename f_or_d in
-    Fs.remove fs propfile >>= function
-    | Error e -> Lwt.return (Error e)
-    | Ok () ->
-      let file = data @@ to_string f_or_d in
-      Fs.remove fs file
+    Fs.remove fs propfile >>= fun _ ->
+    let file = data @@ to_string f_or_d in
+    Fs.remove fs file >|= fun _ ->
+    Ok ()
 
   let destroy fs f_or_d =
     destroy_file_or_empty_dir fs f_or_d
