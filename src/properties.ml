@@ -189,7 +189,9 @@ let privileges ~auth_user_props resource_props =
     | None -> []
     | Some (_, aces) -> aces
   in
-  Privileges.list ~identities:(identities auth_user_props) aces
+  let identities = identities auth_user_props in
+  Logs.info (fun m -> m "identities: %a" Fmt.(list ~sep:(unit ", ") Uri.pp) identities) ;
+  Privileges.list ~identities aces
 
 let inherited_acls ~auth_user_props resource_props =
   let aces = match unsafe_find (Xml.dav_ns, "acl") resource_props with
