@@ -136,7 +136,7 @@ module Make (Fs:Mirage_kv_lwt.RW) = struct
     | `File data -> match List.rev data with
       | filename :: path -> List.rev path @ [ filename ^ propfile_ext ]
       | [] -> assert false (* no file without a name *) in
-    List.fold_left Mirage_kv.Key.add Mirage_kv.Key.empty segments
+    Mirage_kv.Key.v (Astring.String.concat ~sep:"/" segments)
 
   let get_properties fs f_or_d =
     let propfile = propfilename f_or_d in
