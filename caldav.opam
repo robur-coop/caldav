@@ -20,23 +20,23 @@ build: [
   ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]
 
-pin-depends: [ 
+pin-depends: [
   ["webmachine.dev" "git+https://github.com/roburio/ocaml-webmachine.git#webdav"]
-  ["mirage-kv-mem.dev" "git+https://github.com/mirage/mirage-kv-mem.git"]
-  ["mirage-kv.dev" "git+https://github.com/samoht/mirage-kv.git#rw"]
-  ["mirage-kv-lwt.dev" "git+https://github.com/samoht/mirage-kv.git#rw"]
 ]
 
 depends: [
-  "ocaml" {>= "4.05.0"}
+  "ocaml" {>= "4.06.0"}
   "dune" {build}
   "alcotest" {with-test}
   "ounit" {with-test}
   "mirage-random-test" {with-test}
   "mirage-clock-unix" {with-test}
-  "mirage-kv-mem" {with-test}
+  "mirage-kv-mem" {with-test & >= "2.0.0"}
+  "mirage-kv-lwt" {>= "2.0.0"}
+  "mirage-clock" {>= "2.0.0"}
+  "mirage-random" {>= "1.2.0"}
   "ppx_deriving" {build}
-  "webmachine" 
+  "webmachine"
   "lwt"
   "ptime"
   "cohttp-lwt-unix"
@@ -46,7 +46,6 @@ depends: [
   "icalendar"
   "rresult"
 ]
-
 synopsis: "A CalDAV server"
 description: """
 A CalDAV server. Supports everything from the roburio/icalendar library.

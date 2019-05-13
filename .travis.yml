@@ -5,10 +5,7 @@ sudo: required
 env:
   global:
     - PACKAGE="caldav"
-    - POST_INSTALL_HOOK="make"
-    - PINS="webmachine:git+https://github.com/roburio/ocaml-webmachine.git#webdav"
   matrix:
-    - OCAML_VERSION=4.05
     - OCAML_VERSION=4.06
     - OCAML_VERSION=4.07
 notifications:
