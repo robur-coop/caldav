@@ -30,6 +30,7 @@ depends: [
   "alcotest" {with-test}
   "ounit" {with-test}
   "mirage-random-test" {with-test}
+  "tcpip" {with-test}
   "mirage-clock-unix" {with-test}
   "mirage-kv-mem" {with-test & >= "2.0.0"}
   "mirage-kv-lwt" {>= "2.0.0"}
