@@ -46,6 +46,8 @@ depends: [
   "tyxml"
   "icalendar"
   "rresult"
+  "sexplib"
+  "ppx_sexp_conv"
 ]
 synopsis: "A CalDAV server"
 description: """

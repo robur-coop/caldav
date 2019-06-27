@@ -162,7 +162,7 @@ module Make (Fs:Mirage_kv_lwt.RW) = struct
           assert false
         | Ok _ ->
           (*    let data = Properties.to_string map in *)
-          let data = Sexplib.Sexp.to_string (Properties.to_sexp map) in
+          let data = Sexplib.Sexp.to_string_hum (Properties.to_sexp map) in
           let filename = propfilename f_or_d in
           (* Log.debug (fun m -> m "writing property map %s: %s" filename data) ; *)
           Fs.set fs filename data
