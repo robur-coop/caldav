@@ -40,7 +40,7 @@ depends: [
   "webmachine"
   "lwt"
   "ptime"
-  "cohttp-lwt-unix"
+  "cohttp-lwt-unix" {with-test}
   "nocrypto"
   "xmlm"
   "tyxml"
