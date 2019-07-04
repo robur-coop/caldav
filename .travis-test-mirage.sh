@@ -2,8 +2,6 @@
 
 eval `opam config env`
 
-opam update
-opam upgrade -y
 opam install -y mirage
 
 cd mirage
