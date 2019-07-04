@@ -11,7 +11,7 @@ module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
 module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_clock.MCLOCK) (KEYS: Mirage_types_lwt.KV_RO) (S: HTTP) (Resolver : Resolver_lwt.S) (Conduit : Conduit_mirage.S) = struct
   module X509 = Tls_mirage.X509(KEYS)(Clock)
-  module Store = Irmin_mirage.Git.KV_RW(Irmin_git.Mem)(Clock)
+  module Store = Irmin_mirage_git.KV_RW(Irmin_git.Mem)(Clock)
   module Dav_fs = Caldav.Webdav_fs.Make(Store)
   module Dav = Caldav.Webdav_api.Make(R)(Clock)(Dav_fs)
   module Webdav_server = Caldav.Webdav_server.Make(R)(Clock)(Dav_fs)(S)
@@ -23,6 +23,9 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       (function
         | Failure _ -> Lwt.fail_with "Could not find server.pem and server.key in the <working directory>/tls."
         | e -> Lwt.fail e)
+
+  let ssh_config () =
+    (Key_gen.seed ()) ^ ":" ^ (Key_gen.authenticator ())
 
   (* Redirect to the same address, but in https. *)
   let redirect port request _body =
@@ -47,13 +50,13 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
     in
     S.make ~conn_closed ~callback ()
 
-  let start _random clock mclock tls_keys http resolver conduit =
+  let start _random _clock _mclock keys http resolver conduit =
     let init_http port config store =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
       http (`TCP port) @@ serve @@ Webdav_server.dispatch config store
     in
     let init_https port config store =
-      tls_init tls_keys >>= fun tls_config ->
+      tls_init keys >>= fun tls_config ->
       Server_log.info (fun f -> f "listening on %d/HTTPS" port);
       let tls = `TLS (tls_config, `TCP port) in
       http tls @@ serve @@ Webdav_server.dispatch config store
@@ -67,7 +70,9 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       Irmin_git.Mem.v (Fpath.v "bla") >>= function
       | Error _ -> assert false
       | Ok git ->
-        Store.connect git ~conduit ~author:"caldav" ~resolver
+        Conduit.with_ssh conduit (module Mclock) >>= fun conduit ->
+        let headers = Cohttp.Header.of_list [ "config", ssh_config () ] in
+        Store.connect git ~headers ~conduit ~author:"caldav" ~resolver
           ~msg:(fun _ -> "a calendar change") ()
           (Key_gen.remote ()) >>= fun store ->
         Dav.connect store config admin_pass

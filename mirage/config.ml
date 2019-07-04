@@ -2,6 +2,14 @@ open Mirage
 
 let net = generic_stackv4 default_network
 
+let seed =
+  let doc = Key.Arg.info ~doc:"Seed for private key." ["seed"] in
+  Key.(create "seed" Arg.(opt string "180586" doc))
+
+let authenticator =
+  let doc = Key.Arg.info ~doc:"Authenticator." ["authenticator"] in
+  Key.(create "authenticator" Arg.(opt string "" doc))
+
 (* set ~tls to false to get a plain-http server *)
 let http_srv = http_server @@ conduit_direct ~tls:true net
 
@@ -43,16 +51,13 @@ let apple_testable =
 let main =
   let direct_dependencies = [
     package "uri" ;
-    package ~pin:"git+https://github.com/roburio/caldav.git#retreat" "caldav" ;
-    package ~pin:"git+https://github.com/hannesm/irmin.git#next" "irmin" ;
-    package ~pin:"git+https://github.com/hannesm/irmin.git#next" "irmin-mirage" ;
-    package ~pin:"git+https://github.com/hannesm/irmin.git#next" "irmin-git" ;
-    package ~pin:"git+https://github.com/hannesm/irmin.git#next" "irmin-mem" ;
-    package ~pin:"git+https://github.com/linse/ocaml-git.git" "git-http" ;
-    package ~pin:"git+https://github.com/linse/ocaml-git.git" "git-mirage" ;
+    package "caldav" ;
+    package "irmin-mirage-git" ;
+    package "irmin-mem" ;
   ] in
   let keys =
-    [ Key.abstract http_port ; Key.abstract https_port ;
+    [ Key.abstract seed ; Key.abstract authenticator ;
+      Key.abstract http_port ; Key.abstract https_port ;
       Key.abstract admin_password ; Key.abstract remote ;
       Key.abstract tofu ; Key.abstract hostname ;
       Key.abstract monitor ; Key.abstract apple_testable ]
