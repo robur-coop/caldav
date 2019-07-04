@@ -2,6 +2,14 @@ open Mirage
 
 let net = generic_stackv4 default_network
 
+let seed =
+  let doc = Key.Arg.info ~doc:"Seed for the ssh private key." ["seed"] in
+  Key.(create "seed" Arg.(opt string "" doc))
+
+let authenticator =
+  let doc = Key.Arg.info ~doc:"Authenticator for SSH." ["authenticator"] in
+  Key.(create "authenticator" Arg.(opt string "" doc))
+
 (* set ~tls to false to get a plain-http server *)
 let http_srv = cohttp_server @@ conduit_direct ~tls:true net
 
@@ -44,19 +52,14 @@ let apple_testable =
 let main =
   let direct_dependencies = [
     package "uri" ;
-    package ~pin:"git+https://github.com/roburio/caldav.git" "caldav" ;
+    package "caldav" ;
     package ~min:"0.1.2" "icalendar" ;
-    package ~pin:"git+https://github.com/hannesm/irmin.git#future" "irmin" ;
-    package ~pin:"git+https://github.com/hannesm/irmin.git#future" "irmin-mirage" ;
-    package ~pin:"git+https://github.com/hannesm/irmin.git#future" "irmin-git" ;
-    package ~pin:"git+https://github.com/hannesm/irmin.git#future" "irmin-mirage-git" ;
-    package ~pin:"git+https://github.com/hannesm/irmin.git#future" "irmin-mem" ;
-    package ~pin:"git+https://github.com/hannesm/ocaml-git.git#easy" "git-http" ;
-    package ~pin:"git+https://github.com/hannesm/ocaml-git.git#easy" "git-mirage" ;
-    package ~pin:"git+https://github.com/hannesm/ocaml-git.git#easy" "git" ;
+    package "irmin-mirage-git" ;
+    package "irmin-mem" ;
   ] in
   let keys =
-    [ Key.abstract http_port ; Key.abstract https_port ;
+    [ Key.abstract seed ; Key.abstract authenticator ;
+      Key.abstract http_port ; Key.abstract https_port ;
       Key.abstract admin_password ; Key.abstract remote ;
       Key.abstract tofu ; Key.abstract hostname ;
       Key.abstract monitor ; Key.abstract apple_testable ]
