@@ -11,9 +11,16 @@ Then, you need to install [`opam`](https://opam.ocaml.org) via your package mana
 Make sure you have OCaml version `>=4.07.0`, and opam version `>=2.0.0` and mirage version `>=3.7.1` installed via your package manager.
 You can use `ocaml --version`, `opam --version`, and `mirage --version` to find out.
 
+In addition, you currently need our opam repository overlay because we need some
+libraries that are not yet released for git-via-ssh. It is recommended to use a custom opam switch:
+
+    opam switch create caldav 4.07.1
+    opam repo add git-ssh-dns git+https://github.com/roburio/git-ssh-dns-mirage3-repo.git
+    opam install lwt mirage
+
 Now we're ready to compile the CalDAV server. Let's get the code (don't worry that we already pinned caldav, we now need the source code of the unikernel):
 
-    git clone https://github.com/roburio/caldav.git
+    git clone -b future https://github.com/roburio/caldav.git
     cd caldav/mirage
     mirage configure // -t xen / -t hvt works as well
     make depend

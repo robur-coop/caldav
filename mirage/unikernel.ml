@@ -24,6 +24,15 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
         | Failure _ -> Lwt.fail_with "Could not find server.pem and server.key in the <working directory>/tls."
         | e -> Lwt.fail e)
 
+  let ssh_config () =
+    match Astring.String.cut ~sep:"://" (Key_gen.remote ()) with
+    | Some (pre, _) when
+        Astring.String.is_infix ~affix:"ssh" pre &&
+        not (String.equal (Key_gen.seed ()) "")  ->
+      Cohttp.Header.init_with "config"
+        (Key_gen.seed () ^ ":" ^ Key_gen.authenticator ())
+    | _ -> Cohttp.Header.init ()
+
   (* Redirect to the same address, but in https. *)
   let redirect port request _body =
     let redirect_port = match port with 443 -> None | x -> Some x in
@@ -119,7 +128,9 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
             Fmt.(option ~none:(unit "no HTTP request") string) (Lwt.get http_req)
             Fmt.(option ~none:(unit "none") string) (Lwt.get user_agent)
         in
-        Store.connect git ~conduit ~author ~resolver ~msg (Key_gen.remote ()) >>= fun store ->
+        Conduit.with_ssh conduit (module Mclock) >>= fun conduit ->
+        let headers = ssh_config () in
+        Store.connect git ~headers ~conduit ~author ~resolver ~msg (Key_gen.remote ()) >>= fun store ->
         Dav.connect store config admin_pass
     in
     let hostname = Key_gen.hostname () in

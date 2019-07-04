@@ -2,6 +2,14 @@ open Mirage
 
 let net = generic_stackv4 default_network
 
+let seed =
+  let doc = Key.Arg.info ~doc:"Seed for the ssh private key." ["seed"] in
+  Key.(create "seed" Arg.(opt string "" doc))
+
+let authenticator =
+  let doc = Key.Arg.info ~doc:"Authenticator for SSH." ["authenticator"] in
+  Key.(create "authenticator" Arg.(opt string "" doc))
+
 (* set ~tls to false to get a plain-http server *)
 let http_srv = cohttp_server @@ conduit_direct ~tls:true net
 
@@ -46,7 +54,8 @@ let main =
     package ~min:"2.0.0" "irmin-mirage-git" ;
   ] in
   let keys =
-    [ Key.abstract http_port ; Key.abstract https_port ;
+    [ Key.abstract seed ; Key.abstract authenticator ;
+      Key.abstract http_port ; Key.abstract https_port ;
       Key.abstract admin_password ; Key.abstract remote ;
       Key.abstract tofu ; Key.abstract hostname ;
       Key.abstract apple_testable ]
