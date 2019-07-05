@@ -204,7 +204,7 @@ let inherited_acls ~auth_user_props resource_props =
 (* helper computing "current-user-privilege-set", not public *)
 let current_user_privilege_set ~auth_user_props map =
   let make_node p = Xml.dav_node "privilege" [ Xml.priv_to_xml p ] in
-  let privileges = privileges auth_user_props map in
+  let privileges = privileges ~auth_user_props map in
   let uniq =
     (* workaround for Firefox OS which doesn't understand <privilege><all/></privilege> *)
     if List.mem `All privileges
@@ -233,7 +233,7 @@ let authorized_properties_for_resource ~auth_user_props requested_props propmap_
   (requested_allowed, requested_forbidden)
 
 let find ~auth_user_props ~resource_props property_fqname =
-  let privileges = privileges auth_user_props resource_props in
+  let privileges = privileges ~auth_user_props resource_props in
   if Privileges.can_read_prop property_fqname privileges
   then match get_prop auth_user_props resource_props property_fqname with
     | None -> Error `Not_found
