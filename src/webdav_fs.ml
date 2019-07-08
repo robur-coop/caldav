@@ -136,7 +136,7 @@ module Make (Fs:Mirage_kv_lwt.RW) = struct
     | `File data -> match List.rev data with
       | filename :: path -> List.rev path @ [ filename ^ propfile_ext ]
       | [] -> assert false (* no file without a name *) in
-    List.fold_left Mirage_kv.Key.add Mirage_kv.Key.empty segments
+    Mirage_kv.Key.v (Astring.String.concat ~sep:"/" segments)
 
   let get_properties fs f_or_d =
     let propfile = propfilename f_or_d in
@@ -162,7 +162,7 @@ module Make (Fs:Mirage_kv_lwt.RW) = struct
           assert false
         | Ok _ ->
           (*    let data = Properties.to_string map in *)
-          let data = Sexplib.Sexp.to_string (Properties.to_sexp map) in
+          let data = Sexplib.Sexp.to_string_hum (Properties.to_sexp map) in
           let filename = propfilename f_or_d in
           (* Log.debug (fun m -> m "writing property map %s: %s" filename data) ; *)
           Fs.set fs filename data

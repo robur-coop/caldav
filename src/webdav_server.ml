@@ -99,18 +99,18 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         let rd' = with_resp_headers (Headers.replace_content_type content_type) rd in
         Wm.continue (`String body) rd'
 
-    method allowed_methods rd =
+    method! allowed_methods rd =
       Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "MKCOL"; `Other "MKCALENDAR" ; `Other "REPORT" ; `Other "ACL" ] rd
 
-    method known_methods rd =
+    method! known_methods rd =
       Wm.continue [`GET; `HEAD; `PUT; `DELETE; `OPTIONS; `Other "PROPFIND"; `Other "PROPPATCH"; `Other "MKCOL"; `Other "MKCALENDAR" ; `Other "REPORT" ; `Other "ACL"] rd
 
-    method charsets_provided rd =
+    method! charsets_provided rd =
       Wm.continue [
         "utf-8", (fun id -> id)
       ] rd
 
-    method resource_exists rd =
+    method! resource_exists rd =
       Fs.exists fs (self#path rd) >>= fun v ->
       Wm.continue v rd
 
@@ -126,7 +126,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         "text/calendar", self#write_component
       ] rd
 
-    method is_authorized rd =
+    method! is_authorized rd =
       (* TODO implement digest authentication! *)
       match Headers.get_authorization rd.req_headers with
       | None -> Wm.continue (`Basic "calendar") rd
@@ -154,13 +154,13 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
           let rd' = with_req_headers (Headers.replace_authorization user) rd in
           Wm.continue `Authorized rd'
 
-    method forbidden rd =
+    method! forbidden rd =
       let path = self#path rd in
       let user = Headers.get_user rd.req_headers in
       Dav.access_granted_for_acl fs config ~path rd.meth ~user >>= fun granted ->
       Wm.continue (not granted) rd
 
-    method process_property rd =
+    method! process_property rd =
       let path = self#path rd in
       let user = Headers.get_user rd.req_headers in
       let depth = Headers.get_depth rd.req_headers in
@@ -178,7 +178,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         let rd' = with_resp_headers (Headers.replace_content_type "application/xml") rd in
         Wm.continue `Multistatus { rd' with resp_body = `String body }
 
-    method report rd =
+    method! report rd =
       let path = self#path rd in
       let user = Headers.get_user rd.req_headers in
       Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
@@ -190,13 +190,13 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         Wm.continue `Multistatus { rd' with resp_body = `String body }
 
     (* required by webmachine API *)
-    method cannot_create rd =
+    method! cannot_create rd =
       let xml = Xml.node ~ns:Xml.dav_ns "error" [Xml.node ~ns:Xml.dav_ns "resource-must-be-null" []] in
       let err = Xml.tree_to_string xml in
       let rd' = { rd with resp_body = `String err } in
       Wm.continue () rd'
 
-    method create_collection rd =
+    method! create_collection rd =
       let path = self#path rd in
       let user = Headers.get_user rd.req_headers in
       Cohttp_lwt.Body.to_string rd.req_body >>= fun body ->
@@ -207,18 +207,18 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
       | Error `Conflict -> Wm.continue `Conflict rd
       | Ok _ -> Wm.continue `Created rd
 
-    method delete_resource rd =
+    method! delete_resource rd =
       let path = self#path rd in
       Logs.debug (fun m -> m "delete_resource path %s" path);
       Dav.delete fs ~path (now ()) >>= fun deleted ->
       Wm.continue deleted rd
 
-    method last_modified rd =
+    method! last_modified rd =
       let path = self#path rd in
       Dav.last_modified fs ~path >>= fun lm ->
       Wm.continue lm rd
 
-    method generate_etag rd =
+    method! generate_etag rd =
       let path = self#path rd in
       (Dav.last_modified fs ~path >|= function
         | None -> rd
@@ -226,7 +226,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
       Dav.compute_etag fs ~path >>= fun etag ->
       Wm.continue etag rd'
 
-    method finish_request rd =
+    method! finish_request rd =
       let rd' = if rd.meth = `OPTIONS then
           (* access-control, access-control, calendar-access, calendar-schedule, calendar-auto-schedule,
              calendar-availability, inbox-availability, calendar-proxy, calendarserver-private-events,
@@ -247,10 +247,10 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
   class redirect config = object(self)
     inherit [Cohttp_lwt.Body.t] Wm.resource
 
-    method allowed_methods rd =
+    method! allowed_methods rd =
       Wm.continue [`GET ; `Other "PROPFIND"] rd
 
-    method known_methods = self#allowed_methods
+    method! known_methods = self#allowed_methods
 
     method content_types_provided rd =
       Wm.continue [ ("*/*", self#redirect) ] rd
@@ -258,7 +258,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
     method content_types_accepted rd =
       Wm.continue [] rd
 
-    method process_property rd =
+    method! process_property rd =
       let rd' = redirect (Uri.to_string @@ Uri.with_path config.host config.calendars) rd in
       Wm.respond 301 rd'
 
@@ -281,10 +281,10 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
       | None -> Error `Bad_request
       | Some x -> Ok x
 
-    method allowed_methods rd =
+    method! allowed_methods rd =
       Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
 
-    method known_methods rd =
+    method! known_methods rd =
       Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
 
     method private create_user rd =
@@ -299,7 +299,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
 
     (* TODO? allow a user to delete themselves *)
     (* TODO? soft-delete: "mark as deleted" *)
-    method delete_resource rd =
+    method! delete_resource rd =
       match self#requested_user rd with
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
       | Ok name ->
@@ -307,7 +307,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         | Error e -> Wm.respond (to_status e) rd
         | Ok () -> Wm.continue true rd
 
-    method is_conflict rd =
+    method! is_conflict rd =
       match self#requested_user rd with
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
       | Ok name ->
@@ -331,7 +331,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         ("application/octet-stream", self#create_user)
       ] rd
 
-    method is_authorized rd =
+    method! is_authorized rd =
       (* TODO implement digest authentication! *)
       match Headers.get_authorization rd.req_headers with
        | None -> Wm.continue (`Basic "calendar") rd
@@ -346,7 +346,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
            let rd' = with_req_headers (Headers.replace_authorization user) rd in
            Wm.continue `Authorized rd'
 
-    method forbidden rd =
+    method! forbidden rd =
       let user = Headers.get_user rd.req_headers in
       match self#requested_user rd with
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
@@ -372,10 +372,10 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         then Ok members
         else Error `Bad_request
 
-    method allowed_methods rd =
+    method! allowed_methods rd =
       Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
 
-    method known_methods rd =
+    method! known_methods rd =
       Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
 
     method private create_group rd =
@@ -387,7 +387,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         let rd' = with_resp_headers (Headers.replace_location principal_url) rd in
         Wm.continue true rd'
 
-    method delete_resource rd =
+    method! delete_resource rd =
       match self#requested_group rd with
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
       | Ok name ->
@@ -395,7 +395,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         | Error e -> Wm.respond (to_status e) rd
         | Ok () -> Wm.continue true rd
 
-    method is_conflict rd =
+    method! is_conflict rd =
       match self#requested_group rd with
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
       | Ok name ->
@@ -414,7 +414,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         ("application/octet-stream", self#create_group)
       ] rd
 
-    method is_authorized rd =
+    method! is_authorized rd =
       (* TODO implement digest authentication! *)
       match Headers.get_authorization rd.req_headers with
        | None -> Wm.continue (`Basic "calendar") rd
@@ -429,7 +429,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
            let rd' = with_req_headers (Headers.replace_authorization user) rd in
            Wm.continue `Authorized rd'
 
-    method forbidden rd =
+    method! forbidden rd =
       let user = Headers.get_user rd.req_headers in
       match self#requested_group rd with
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
@@ -451,10 +451,10 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
       | None -> Error `Bad_request
       | Some x -> if not (sane x) then Error `Bad_request else Ok x
 
-    method allowed_methods rd =
+    method! allowed_methods rd =
       Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
 
-    method known_methods rd =
+    method! known_methods rd =
       Wm.continue [`PUT; `OPTIONS; `DELETE ] rd
 
     method private add_group_member rd =
@@ -464,7 +464,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         Dav.enroll fs config ~group ~member >>= fun () ->
         Wm.continue true rd
 
-    method delete_resource rd =
+    method! delete_resource rd =
       match self#requested_group rd, self#requested_member rd with
       | Error `Bad_request, _ | _, Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
       | Ok group, Ok member ->
@@ -479,10 +479,10 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         ("application/octet-stream", self#add_group_member)
       ] rd
 
-    method is_conflict rd =
+    method! is_conflict rd =
       Wm.continue false rd
 
-    method is_authorized rd =
+    method! is_authorized rd =
       (* TODO implement digest authentication! *)
       match Headers.get_authorization rd.req_headers with
        | None -> Wm.continue (`Basic "calendar") rd
@@ -497,7 +497,7 @@ module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
            let rd' = with_req_headers (Headers.replace_authorization user) rd in
            Wm.continue `Authorized rd'
 
-    method forbidden rd =
+    method! forbidden rd =
       let user = Headers.get_user rd.req_headers in
       match self#requested_group rd with
       | Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
