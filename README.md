@@ -43,7 +43,7 @@ If you're planning to use https you need to create a certificate:
     opam install certify
     certify selfsign -c server.pem -k server.key "calendar.example.com"
     mv server.pem server.key caldav/mirage/tls/
-    cd caldav/mirage/tls ; make
+    cd caldav/mirage ; make
 
 You can also copy an existing certificate and private key to that location.
 
