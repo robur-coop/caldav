@@ -10,12 +10,12 @@ libraries that are not yet released. It is recommended to use a custom opam
 switch:
 
     opam switch create caldav 4.07.1
-    opam repo add git+https://github.com/roburio/git-ssh-dns-mirage3-repo.git
+    opam repo add git-ssh-dns git+https://github.com/roburio/git-ssh-dns-mirage3-repo.git
     opam install lwt mirage
 
 Now we're ready to compile the CalDAV server. Let's get the code (don't worry that we already pinned caldav, we now need the source code of the unikernel):
 
-    git clone https://github.com/roburio/caldav.git
+    git clone -b future https://github.com/roburio/caldav.git
     cd caldav/mirage
     mirage configure // -t xen / -t hvt works as well
     make depend
