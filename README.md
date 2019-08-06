@@ -41,7 +41,7 @@ The following steps vary based on your desired server features.
 If you're planning to use https you need to create a certificate:
 
     opam install certify
-    selfsign -c server.pem -k server.key "calendar.example.com"
+    certify selfsign -c server.pem -k server.key "calendar.example.com"
     mv server.pem server.key caldav/mirage/tls/
     cd caldav/mirage/tls ; make
 
