@@ -3,7 +3,7 @@ open Mirage
 let net = generic_stackv4 default_network
 
 (* set ~tls to false to get a plain-http server *)
-let http_srv = http_server @@ conduit_direct ~tls:true net
+let http_srv = cohttp_server @@ conduit_direct ~tls:true net
 
 (* TODO: make it possible to enable and disable schemes without providing a port *)
 let http_port =
