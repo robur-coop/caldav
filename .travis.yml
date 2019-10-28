@@ -5,6 +5,7 @@ sudo: required
 env:
   global:
     - PACKAGE="caldav"
+    - EXTRA_REMOTES="git+https://github.com/roburio/git-ssh-dns-mirage3-repo.git"
   matrix:
     - OCAML_VERSION=4.06
     - OCAML_VERSION=4.07 POST_INSTALL_HOOK="./.travis-test-mirage.sh" TESTS=false
