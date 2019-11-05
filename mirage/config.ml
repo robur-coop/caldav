@@ -43,13 +43,16 @@ let apple_testable =
 let main =
   let direct_dependencies = [
     package "uri" ;
-    package ~pin:"git+https://github.com/roburio/caldav.git#retreat" "caldav" ;
-    package ~pin:"git+https://github.com/hannesm/irmin.git#next" "irmin" ;
-    package ~pin:"git+https://github.com/hannesm/irmin.git#next" "irmin-mirage" ;
-    package ~pin:"git+https://github.com/hannesm/irmin.git#next" "irmin-git" ;
-    package ~pin:"git+https://github.com/hannesm/irmin.git#next" "irmin-mem" ;
-    package ~pin:"git+https://github.com/linse/ocaml-git.git" "git-http" ;
-    package ~pin:"git+https://github.com/linse/ocaml-git.git" "git-mirage" ;
+    package ~pin:"git+https://github.com/roburio/caldav.git" "caldav" ;
+    package ~pin:"git+https://github.com/roburio/icalendar.git#zap" "icalendar" ;
+    package ~pin:"git+https://github.com/hannesm/irmin.git#future" "irmin" ;
+    package ~pin:"git+https://github.com/hannesm/irmin.git#future" "irmin-mirage" ;
+    package ~pin:"git+https://github.com/hannesm/irmin.git#future" "irmin-git" ;
+    package ~pin:"git+https://github.com/hannesm/irmin.git#future" "irmin-mirage-git" ;
+    package ~pin:"git+https://github.com/hannesm/irmin.git#future" "irmin-mem" ;
+    package ~pin:"git+https://github.com/hannesm/ocaml-git.git#easy" "git-http" ;
+    package ~pin:"git+https://github.com/hannesm/ocaml-git.git#easy" "git-mirage" ;
+    package ~pin:"git+https://github.com/hannesm/ocaml-git.git#easy" "git" ;
   ] in
   let keys =
     [ Key.abstract http_port ; Key.abstract https_port ;
