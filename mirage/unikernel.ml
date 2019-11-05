@@ -9,7 +9,7 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
-module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_clock.MCLOCK) (KEYS: Mirage_types_lwt.KV_RO) (S: HTTP) (Resolver : Resolver_lwt.S) (Conduit : Conduit_mirage.S) = struct
+module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_clock.MCLOCK) (KEYS: Mirage_kv.RO) (S: HTTP) (Resolver : Resolver_lwt.S) (Conduit : Conduit_mirage.S) = struct
   module X509 = Tls_mirage.X509(KEYS)(Clock)
   module Store = Irmin_mirage.Git.KV_RW(Irmin_git.Mem)(Clock)
   module Dav_fs = Caldav.Webdav_fs.Make(Store)
@@ -67,8 +67,8 @@ module Main (R : Mirage_random.C) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       Irmin_git.Mem.v (Fpath.v "bla") >>= function
       | Error _ -> assert false
       | Ok git ->
-        Store.connect git ~conduit ~author:"caldav" ~resolver
-          ~msg:(fun _ -> "a calendar change") ()
+        Store.connect git ~headers ~conduit ~author:"caldav" ~resolver
+          ~msg:(fun _ -> "a calendar change")
           (Key_gen.remote ()) >>= fun store ->
         Dav.connect store config admin_pass
     in
