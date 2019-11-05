@@ -57,7 +57,7 @@ end
 let src = Logs.Src.create "webdav.robur.io" ~doc:"webdav api logs"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module Make(R : Mirage_random.C)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) = struct
+module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) = struct
   open Lwt.Infix
 
   type state = Fs.t

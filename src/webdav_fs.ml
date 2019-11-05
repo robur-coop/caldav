@@ -63,7 +63,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let propfile_ext = ".prop" 
 
-module Make (Fs:Mirage_kv_lwt.RW) = struct
+module Make (Fs:Mirage_kv.RW) = struct
 
   open Lwt.Infix
 
