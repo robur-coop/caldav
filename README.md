@@ -32,6 +32,36 @@ For other targets you have to create a virtual machine, e.g. solo5-hvt:
 
     sudo ./solo5-hvt --net=tap100 -- caldav.hvt
 
+## CalDavZAP integration
+
+CalDavZap is an externally developed web-UI for caldav servers. Embedding into
+this unikernel provides the web interface at `https://calendar.example.com/index.html`.
+
+Download [https://www.inf-it.com/CalDavZAP_0.13.1.zip](https://www.inf-it.com/CalDavZAP_0.13.1.zip) (3936373 bytes, SHA256 1fb67a4f85c699bfd73f282407d60852f6649a34a923770ae2a378b4f2794dde)
+and unpack into `mirage/caldavzap` directory.
+
+Edit `mirage/caldavzap/config.js`
+```
+diff -ur caldavzap/config.js mirage/caldavzap/config.js
+--- a/config.js 2015-09-22 15:29:59.000000000 +0200
++++ b/config.js  2019-11-10 00:46:12.653501000 +0100
+@@ -335,12 +335,12 @@
+        href: location.protocol+'//'+location.hostname+
+                (location.port ? ':'+location.port: '')+
+                location.pathname.replace(RegExp('/+[^/]+/*(index\.html)?$'),'')+
+-               '/caldav.php/',
++               '/principals/',
+        timeOut: 90000,
+        lockTimeOut: 10000,
+        checkContentType: true,
+        settingsAccount: true,
+-       delegation: true,
++       delegation: false,
+        additionalResources: [],
+        hrefLabel: null,
+        forceReadOnly: null,
+```
+
 ## Running the unikernel
 
 The following steps vary based on your desired server features.
@@ -149,6 +179,3 @@ Make the calendar `TESTCALENDAR` private, only accessible for the `OWNER`.
         </D:prop>
       </D:set>
     </D:propertyupdate>' "https://calendar.example.com/calendars/TESTCALENDAR"
-
-
-

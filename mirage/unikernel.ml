@@ -9,7 +9,7 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
-module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_clock.MCLOCK) (KEYS: Mirage_kv.RO) (S: HTTP) (Resolver : Resolver_lwt.S) (Conduit : Conduit_mirage.S) = struct
+module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_clock.MCLOCK) (KEYS: Mirage_kv.RO) (S: HTTP) (Resolver : Resolver_lwt.S) (Conduit : Conduit_mirage.S) (Zap : Mirage_kv.RO) = struct
   module X509 = Tls_mirage.X509(KEYS)(Clock)
   module Store = Irmin_mirage_git.KV_RW(Irmin_git.Mem)(Clock)
   module Dav_fs = Caldav.Webdav_fs.Make(Store)
@@ -35,28 +35,30 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
     let headers = Cohttp.Header.init_with "location" (Uri.to_string new_uri) in
     S.respond ~headers ~status:`Moved_permanently ~body:`Empty ()
 
-  let serve callback =
+  let serve data callback =
     let callback (_, cid) request body =
       let cid = Cohttp.Connection.to_string cid in
       let uri = Cohttp.Request.uri request in
       Access_log.debug (fun f -> f "[%s] serving %s." cid (Uri.to_string uri));
-      callback request body
+      Zap.get data (Mirage_kv.Key.v (Uri.path uri)) >>= function
+      | Ok data -> S.respond ~status:`OK ~body:(`String data) ()
+      | _ -> callback request body
     and conn_closed (_,cid) =
       let cid = Cohttp.Connection.to_string cid in
       Access_log.debug (fun f -> f "[%s] closing" cid);
     in
     S.make ~conn_closed ~callback ()
 
-  let start _random clock mclock tls_keys http resolver conduit =
+  let start _random _clock _mclock keys http resolver conduit zap =
     let init_http port config store =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
-      http (`TCP port) @@ serve @@ Webdav_server.dispatch config store
+      http (`TCP port) @@ serve zap @@ Webdav_server.dispatch config store
     in
     let init_https port config store =
-      tls_init tls_keys >>= fun tls_config ->
+      tls_init keys >>= fun tls_config ->
       Server_log.info (fun f -> f "listening on %d/HTTPS" port);
       let tls = `TLS (tls_config, `TCP port) in
-      http tls @@ serve @@ Webdav_server.dispatch config store
+      http tls @@ serve zap @@ Webdav_server.dispatch config store
     in
     let config host =
       let do_trust_on_first_use = Key_gen.tofu () in
@@ -90,7 +92,7 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname () in
       init_store_for_runtime config >>= fun store ->
       Lwt.pick [
-        http (`TCP http_port) @@ serve (redirect https_port) ;
+        http (`TCP http_port) @@ serve zap (redirect https_port) ;
         init_https https_port config store
       ]
 end

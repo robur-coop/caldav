@@ -15,6 +15,7 @@ let https_port =
   Key.(create "https_port" Arg.(opt (some int) None doc))
 
 let certs = generic_kv_ro ~key:Key.(value @@ kv_ro ()) "tls"
+let zap = generic_kv_ro ~key:Key.(value @@ kv_ro ()) "caldavzap"
 
 let admin_password =
   let doc = Key.Arg.info ~doc:"Password for the administrator." ["admin-password"] ~docv:"STRING" in
@@ -44,7 +45,7 @@ let main =
   let direct_dependencies = [
     package "uri" ;
     package ~pin:"git+https://github.com/roburio/caldav.git" "caldav" ;
-    package ~pin:"git+https://github.com/roburio/icalendar.git#zap" "icalendar" ;
+    package ~min:"0.1.2" "icalendar" ;
     package ~pin:"git+https://github.com/hannesm/irmin.git#future" "irmin" ;
     package ~pin:"git+https://github.com/hannesm/irmin.git#future" "irmin-mirage" ;
     package ~pin:"git+https://github.com/hannesm/irmin.git#future" "irmin-git" ;
@@ -62,7 +63,7 @@ let main =
   in
   foreign
     ~packages:direct_dependencies ~keys
-    "Unikernel.Main" (random @-> pclock @-> mclock @-> kv_ro @-> http @-> resolver @-> conduit @-> job)
+    "Unikernel.Main" (random @-> pclock @-> mclock @-> kv_ro @-> http @-> resolver @-> conduit @-> kv_ro @-> job)
 
 let () =
-  register "caldav" [main $ default_random $ default_posix_clock $ default_monotonic_clock $ certs $ http_srv $ resolver_dns net $ conduit_direct ~tls:true net ]
+  register "caldav" [main $ default_random $ default_posix_clock $ default_monotonic_clock $ certs $ http_srv $ resolver_dns net $ conduit_direct ~tls:true net $ zap ]
