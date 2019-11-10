@@ -67,7 +67,7 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       Irmin_git.Mem.v (Fpath.v "bla") >>= function
       | Error _ -> assert false
       | Ok git ->
-        Store.connect git ~headers ~conduit ~author:"caldav" ~resolver
+        Store.connect git ~conduit ~author:"caldav" ~resolver
           ~msg:(fun _ -> "a calendar change")
           (Key_gen.remote ()) >>= fun store ->
         Dav.connect store config admin_pass
