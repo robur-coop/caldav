@@ -23,7 +23,7 @@ It is recommended to use a custom opam switch:
 
 Now we're ready to compile the CalDAV server. Let's get the code:
 
-    git clone https://github.com/roburio/caldav.git
+    git clone -b future-robur https://github.com/roburio/caldav.git
     cd caldav/mirage
     mirage configure // -t xen / -t hvt works as well
     make depend

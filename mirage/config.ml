@@ -23,13 +23,8 @@ let http_srv = cohttp_server @@ conduit_direct ~tls:true net
 (* TODO: make it possible to enable and disable schemes without providing a port *)
 let http_port =
   let doc = Key.Arg.info ~doc:"Listening HTTP port." ["http"] ~docv:"PORT" in
-  Key.(create "http_port" Arg.(opt (some int) None doc))
+  Key.(create "http_port" Arg.(opt int 8080 doc))
 
-let https_port =
-  let doc = Key.Arg.info ~doc:"Listening HTTPS port." ["https"] ~docv:"PORT" in
-  Key.(create "https_port" Arg.(opt (some int) None doc))
-
-let certs = generic_kv_ro ~key:Key.(value @@ kv_ro ()) "tls"
 let zap = generic_kv_ro ~key:Key.(value @@ kv_ro ()) "caldavzap"
 
 let admin_password =
@@ -44,13 +39,23 @@ let tofu =
   let doc = Key.Arg.info ~doc:"If a user does not exist, create them and give them a new calendar." [ "tofu" ] in
   Key.(create "tofu" Arg.(flag doc))
 
-let hostname =
-  let doc = Key.Arg.info ~doc:"Hostname to use." [ "host" ] ~docv:"STRING" in
-  Key.(create "hostname" Arg.(required string doc))
+let monitor =
+  let doc = Key.Arg.info ~doc:"monitor host IP" ["monitor"] in
+  Key.(create "monitor" Arg.(opt (some ip_address) None doc))
+
+let syslog =
+  let doc = Key.Arg.info ~doc:"syslog host IP" ["syslog"] in
+  Key.(create "syslog" Arg.(opt (some ip_address) None doc))
+
+let name =
+  let doc = Key.Arg.info ~doc:"Name of the unikernel" ["name"] in
+  Key.(create "name" Arg.(opt string "calendar.robur.coop" doc))
 
 let apple_testable =
   let doc = Key.Arg.info ~doc:"Configure the server to use with Apple CCS CalDAVtester." [ "apple-testable" ] in
   Key.(create "apple_testable" Arg.(flag doc))
+
+let management_stack = generic_stackv4v6 ~group:"management" (netif ~group:"management" "management")
 
 let main =
   let direct_dependencies = [
@@ -58,17 +63,20 @@ let main =
     package "caldav" ;
     package ~min:"0.1.3" "icalendar" ;
     package ~min:"0.8.7" "fmt";
-    package ~min:"0.0.3" "git-kv"
+    package ~min:"0.0.3" "git-kv";
+    package ~min:"0.3.0" ~sublibs:["mirage"] "logs-syslog";
+    package "mirage-monitoring";
   ] in
   let keys =
-    [ Key.v http_port ; Key.v https_port ;
+    [ Key.v http_port ;
       Key.v admin_password ; Key.v remote ;
-      Key.v tofu ; Key.v hostname ;
+      Key.v tofu ;
+      Key.v name ; Key.v syslog ; Key.v monitor ;
       Key.v apple_testable ]
   in
   foreign
     ~packages:direct_dependencies ~keys
-    "Unikernel.Main" (random @-> pclock @-> git_client @-> kv_ro @-> http @-> kv_ro @-> job)
+    "Unikernel.Main" (console @-> random @-> time @-> pclock @-> git_client @-> http @-> kv_ro @-> stackv4v6 @-> job)
 
 let git_client =
   let dns = generic_dns_client net in
@@ -79,4 +87,4 @@ let git_client =
        (git_http ~authenticator:tls_authenticator tcp git))
 
 let () =
-  register "caldav" [main $ default_random $ default_posix_clock $ git_client $ certs $ http_srv $ zap ]
+  register "caldav" [main $ default_console $ default_random $ default_time $ default_posix_clock $ git_client $ http_srv $ zap $ management_stack ]
