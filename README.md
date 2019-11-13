@@ -37,6 +37,8 @@ For other targets you have to create a virtual machine, e.g. solo5-hvt:
 CalDavZap is an externally developed web-UI for caldav servers. Embedding into
 this unikernel provides the web interface at `https://calendar.example.com/index.html`.
 
+A minified and configured version can be obtained from [here](https://github.com/sg2342/caldavzap/), which is based on the zip file and patch below.
+
 Download [https://www.inf-it.com/CalDavZAP_0.13.1.zip](https://www.inf-it.com/CalDavZAP_0.13.1.zip) (3936373 bytes, SHA256 1fb67a4f85c699bfd73f282407d60852f6649a34a923770ae2a378b4f2794dde)
 and unpack into `mirage/caldavzap` directory.
 
@@ -45,7 +47,7 @@ Edit `mirage/caldavzap/config.js`
 diff -ur caldavzap/config.js mirage/caldavzap/config.js
 --- a/config.js 2015-09-22 15:29:59.000000000 +0200
 +++ b/config.js  2019-11-10 00:46:12.653501000 +0100
-@@ -335,12 +335,12 @@
+@@ -335,12 +335,11 @@
         href: location.protocol+'//'+location.hostname+
                 (location.port ? ':'+location.port: '')+
 -                location.pathname.replace(RegExp('/+[^/]+/*(index\.html)?$'),'')+
