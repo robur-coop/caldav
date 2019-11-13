@@ -48,7 +48,9 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
     let callback (_, cid) request body =
       let cid = Cohttp.Connection.to_string cid in
       let uri = Cohttp.Request.uri request in
-      let path = Uri.path uri in
+      let path = match Uri.path uri with
+        | "/" -> "/index.html"
+        | p -> p in
       Access_log.debug (fun f -> f "[%s] serving %s." cid (Uri.to_string uri));
       Zap.get data (Mirage_kv.Key.v path) >>= function
       | Ok data ->

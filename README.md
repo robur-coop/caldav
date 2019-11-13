@@ -48,7 +48,7 @@ diff -ur caldavzap/config.js mirage/caldavzap/config.js
 @@ -335,12 +335,12 @@
         href: location.protocol+'//'+location.hostname+
                 (location.port ? ':'+location.port: '')+
-                location.pathname.replace(RegExp('/+[^/]+/*(index\.html)?$'),'')+
+-                location.pathname.replace(RegExp('/+[^/]+/*(index\.html)?$'),'')+
 -               '/caldav.php/',
 +               '/principals/',
         timeOut: 90000,
