@@ -35,20 +35,25 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
     let headers = Cohttp.Header.init_with "location" (Uri.to_string new_uri) in
     S.respond ~headers ~status:`Moved_permanently ~body:`Empty ()
 
-  let serve data callback =
+  let opt_static_file zap_data next request body =
+    let uri = Cohttp.Request.uri request in
+    let path = match Uri.path uri with
+      | "/" -> "/index.html"
+      | p -> p
+    in
+    Zap.get zap_data (Mirage_kv.Key.v path) >>= function
+    | Ok data ->
+      let mime_type = Magic_mime.lookup path in
+      let headers = Cohttp.Header.init_with "content-type" mime_type in
+      S.respond ~headers ~status:`OK ~body:(`String data) ()
+    | _ -> next request body
+
+  let serve callback =
     let callback (_, cid) request body =
       let cid = Cohttp.Connection.to_string cid in
       let uri = Cohttp.Request.uri request in
-      let path = match Uri.path uri with
-        | "/" -> "/index.html"
-        | p -> p in
       Access_log.debug (fun f -> f "[%s] serving %s." cid (Uri.to_string uri));
-      Zap.get data (Mirage_kv.Key.v path) >>= function
-      | Ok data ->
-         let mime_type = Magic_mime.lookup path in
-         let headers = Cohttp.Header.init_with "content-type" mime_type in
-         S.respond ~headers ~status:`OK ~body:(`String data) ()
-      | _ -> callback request body
+      callback request body
     and conn_closed (_,cid) =
       let cid = Cohttp.Connection.to_string cid in
       Access_log.debug (fun f -> f "[%s] closing" cid);
@@ -58,13 +63,13 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
   let start _random _clock _mclock keys http resolver conduit zap =
     let init_http port config store =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
-      http (`TCP port) @@ serve zap @@ Webdav_server.dispatch config store
+      http (`TCP port) @@ serve @@ opt_static_file zap @@ Webdav_server.dispatch config store
     in
     let init_https port config store =
       tls_init keys >>= fun tls_config ->
       Server_log.info (fun f -> f "listening on %d/HTTPS" port);
       let tls = `TLS (tls_config, `TCP port) in
-      http tls @@ serve zap @@ Webdav_server.dispatch config store
+      http tls @@ serve @@ opt_static_file zap @@ Webdav_server.dispatch config store
     in
     let config host =
       let do_trust_on_first_use = Key_gen.tofu () in
@@ -98,7 +103,7 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname () in
       init_store_for_runtime config >>= fun store ->
       Lwt.pick [
-        http (`TCP http_port) @@ serve zap (redirect https_port) ;
+        http (`TCP http_port) @@ serve @@ redirect https_port ;
         init_https https_port config store
       ]
 end
