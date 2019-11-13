@@ -39,9 +39,13 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
     let callback (_, cid) request body =
       let cid = Cohttp.Connection.to_string cid in
       let uri = Cohttp.Request.uri request in
+      let path = Uri.path uri in
       Access_log.debug (fun f -> f "[%s] serving %s." cid (Uri.to_string uri));
-      Zap.get data (Mirage_kv.Key.v (Uri.path uri)) >>= function
-      | Ok data -> S.respond ~status:`OK ~body:(`String data) ()
+      Zap.get data (Mirage_kv.Key.v path) >>= function
+      | Ok data ->
+         let mime_type = Magic_mime.lookup path in
+         let headers = Cohttp.Header.init_with "content-type" mime_type in
+         S.respond ~headers ~status:`OK ~body:(`String data) ()
       | _ -> callback request body
     and conn_closed (_,cid) =
       let cid = Cohttp.Connection.to_string cid in
