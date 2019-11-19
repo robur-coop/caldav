@@ -48,11 +48,29 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       S.respond ~headers ~status:`OK ~body:(`String data) ()
     | _ -> next request body
 
-  let serve callback =
+  let get_user_from_auth = function
+    | None -> None
+    | Some v -> match Astring.String.cut ~sep:"Basic " v with
+      | Some ("", b64) ->
+        begin match Nocrypto.Base64.decode (Cstruct.of_string b64) with
+          | None -> Some "bad b64 encoding"
+          | Some data -> match Astring.String.cut ~sep:":" (Cstruct.to_string data) with
+            | Some (user, _) -> Some user
+            | None -> Some "no : between user and password"
+        end
+      | _ -> Some "not basic"
+
+  let serve (author_k, user_agent_k, request_k) callback =
     let callback (_, cid) request body =
-      let cid = Cohttp.Connection.to_string cid in
-      let uri = Cohttp.Request.uri request in
+      let open Cohttp in
+      let cid = Connection.to_string cid in
+      let uri = Request.uri request in
       Access_log.debug (fun f -> f "[%s] serving %s." cid (Uri.to_string uri));
+      let hdr = request.Request.headers in
+      Lwt.with_value author_k (get_user_from_auth (Header.get hdr "Authorization")) @@ fun () ->
+      Lwt.with_value user_agent_k (Header.get hdr "User-Agent") @@ fun () ->
+      let req = Fmt.strf "%s %s" (Code.string_of_method request.Request.meth) (Uri.path uri) in
+      Lwt.with_value request_k (Some req) @@ fun () ->
       callback request body
     and conn_closed (_,cid) =
       let cid = Cohttp.Connection.to_string cid in
@@ -61,15 +79,20 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
     S.make ~conn_closed ~callback ()
 
   let start _random _clock _mclock keys http resolver conduit zap =
+    let author = Lwt.new_key ()
+    and user_agent = Lwt.new_key ()
+    and http_req = Lwt.new_key ()
+    in
+    let dynamic = author, user_agent, http_req in
     let init_http port config store =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
-      http (`TCP port) @@ serve @@ opt_static_file zap @@ Webdav_server.dispatch config store
+      http (`TCP port) @@ serve dynamic @@ opt_static_file zap @@ Webdav_server.dispatch config store
     in
     let init_https port config store =
       tls_init keys >>= fun tls_config ->
       Server_log.info (fun f -> f "listening on %d/HTTPS" port);
       let tls = `TLS (tls_config, `TCP port) in
-      http tls @@ serve @@ opt_static_file zap @@ Webdav_server.dispatch config store
+      http tls @@ serve dynamic @@ opt_static_file zap @@ Webdav_server.dispatch config store
     in
     let config host =
       let do_trust_on_first_use = Key_gen.tofu () in
@@ -80,9 +103,23 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       Irmin_git.Mem.v (Fpath.v "bla") >>= function
       | Error _ -> assert false
       | Ok git ->
-        Store.connect git ~conduit ~author:"caldav" ~resolver
-          ~msg:(fun _ -> "a calendar change")
-          (Key_gen.remote ()) >>= fun store ->
+        (* TODO maybe source IP address? turns out to be not trivial
+                (unclear how to get it from http/conduit) *)
+        let author () =
+          Fmt.strf "%a (via caldav)"
+            Fmt.(option ~none:(unit "no author") string) (Lwt.get author)
+        and msg op =
+          let op_str = function
+            | `Set k -> Fmt.strf "updating %a" Mirage_kv.Key.pp k
+            | `Remove k -> Fmt.strf "removing %a" Mirage_kv.Key.pp k
+            | `Batch -> "batch operation"
+          in
+          Fmt.strf "calendar change %s@.during processing HTTP request %a@.by user-agent %a"
+            (op_str op)
+            Fmt.(option ~none:(unit "no HTTP request") string) (Lwt.get http_req)
+            Fmt.(option ~none:(unit "none") string) (Lwt.get user_agent)
+        in
+        Store.connect git ~conduit ~author ~resolver ~msg (Key_gen.remote ()) >>= fun store ->
         Dav.connect store config admin_pass
     in
     let hostname = Key_gen.hostname () in
@@ -103,7 +140,7 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname () in
       init_store_for_runtime config >>= fun store ->
       Lwt.pick [
-        http (`TCP http_port) @@ serve @@ redirect https_port ;
+        http (`TCP http_port) @@ serve dynamic @@ redirect https_port ;
         init_https https_port config store
       ]
 end
