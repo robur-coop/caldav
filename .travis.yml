@@ -5,7 +5,6 @@ sudo: required
 env:
   global:
     - PACKAGE="caldav"
-    - EXTRA_REMOTES="git+https://github.com/samoht/opam-repository.git#release-irmin-2.0.0"
   matrix:
     - OCAML_VERSION=4.06
     - OCAML_VERSION=4.07 POST_INSTALL_HOOK="./.travis-test-mirage.sh" TESTS=false
