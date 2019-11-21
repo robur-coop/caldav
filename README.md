@@ -2,22 +2,59 @@
 
 To begin the installation, you need to `ssh` into your server.
 Then, you need to install [`opam`](https://opam.ocaml.org) via your package manager (e.g. `apt install opam`).
-Make sure you have OCaml version `>=4.03.0`, and opam version `>=2.0.0` and mirage version `>=3.3.1` installed via your package manager.
+Make sure you have OCaml version `>=4.07.0`, and opam version `>=2.0.0` and mirage version `>=3.7.1` installed via your package manager.
 You can use `ocaml --version`, `opam --version`, and `mirage --version` to find out.
 
 Now we're ready to compile the CalDAV server. Let's get the code (don't worry that we already pinned caldav, we now need the source code of the unikernel):
 
-    git clone https://github.com/roburio/caldav.git 
+    git clone https://github.com/roburio/caldav.git
     cd caldav/mirage
-    mirage configure
+    mirage configure // -t xen / -t hvt works as well
     make depend
     make
 
-If the above commands fail while installing caldav, run `opam remove webmachine` and run `make depend` again.  
-The `make` command creates a `main.native` executable in `caldav/mirage`. This is the unikernel.
+If the above commands fail while installing caldav, run `opam remove webmachine` and run `make depend` again.
+The `make` command creates a `caldav` executable in `caldav/mirage`. This is the unikernel.
+If you compiled for unix (the default unless you specify `-t xen/hvt/..`, this is an executable you can run directly:
 We can see all its options:
 
-    ./main.native --help
+    ./caldav --help
+
+For other targets you have to create a virtual machine, e.g. solo5-hvt:
+
+    sudo ./solo5-hvt --net=tap100 -- caldav.hvt
+
+## CalDavZAP integration
+
+CalDavZap is an externally developed web-UI for caldav servers. Embedding into
+this unikernel provides the web interface at `https://calendar.example.com/index.html`.
+
+A minified and configured version can be obtained from [here](https://github.com/sg2342/caldavzap/), which is based on the zip file and patch below.
+
+Download [https://www.inf-it.com/CalDavZAP_0.13.1.zip](https://www.inf-it.com/CalDavZAP_0.13.1.zip) (3936373 bytes, SHA256 1fb67a4f85c699bfd73f282407d60852f6649a34a923770ae2a378b4f2794dde)
+and unpack into `mirage/caldavzap` directory.
+
+Edit `mirage/caldavzap/config.js`
+```
+diff -ur caldavzap/config.js mirage/caldavzap/config.js
+--- a/config.js 2015-09-22 15:29:59.000000000 +0200
++++ b/config.js  2019-11-10 00:46:12.653501000 +0100
+@@ -335,12 +335,11 @@
+        href: location.protocol+'//'+location.hostname+
+                (location.port ? ':'+location.port: '')+
+-                location.pathname.replace(RegExp('/+[^/]+/*(index\.html)?$'),'')+
+-               '/caldav.php/',
++               '/principals/',
+        timeOut: 90000,
+        lockTimeOut: 10000,
+        checkContentType: true,
+        settingsAccount: true,
+-       delegation: true,
++       delegation: false,
+        additionalResources: [],
+        hrefLabel: null,
+        forceReadOnly: null,
+```
 
 ## Running the unikernel
 
@@ -28,27 +65,28 @@ The following steps vary based on your desired server features.
 If you're planning to use https you need to create a certificate:
 
     opam install certify
-    selfsign -c server.pem -k server.key "calendar.example.com"
+    certify selfsign -c server.pem -k server.key "calendar.example.com"
     mv server.pem server.key caldav/mirage/tls/
+    cd caldav/mirage ; make
 
-You can also copy an existing one to that location.
+You can also copy an existing certificate and private key to that location.
 
 ### First start
 
-To start the server, we need a data directory and an admin password, which will be used for the user `root` that always exists. The password needs to be set on first run only. It will then be hashed, salted and stored on disk in the data directory. The data directory persists on disk when the unikernel is not running. It's the part with your precious user data that you might want to back up.
+To start the server, we need a git remote (possibly with credentials) and an admin password, which will be used for the user `root` that always exists. The password needs to be set on first run only. It will then be hashed, salted and stored in the git repository. The git repository persists on disk when the unikernel is not running. It's the part with your precious user data that you might want to back up.
 
-Startup:
+You have to set up a git repository and provide access to that, either using git_daemon and `--enable=receive-pack` (then everybody can push :/), or via https, or ssh with an RSA key. You can run `awa_gen_key` to get a seed (to be passed to the unikernel) and a public key (which you need to enable access to the git repository).
 
-    mkdir /tmp/calendar
+The arguments for the command line vary depending on the setup:
 
-### With HTTP
-    ./main.native --data="/tmp/calendar" --admin-password="somecoolpassword" --host="calendar.example.com" --http=80
+### With HTTP server and git via TCP
+    --admin-password="somecoolpassword" --host="calendar.example.com" --http=80 --remote=git://git.example.com/calendar-data.git
 
-### With HTTPS
-    ./main.native --data="/tmp/calendar" --admin-password="somecoolpassword" --host="calendar.example.com" --http=80 --https=443
+### With HTTPS server and git via https
+    --admin-password="somecoolpassword" --host="calendar.example.com" --http=80 --https=443 --remote=https://user:pass@git.example.com/calendar-data.git
 
-### With HTTPS + trust on first use (tofu):
-    ./main.native --data="/tmp/calendar" --admin-password="somecoolpassword" --host="calendar.example.com" --http=80 --https=443 --tofu
+### With HTTPS + trust on first use (tofu) and git via ssh:
+    --admin-password="somecoolpassword" --host="calendar.example.com" --http=80 --https=443 --tofu --remote=ssh://git@git.example.com/calendar-data.git --seed=abcdef --authenticator=SHA256:b64-encoded-hash-of-server-key
 
 ## Server administration
 
@@ -135,6 +173,3 @@ Make the calendar `TESTCALENDAR` private, only accessible for the `OWNER`.
         </D:prop>
       </D:set>
     </D:propertyupdate>' "https://calendar.example.com/calendars/TESTCALENDAR"
-
-
-

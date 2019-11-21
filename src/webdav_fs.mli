@@ -59,4 +59,4 @@ sig
   val valid : t -> Webdav_config.config -> (unit, [> `Msg of string ]) result Lwt.t
 end
 
-module Make (Fs: Mirage_kv_lwt.RW) : S with type t = Fs.t 
+module Make (Fs: Mirage_kv.RW) : S with type t = Fs.t 

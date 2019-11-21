@@ -58,7 +58,7 @@ end
 
 let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 
-module Make (R : Mirage_random.C) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.S) (S: Cohttp_lwt.S.Server) = struct
+module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.S) (S: Cohttp_lwt.S.Server) = struct
 
   module WmClock = struct
     let now () =
