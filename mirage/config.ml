@@ -33,10 +33,6 @@ let hostname =
   let doc = Key.Arg.info ~doc:"Hostname to use." [ "host" ] ~docv:"STRING" in
   Key.(create "hostname" Arg.(required string doc))
 
-let monitor =
-  let doc = Key.Arg.info ~doc:"Hostname to use for monitoring." [ "monitor" ] ~docv:"STRING" in
-  Key.(create "monitor" Arg.(opt (some string) None doc))
-
 let apple_testable =
   let doc = Key.Arg.info ~doc:"Configure the server to use with Apple CCS CalDAVtester." [ "apple-testable" ] in
   Key.(create "apple_testable" Arg.(flag doc))
@@ -53,7 +49,7 @@ let main =
     [ Key.abstract http_port ; Key.abstract https_port ;
       Key.abstract admin_password ; Key.abstract remote ;
       Key.abstract tofu ; Key.abstract hostname ;
-      Key.abstract monitor ; Key.abstract apple_testable ]
+      Key.abstract apple_testable ]
   in
   foreign
     ~packages:direct_dependencies ~keys
