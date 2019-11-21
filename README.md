@@ -1,7 +1,8 @@
 ## Live test server
 
 A test caldav server is setup at [https://calendar.robur.coop](https://calendar.robur.coop), which is a unikernel pushing to our [calendar git repository](https://git.robur.io/?p=calendar-data.git;a=summary).
-You can configure the test server in your calendar client with any username and any password (e.g. using "mirage" as user and password).
+Please try using "mirage" as user and password either on our test server which serves as well a [CalDavZAP](https://www.inf-it.com/open-source/clients/caldavzap/) user interface or configure our test server in your calendar client (`calendar.robur.coop`).
+You can choose any not-yet-used username and password, an account will be created by caldav (using the "trust on first use" argument described below).
 
 ## Compilation of CalDAV server unikernel
 
