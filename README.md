@@ -1,3 +1,8 @@
+## Live test server
+
+A test caldav server is setup at [https://calendar.robur.coop](https://calendar.robur.coop), which is a unikernel pushing to our [calendar git repository](https://git.robur.io/?p=calendar-data.git;a=summary).
+You can configure the test server in your calendar client with any username and any password (e.g. using "mirage" as user and password).
+
 ## Compilation of CalDAV server unikernel
 
 To begin the installation, you need to `ssh` into your server.
@@ -22,7 +27,7 @@ We can see all its options:
 
 For other targets you have to create a virtual machine, e.g. solo5-hvt:
 
-    sudo ./solo5-hvt --net=tap100 -- caldav.hvt
+    sudo solo5-hvt --net:service=tap100 -- caldav.hvt
 
 ## CalDavZAP integration
 
