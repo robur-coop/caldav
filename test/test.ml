@@ -549,8 +549,8 @@ let appendix_b_data acl =
     let props name = Properties.create_dir acl now name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
-    Lwt_list.iter_s (fun (fn, etag, data) ->
-        let props = Properties.create ~content_type:"text/calendar" ~etag
+    Lwt_list.iter_s (fun (fn, _etag, data) ->
+        let props = Properties.create ~content_type:"text/calendar"
             acl now (String.length data) ("bernard/work/" ^ fn)
         in
         Fs.write res_fs (`File [ "bernard" ; "work" ; fn ])
@@ -569,8 +569,8 @@ let appendix_b_1_data acl =
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
     (match Appendix_b.all with
      | [] -> assert false
-     | (fn, etag, data) :: _ ->
-       let props = Properties.create ~content_type:"text/calendar" ~etag
+     | (fn, _etag, data) :: _ ->
+       let props = Properties.create ~content_type:"text/calendar"
            acl now (String.length data) ("bernard/work/" ^ fn)
        in
        Fs.write res_fs (`File [ "bernard" ; "work" ; fn ])
@@ -613,7 +613,7 @@ let test_report_7_8_1 () =
        <D:href>/bernard/work/abcd2.ics</D:href>
        <D:propstat>
          <D:prop>
-           <D:getetag>"fffff-abcd2"</D:getetag>
+           <D:getetag>0f034329a44585adc51b4038070b968d</D:getetag>
            <C:calendar-data>BEGIN:VCALENDAR
 VERSION:2.0
 BEGIN:VTIMEZONE
@@ -665,7 +665,7 @@ END:VCALENDAR
     <D:href>/bernard/work/abcd3.ics</D:href>
     <D:propstat>
       <D:prop>
-        <D:getetag>"fffff-abcd3"</D:getetag>
+        <D:getetag>f5ef220a9072ece829f086cfd9b137ba</D:getetag>
         <C:calendar-data>BEGIN:VCALENDAR
 VERSION:2.0
 BEGIN:VTIMEZONE
@@ -716,7 +716,7 @@ let test_report_7_8_2 () =
        <D:href>/bernard/work/abcd2.ics</D:href>
        <D:propstat>
          <D:prop>
-           <D:getetag>"fffff-abcd2"</D:getetag>
+           <D:getetag>0f034329a44585adc51b4038070b968d</D:getetag>
            <C:calendar-data>BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -764,7 +764,7 @@ END:VCALENDAR
        <D:href>/bernard/work/abcd3.ics</D:href>
        <D:propstat>
          <D:prop>
-           <D:getetag>"fffff-abcd3"</D:getetag>
+           <D:getetag>f5ef220a9072ece829f086cfd9b137ba</D:getetag>
            <C:calendar-data>BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -823,7 +823,7 @@ let test_report_7_8_3 () =
        <D:href>/bernard/work/abcd2.ics</D:href>
        <D:propstat>
          <D:prop>
-           <D:getetag>"fffff-abcd2"</D:getetag>
+           <D:getetag>0f034329a44585adc51b4038070b968d</D:getetag>
            <C:calendar-data>BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -853,7 +853,7 @@ END:VCALENDAR
        <D:href>/bernard/work/abcd3.ics</D:href>
        <D:propstat>
          <D:prop>
-           <D:getetag>"fffff-abcd3"</D:getetag>
+           <D:getetag>f5ef220a9072ece829f086cfd9b137ba</D:getetag>
            <C:calendar-data>BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -894,7 +894,7 @@ let test_report_7_8_4 () =
        <D:href>/bernard/work/abcd8.ics</D:href>
        <D:propstat>
          <D:prop>
-           <D:getetag>"fffff-abcd8"</D:getetag>
+           <D:getetag>0556572c63ff541a1512cb3494ed1fe7</D:getetag>
            <C:calendar-data>BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -929,7 +929,7 @@ let test_report_7_8_5 () =
        <D:href>/bernard/work/abcd5.ics</D:href>
        <D:propstat>
          <D:prop>
-           <D:getetag>"fffff-abcd5"</D:getetag>
+           <D:getetag>c8ef519bd9b7316a51611ebf2d99991b</D:getetag>
            <C:calendar-data>BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -1017,7 +1017,7 @@ let test_multiget_7_9_1 () =
        <D:href>/bernard/work/abcd1.ics</D:href>
        <D:propstat>
          <D:prop>
-           <D:getetag>"fffff-abcd1"</D:getetag>
+           <D:getetag>9e4b2e35cd7588524c1285a57746c17b</D:getetag>
            <C:calendar-data>BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Example Corp.//CalDAV Client//EN
@@ -1100,7 +1100,7 @@ let test_report_7_8_2_range () =
            (Xml.Node ("DAV:", "propstat", [],
               [(Xml.Node ("DAV:", "prop", [],
                   [(Xml.Node ("DAV:", "getetag", [],
-                      [(Xml.Pcdata "\"fffff-abcd1\"")]));
+                      [(Xml.Pcdata "9e4b2e35cd7588524c1285a57746c17b")]));
                     (Xml.Node ("urn:ietf:params:xml:ns:caldav",
                        "calendar-data", [],
                        [(Xml.Pcdata ics_example)
@@ -1224,8 +1224,7 @@ let mkcol_success () =
       let props =
         let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
         let acl = [ (`Href (Uri.of_string "/principals/testuser/"), `Grant [`All])] in
-        let etag = [ ((Xml.dav_ns, "getetag"), ([], [ Xml.Pcdata "c5fcac20004bda4569187f24b207e558" ] )) ] in
-        Properties.create_dir ~initial_props:etag ~resourcetype acl now "Special Resource"
+        Properties.create_dir ~resourcetype acl now "Special Resource"
       in
       let properties = Properties.create_dir allow_all_acl now "home" in
       Fs.mkdir res_fs (`Dir ["home"]) properties >>= fun _ ->

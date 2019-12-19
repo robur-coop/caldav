@@ -153,7 +153,8 @@ module Make (Fs:Mirage_kv.RW) = struct
   *)
   let write_property_map fs f_or_d map =
     let map' = Properties.unsafe_remove (Xml.dav_ns, "getlastmodified") map in
-    let data = Sexplib.Sexp.to_string_hum (Properties.to_sexp map') in
+    let map'' = Properties.unsafe_remove (Xml.dav_ns, "getetag") map' in
+    let data = Sexplib.Sexp.to_string_hum (Properties.to_sexp map'') in
     let filename = propfilename f_or_d in
     Fs.set fs filename data
 
@@ -204,24 +205,6 @@ module Make (Fs:Mirage_kv.RW) = struct
     | Ok str ->
       Some (Properties.of_sexp (Sexplib.Sexp.of_string str))
 
-  (* careful: unsafe_find *)
-  let get_etag fs f_or_d =
-    get_raw_property_map fs f_or_d >|= function
-    | None -> None
-    | Some map -> match Properties.unsafe_find (Xml.dav_ns, "getetag") map with
-      | Some (_, [ Xml.Pcdata etag ]) -> Some etag
-      | _ -> Some (to_string f_or_d)
-
-  (* careful: unsafe_find (when calling get_etag) *)
-  let etag_of_dir fs (`Dir dir) =
-    listdir fs (`Dir dir) >>= function
-    | Error _ -> Lwt.return ""
-    | Ok files ->
-      Lwt_list.map_p (get_etag fs) files >>= fun etags ->
-      let some_etags = List.fold_left (fun acc -> function None -> acc | Some x -> x :: acc) [] etags in
-      let data = String.concat ":" some_etags in
-      Lwt.return (Digest.to_hex @@ Digest.string data)
-
   let last_modified fs f_or_d =
     let key = data @@ to_string f_or_d in
     Fs.last_modified fs key >|= function
@@ -242,9 +225,15 @@ module Make (Fs:Mirage_kv.RW) = struct
       begin last_modified fs f_or_d >|= function
       | Error e -> Ptime.epoch
       | Ok ts -> ts
-      end >|= fun ts ->
-      let node = ([], [ Xml.Pcdata (Ptime.to_rfc3339 ts) ]) in
-      Properties.unsafe_add (Xml.dav_ns, "getlastmodified") node map
+      end >>= fun ts ->
+      begin etag fs f_or_d >|= function
+      | Error e -> assert false
+      | Ok etag -> etag
+      end >|= fun etag ->
+      let lm = ([], [ Xml.Pcdata (Ptime.to_rfc3339 ts) ]) in
+      let etag = ([], [ Xml.Pcdata etag ]) in
+      let map' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") lm map in
+      Properties.unsafe_add (Xml.dav_ns, "getetag") etag map'
 
   let read fs (`File file) =
     let kv_file = data @@ to_string (`File file) in

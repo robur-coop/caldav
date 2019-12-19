@@ -62,8 +62,6 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
 
   type state = Fs.t
 
-  let etag_of_data str = Digest.to_hex @@ Digest.string str
-
   let is_calendar fs file =
     Fs.get_property_map fs file >|= fun map ->
     (* unsafe is ok, used internally for decision *)
@@ -151,10 +149,6 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     let data = String.concat "\n" (List.map print_file files) in
     ("text/html", data)
 
-  let etag_of_dir fs (`Dir dir) last_modified =
-    directory_as_html fs (`Dir dir) >|= fun (_ct, data) ->
-    etag_of_data (last_modified ^ data)
-
   let write_if_parent_exists fs config (file : Webdav_fs.file) timestamp content_type user ics =
     let file' = (file :> Webdav_fs.file_or_dir) in
     let parent = Fs.parent file' in
@@ -169,14 +163,14 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         Log.err (fun m -> m "is_calendar was false when trying to write %s" (Fs.to_string file')) ;
         Lwt.return @@ Error `Bad_request
       | true ->
-        let etag = etag_of_data ics in
         let acl = [(`All, `Inherited (Uri.of_string (Fs.to_string parent')))] in
-        let props = Properties.create ~content_type ~etag
-            acl timestamp (String.length ics) (Fs.to_string file')
-        in
-        Fs.write fs file ics props >|= function
-        | Error e -> Error `Internal_server_error
-        | Ok () -> Ok etag
+        let props = Properties.create ~content_type acl timestamp (String.length ics) (Fs.to_string file') in
+        Fs.write fs file ics props >>= function
+        (* TODO map error to internal server error and log it, as function *)
+        | Error e -> Lwt.return @@ Error `Internal_server_error
+        | Ok () -> Fs.etag fs file' >|= function
+          | Error e -> Error `Internal_server_error
+          | Ok etag -> Ok etag
 
   let write_component fs config ~path ~user timestamp ~content_type ~data =
     match parse_calendar ~path data with
@@ -372,9 +366,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
       let res = Xml.tree_to_string xml in
       Lwt.return @@ Error (`Forbidden res)
     | Some map, _ ->
-      let etag = etag_of_data (Ptime.to_rfc3339 now) in
-      let map' = Properties.unsafe_add (Xml.dav_ns, "getetag") ([], [Xml.Pcdata etag]) map in
-      Fs.mkdir fs dir map' >|= function
+      Fs.mkdir fs dir map >|= function
       | Error _ -> Error `Conflict
       | Ok () -> Ok ()
 
@@ -999,11 +991,9 @@ let compute_etag fs ~path =
   Fs.from_string fs path >>= function
   | Error _ -> Lwt.return None
   | Ok f_or_d ->
-    Fs.get_property_map fs f_or_d >|= fun map ->
-    (* no special property, already checked for resource *)
-    match Properties.unsafe_find (Xml.dav_ns, "getetag") map with
-    | Some (_, [ Xml.Pcdata etag ]) -> Some etag
-    | _ -> None
+    Fs.etag fs f_or_d >|= function
+    | Error _ -> None
+    | Ok etag -> Some etag
 
 let server_ns = "http://calendarserver.org/ns/"
 let carddav_ns = "urn:ietf:params:xml:ns:carddav"

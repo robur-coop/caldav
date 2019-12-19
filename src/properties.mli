@@ -33,7 +33,7 @@ val unsafe_remove : Xml.fqname -> t -> t
 
 (* safe methods: ACL is verified for property, property is checked to be not in any exclusion list *)
 val create : ?initial_props:(Xml.fqname * property) list ->
-  ?content_type:string -> ?language:string -> ?etag:string ->
+  ?content_type:string -> ?language:string ->
   ?resourcetype:Xml.tree list -> Xml.ace list -> Ptime.t -> int -> string -> t
 
 val create_dir : ?initial_props:(Xml.fqname * property) list ->

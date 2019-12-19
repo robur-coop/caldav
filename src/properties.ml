@@ -131,11 +131,10 @@ let pp ppf t = Fmt.string ppf @@ to_string t
 let equal a b = String.equal (to_string a) (to_string b)
 
 (* creates property map for file, only needs to check `Bind in parent, done by webmachine *)
-let create ?(initial_props = []) ?(content_type = "text/html") ?(language = "en") ?etag ?(resourcetype = []) acl timestamp length filename =
+let create ?(initial_props = []) ?(content_type = "text/html") ?(language = "en") ?(resourcetype = []) acl timestamp length filename =
   let filename = if filename = "" then "hinz und kunz" else filename in
-  let etag' m = match etag with None -> m | Some e -> unsafe_add (Xml.dav_ns, "getetag") ([], [ Xml.Pcdata e ]) m in
   let timestamp' = Ptime.to_rfc3339 timestamp in
-  let propmap = etag' @@
+  let propmap =
     unsafe_add (Xml.robur_ns, "prop_version") ([], prop_version) @@
     unsafe_add (Xml.dav_ns, "acl") ([], List.map Xml.ace_to_xml acl) @@
     unsafe_add (Xml.dav_ns, "creationdate") ([], [ Xml.Pcdata timestamp' ]) @@
