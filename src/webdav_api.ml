@@ -132,17 +132,12 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
   (* out: ( name * typ * last_modified ) list - non-recursive *)
   let list_dir fs (`Dir dir) =
     let list_file f_or_d =
-      (* maybe implement a Fs.get_property? *)
-      Fs.get_property_map fs f_or_d >|= fun m ->
-      (* restore last modified from properties as a workaround because the file system does not provide it *)
-      let last_modified = match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") m with
-        | Some (_, [ Xml.Pcdata lm ]) -> lm
-        | _ -> assert false
-      in
-      let is_dir = match f_or_d with
-        | `File _ -> false | `Dir _ -> true
-      in
-      (Fs.to_string f_or_d, is_dir, last_modified)
+      begin Fs.last_modified fs f_or_d >|= function
+      | Error e -> Ptime.epoch
+      | Ok ts -> ts 
+      end >|= fun ts ->
+      let is_dir = match f_or_d with | `File _ -> false | `Dir _ -> true in
+      (Fs.to_string f_or_d, is_dir, Ptime.to_rfc3339 ts)
     in
     Fs.listdir fs (`Dir dir) >>= function
     | Error e -> assert false
@@ -159,18 +154,6 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
   let etag_of_dir fs (`Dir dir) last_modified =
     directory_as_html fs (`Dir dir) >|= fun (_ct, data) ->
     etag_of_data (last_modified ^ data)
-
-  (* When a resource is modified or deleted, its parent's getlastmodified and getetag properties are updated. *)
-  let update_parent_after_child_write fs f_or_d last_modified = 
-    let last_modified = Ptime.to_rfc3339 last_modified in
-    let (`Dir parent) = Fs.parent f_or_d in
-    Fs.get_property_map fs (`Dir parent) >>= fun map ->
-    let map' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.Pcdata last_modified ]) map in
-    etag_of_dir fs (`Dir parent) last_modified >>= fun etag ->
-    let map'' = Properties.unsafe_add (Xml.dav_ns, "getetag") ([], [ Xml.Pcdata etag ]) map' in
-    Fs.write_property_map fs (`Dir parent) map'' >|= function
-    | Error e -> assert false
-    | Ok () -> ()
 
   let write_if_parent_exists fs config (file : Webdav_fs.file) timestamp content_type user ics =
     let file' = (file :> Webdav_fs.file_or_dir) in
@@ -191,10 +174,9 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         let props = Properties.create ~content_type ~etag
             acl timestamp (String.length ics) (Fs.to_string file')
         in
-        Fs.write fs file ics props >>= function
-        | Error e -> Lwt.return @@ Error `Internal_server_error
-        | Ok () -> update_parent_after_child_write fs file' timestamp >|= fun () ->
-                    Ok etag
+        Fs.write fs file ics props >|= function
+        | Error e -> Error `Internal_server_error
+        | Ok () -> Ok etag
 
   let write_component fs config ~path ~user timestamp ~content_type ~data =
     match parse_calendar ~path data with
@@ -259,10 +241,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
   let delete fs ~path now =
     Fs.from_string fs path >>= function
     | Error _ -> Lwt.return false
-    | Ok f_or_d ->
-      Fs.destroy fs f_or_d >>= fun res ->
-      update_parent_after_child_write fs f_or_d now >|= fun () ->
-      true
+    | Ok f_or_d -> Fs.destroy fs f_or_d >|= fun res -> true
 
   let statuscode_to_string res =
     Format.sprintf "%s %s"
@@ -1012,11 +991,9 @@ let last_modified fs ~path =
   Fs.from_string fs path >>= function
   | Error _ -> Lwt.return None
   | Ok f_or_d ->
-    Fs.get_property_map fs f_or_d >|= fun map ->
-    (* no special property, already checked for resource *)
-    match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
-    | Some (_, [ Xml.Pcdata lm]) -> Some (Xml.rfc3339_date_to_http_date lm)
-    | _ -> None
+    Fs.last_modified fs f_or_d >|= function
+    | Error _ -> None
+    | Ok ts -> Some (Xml.ptime_to_http_date ts)
 
 let compute_etag fs ~path =
   Fs.from_string fs path >>= function

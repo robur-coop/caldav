@@ -28,11 +28,9 @@ let of_sexp s =
 (* not safe *)
 let unsafe_find = PairMap.find_opt
 
-(* not safe *)
 let unsafe_add = PairMap.add
 
-(* not safe, not public *)
-let remove = PairMap.remove
+let unsafe_remove = PairMap.remove
 
 (* public and ok *)
 let empty = PairMap.empty
@@ -102,7 +100,7 @@ let patch ?(is_mkcol = false) props_for_resource updates =
       if List.mem k write_protected
       then None, (`Forbidden, xml k) :: propstats
       else
-        let props_for_resource'' = remove k props_for_resource' in
+        let props_for_resource'' = unsafe_remove k props_for_resource' in
         Some props_for_resource'', (`OK, xml k) :: propstats
   in
   match List.fold_left apply (Some props_for_resource, []) updates with
@@ -268,4 +266,4 @@ let names m =
 (* not really safe, but excludes from the not-returned-by-allprop list *)
 let all m =
   let m' = PairMap.update (Xml.dav_ns, "getlastmodified") transform_lastmodified m in
-  to_trees (List.fold_right remove not_returned_by_allprop m')
+  to_trees (List.fold_right unsafe_remove not_returned_by_allprop m')

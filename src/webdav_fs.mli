@@ -57,6 +57,10 @@ sig
   val pp_write_error : write_error Fmt.t
 
   val valid : t -> Webdav_config.config -> (unit, [> `Msg of string ]) result Lwt.t
+
+  val last_modified : t -> file_or_dir -> (Ptime.t, error) result Lwt.t
+
+  val etag : t -> file_or_dir -> (string, error) result Lwt.t
 end
 
 module Make (Fs: Mirage_kv.RW) : S with type t = Fs.t 

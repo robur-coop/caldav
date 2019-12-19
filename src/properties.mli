@@ -25,9 +25,11 @@ val privileges : auth_user_props:t -> t -> Xml.privilege list
 val inherited_acls : auth_user_props:t -> t -> Uri.t list
 
 (* unsafe methods *)
+val unsafe_find : Xml.fqname -> t -> property option
+
 val unsafe_add : Xml.fqname -> property -> t -> t
 
-val unsafe_find : Xml.fqname -> t -> property option
+val unsafe_remove : Xml.fqname -> t -> t
 
 (* safe methods: ACL is verified for property, property is checked to be not in any exclusion list *)
 val create : ?initial_props:(Xml.fqname * property) list ->
