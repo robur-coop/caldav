@@ -215,7 +215,9 @@ module Make (Fs:Mirage_kv.RW) = struct
     let key = data @@ to_string f_or_d in
     Fs.digest fs key >|= function
     | Error e -> Error e
-    | Ok d -> Ok (Digest.to_hex d)
+    | Ok d ->
+      let `Hex hex = Hex.of_string d in
+      Ok hex
 
   (* careful: unsafe_find, unsafe_add *)
   let get_property_map fs f_or_d =
