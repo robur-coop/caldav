@@ -2,12 +2,12 @@
 open Lwt.Infix
 open Caldav.Webdav_config
 
-module Fs = Caldav.Webdav_fs.Make(FS_unix)
+module Fs = Caldav.Webdav_fs.Make(Pclock)(FS_unix)
 module Webdav_server = Caldav.Webdav_server.Make(Clock)(Fs)
 
 module G = Irmin_git.Mem
 module Store = Irmin_mirage.Git.KV_RW(G)(Pclock)
-module Fs = Caldav.Webdav_fs.Make(Store)
+module Fs = Caldav.Webdav_fs.Make(Pclock)(Store)
 
 module Xml = Caldav.Webdav_xml
 module Dav = Caldav.Webdav_api.Make(Fs)
@@ -124,7 +124,7 @@ module Http_server = Cohttp_lwt_unix.Server
 module Body = Cohttp_lwt.Body
 
 module KV_mem = Mirage_kv_mem.Make(Pclock)
-module Dav_fs = Caldav.Webdav_fs.Make(KV_mem)
+module Dav_fs = Caldav.Webdav_fs.Make(Pclock)(KV_mem)
 
 module Webdav_server = Caldav.Webdav_server.Make(Mirage_random_test)(Pclock)(Dav_fs)(Http_server)
 

@@ -63,4 +63,4 @@ sig
   val etag : t -> file_or_dir -> (string, error) result Lwt.t
 end
 
-module Make (Fs: Mirage_kv.RW) : S with type t = Fs.t 
+module Make (Pclock : Mirage_clock.PCLOCK) (Fs: Mirage_kv.RW) : S with type t = Fs.t

@@ -149,6 +149,16 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     let data = String.concat "\n" (List.map print_file files) in
     ("text/html", data)
 
+  (* When a resource is modified or deleted, its parent's getlastmodified property needs to be updated. *)
+  let update_parent_after_child_write fs f_or_d last_modified =
+    let last_modified = Ptime.to_rfc3339 last_modified in
+    let (`Dir parent) = Fs.parent f_or_d in
+    Fs.get_property_map fs (`Dir parent) >>= fun map ->
+    let map' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.Pcdata last_modified ]) map in
+    Fs.write_property_map fs (`Dir parent) map' >|= function
+    | Error e -> assert false
+    | Ok () -> ()
+
   let write_if_parent_exists fs config (file : Webdav_fs.file) timestamp content_type user ics =
     let file' = (file :> Webdav_fs.file_or_dir) in
     let parent = Fs.parent file' in
@@ -168,7 +178,9 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         Fs.write fs file ics props >>= function
         (* TODO map error to internal server error and log it, as function *)
         | Error e -> Lwt.return @@ Error `Internal_server_error
-        | Ok () -> Fs.etag fs file' >|= function
+        | Ok () ->
+          update_parent_after_child_write fs file' timestamp >>= fun () ->
+          Fs.etag fs file' >|= function
           | Error e -> Error `Internal_server_error
           | Ok etag -> Ok etag
 
@@ -235,7 +247,10 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
   let delete fs ~path now =
     Fs.from_string fs path >>= function
     | Error _ -> Lwt.return false
-    | Ok f_or_d -> Fs.destroy fs f_or_d >|= fun res -> true
+    | Ok f_or_d ->
+      Fs.destroy fs f_or_d >>= fun res ->
+      update_parent_after_child_write fs f_or_d now >|= fun () ->
+      true
 
   let statuscode_to_string res =
     Format.sprintf "%s %s"

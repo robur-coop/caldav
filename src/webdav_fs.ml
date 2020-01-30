@@ -67,7 +67,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let propfile_ext = ".prop" 
 
-module Make (Fs:Mirage_kv.RW) = struct
+module Make (Pclock : Mirage_clock.PCLOCK) (Fs:Mirage_kv.RW) = struct
 
   open Lwt.Infix
 
@@ -203,13 +203,7 @@ module Make (Fs:Mirage_kv.RW) = struct
       Log.err (fun m -> m "error while getting properties for %s %a" (to_string f_or_d) pp_error e) ;
       None
     | Ok str ->
-      Some (Properties.of_sexp (Sexplib.Sexp.of_string str))
-
-  let last_modified fs f_or_d =
-    let key = data @@ to_string f_or_d in
-    Fs.last_modified fs key >|= function
-    | Error e -> Error e
-    | Ok t -> Ok (Ptime.v t)
+      Some (Properties.of_sexp (Ptime.v (Pclock.now_d_ps ())) (Sexplib.Sexp.of_string str))
 
   let etag fs f_or_d =
     let key = data @@ to_string f_or_d in
@@ -223,19 +217,34 @@ module Make (Fs:Mirage_kv.RW) = struct
   let get_property_map fs f_or_d =
     get_raw_property_map fs f_or_d >>= function
     | None -> Lwt.return Properties.empty
-    | Some map -> 
-      begin last_modified fs f_or_d >|= function
-      | Error e -> Ptime.epoch
-      | Ok ts -> ts
-      end >>= fun ts ->
-      begin etag fs f_or_d >|= function
-      | Error e -> assert false
-      | Ok etag -> etag
-      end >|= fun etag ->
-      let lm = ([], [ Xml.Pcdata (Ptime.to_rfc3339 ts) ]) in
-      let etag = ([], [ Xml.Pcdata etag ]) in
-      let map' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") lm map in
-      Properties.unsafe_add (Xml.dav_ns, "getetag") etag map'
+    | Some map ->
+      (* insert etag (from Fs.digest) into the propertymap *)
+      etag fs f_or_d >|= function
+      | Error e ->
+        Log.err (fun m -> m "error %a while computing etag for %s"
+                    Fs.pp_error e (to_string f_or_d));
+        map
+      | Ok etag ->
+        let etag = ([], [ Xml.Pcdata etag ]) in
+        Properties.unsafe_add (Xml.dav_ns, "getetag") etag map
+
+  let last_modified fs f_or_d =
+    get_property_map fs f_or_d >|= fun map ->
+    let ts =
+      match Properties.unsafe_find (Xml.dav_ns, "getlastmodified") map with
+      | Some (_, [ Xml.Pcdata ts ]) ->
+        begin match Ptime.of_rfc3339 ts with
+          | Ok (ts, _, _) -> ts
+          | Error (`RFC3339 (_, err)) ->
+            Log.err (fun m -> m "error %a parsing %s as RFC3339 time, using current time"
+                        Ptime.pp_rfc3339_error err ts);
+            Ptime.v (Pclock.now_d_ps ())
+        end
+      | _ ->
+        Log.err (fun m -> m "error while retrieving getlastmodified, not present or wrong XML data, using current time");
+        Ptime.v (Pclock.now_d_ps ())
+    in
+    Ok ts
 
   let read fs (`File file) =
     let kv_file = data @@ to_string (`File file) in

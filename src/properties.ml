@@ -1,6 +1,6 @@
 module Xml = Webdav_xml
 
-let prop_version = [ Xml.pcdata "0" ]
+let prop_version = [ Xml.pcdata "1" ]
 
 module PairMap = Map.Make (struct
     type t = string * string
@@ -20,10 +20,35 @@ let to_sexp t =
   let bindings = PairMap.bindings t in
   sexp_of_property_list bindings
 
-let of_sexp s =
+let of_sexp now s =
   let bindings = property_list_of_sexp s in
-  List.fold_left (fun map (k, v) ->
-      PairMap.add k v map) PairMap.empty bindings
+  let map =
+    List.fold_left (fun map (k, v) -> PairMap.add k v map) PairMap.empty bindings
+  in
+  match PairMap.find_opt (Xml.robur_ns, "prop_version") map with
+  | Some ([], [ Xml.Pcdata n ]) ->
+    begin match int_of_string n with
+      | exception Failure _ ->
+        Logs.warn (fun m -> m "couldn't parse version"); map
+      | 0 ->
+        let current = [], [ Xml.Pcdata (Ptime.to_rfc3339 now) ] in
+        (* version 0 didn't write the lastmodified *)
+        (* for directories, we use the current timestamp,
+           for files the creationdate (which is always updated) *)
+        let ts = match PairMap.find_opt (Xml.dav_ns, "getcontenttype") map with
+          | Some ([], [ Xml.Pcdata ct ]) when ct = "text/directory" -> current
+          | _ ->
+            begin match PairMap.find_opt (Xml.dav_ns, "creationdate") map with
+              | None -> Logs.warn (fun m -> m "map without creationdate"); current
+              | Some v -> v
+            end
+        in
+        PairMap.add (Xml.robur_ns, "prop_version") ([], prop_version)
+          (PairMap.add (Xml.dav_ns, "getlastmodified") ts map)
+      | _ -> map
+    end
+  | _ -> (* shouldn't happen *)
+    Logs.warn (fun m -> m "property map without version"); map
 
 (* not safe *)
 let unsafe_find = PairMap.find_opt
