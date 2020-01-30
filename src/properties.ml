@@ -1,6 +1,6 @@
 module Xml = Webdav_xml
 
-let prop_version = [ Xml.pcdata "1" ]
+let prop_version = [ Xml.pcdata "2" ]
 
 module PairMap = Map.Make (struct
     type t = string * string
@@ -30,9 +30,9 @@ let of_sexp now s =
     begin match int_of_string n with
       | exception Failure _ ->
         Logs.warn (fun m -> m "couldn't parse version"); map
-      | 0 ->
+      | 0 | 1 ->
         let current = [], [ Xml.Pcdata (Ptime.to_rfc3339 now) ] in
-        (* version 0 didn't write the lastmodified *)
+        (* version 0 and 1 didn't write the lastmodified *)
         (* for directories, we use the current timestamp,
            for files the creationdate (which is always updated) *)
         let ts = match PairMap.find_opt (Xml.dav_ns, "getcontenttype") map with

@@ -152,9 +152,8 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:Mirage_kv.RW) = struct
         | _ -> name in
   *)
   let write_property_map fs f_or_d map =
-    let map' = Properties.unsafe_remove (Xml.dav_ns, "getlastmodified") map in
-    let map'' = Properties.unsafe_remove (Xml.dav_ns, "getetag") map' in
-    let data = Sexplib.Sexp.to_string_hum (Properties.to_sexp map'') in
+    let map' = Properties.unsafe_remove (Xml.dav_ns, "getetag") map in
+    let data = Sexplib.Sexp.to_string_hum (Properties.to_sexp map') in
     let filename = propfilename f_or_d in
     Fs.set fs filename data
 
