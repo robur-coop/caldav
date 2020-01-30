@@ -156,7 +156,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     Fs.get_property_map fs (`Dir parent) >>= fun map ->
     let map' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.Pcdata last_modified ]) map in
     Fs.write_property_map fs (`Dir parent) map' >|= function
-    | Error e -> assert false
+    | Error e -> Log.warn (fun m -> m "increasing last modified of parent failed %a, ignoring" Fs.pp_write_error e)
     | Ok () -> ()
 
   let write_if_parent_exists fs config (file : Webdav_fs.file) timestamp content_type user ics =
