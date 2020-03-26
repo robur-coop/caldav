@@ -249,20 +249,20 @@ module Make (Fs:Mirage_kv.RW) = struct
     write_property_map fs (`Dir dir) propmap
 
   let write fs (`File file) value propmap =
-    let kv_file = data @@ to_string (`File file) in
-    Fs.set fs kv_file value >>= function
-    | Error e -> Lwt.return (Error e)
-    | Ok () -> write_property_map fs (`File file) propmap
+    Fs.batch fs (fun batch ->
+        let kv_file = data @@ to_string (`File file) in
+        Fs.set batch kv_file value >>= function
+        | Error e -> Lwt.return (Error e)
+        | Ok () -> write_property_map batch (`File file) propmap)
 
   let destroy_file_or_empty_dir fs f_or_d =
-    (* TODO could a propfile influence the right to deletion if it gets deleted first? *)
-    (* TODO use Mirage_kv.RW.batch! *)
-    let propfile = propfilename f_or_d in
-    Fs.remove fs propfile >>= function
-    | Error e -> Lwt.return (Error e)
-    | Ok () ->
-      let file = data @@ to_string f_or_d in
-      Fs.remove fs file
+    Fs.batch fs (fun batch ->
+        let propfile = propfilename f_or_d in
+        Fs.remove batch propfile >>= function
+        | Error e -> Lwt.return (Error e)
+        | Ok () ->
+          let file = data @@ to_string f_or_d in
+          Fs.remove batch file)
 
   let destroy fs f_or_d =
     destroy_file_or_empty_dir fs f_or_d
