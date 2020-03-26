@@ -52,9 +52,9 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
     | None -> None
     | Some v -> match Astring.String.cut ~sep:"Basic " v with
       | Some ("", b64) ->
-        begin match Nocrypto.Base64.decode (Cstruct.of_string b64) with
-          | None -> Some "bad b64 encoding"
-          | Some data -> match Astring.String.cut ~sep:":" (Cstruct.to_string data) with
+        begin match Base64.decode b64 with
+          | Error _ -> Some "bad b64 encoding"
+          | Ok data -> match Astring.String.cut ~sep:":" data with
             | Some (user, _) -> Some user
             | None -> Some "no : between user and password"
         end

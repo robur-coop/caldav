@@ -186,7 +186,7 @@ let config = Caldav.Webdav_config.config ~do_trust_on_first_use:true (Uri.of_str
 
 let server fs =
   let headers =
-    let auth_header = "Basic " ^ Cstruct.to_string (Nocrypto.Base64.encode (Cstruct.of_string "root:foo")) in
+    let auth_header = "Basic " ^ Base64.encode_string "root:foo" in
     Cohttp.Header.add (Cohttp.Header.init ()) "Authorization" auth_header
   in
   let request, body = Request.make ~headers ~meth:`GET (Uri.of_string "/calendars/root"), `Empty in
