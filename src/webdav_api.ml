@@ -951,18 +951,19 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
 
   (* moved from Caldav_server *)
 
-let base64_encode data = Cstruct.to_string @@ Nocrypto.Base64.encode @@ data
+let base64_encode data = Base64.encode_string @@ Cstruct.to_string data
 
 let hash_password password salt =
-  base64_encode @@ Nocrypto.Hash.SHA256.digest @@ Cstruct.of_string (salt ^ "-" ^ password)
+  base64_encode @@ Mirage_crypto.Hash.SHA256.digest @@ Cstruct.of_string (salt ^ "-" ^ password)
 
 let verify_auth_header fs config v =
   match Astring.String.cut ~sep:"Basic " v with
   | Some ("", b64) ->
-    begin match Nocrypto.Base64.decode (Cstruct.of_string b64) with
-      | None -> Lwt.return @@ Error (`Msg ("invalid base64 encoding " ^ b64))
-      | Some data -> match Astring.String.cut ~sep:":" (Cstruct.to_string data) with
-        | None -> Lwt.return @@ Error (`Msg ("invalid user:pass encoding" ^ Cstruct.to_string data))
+    begin match Base64.decode b64 with
+      | Error `Msg msg ->
+        Lwt.return @@ Rresult.R.error_msgf "invalid base64 encoding %s: %s" msg b64
+      | Ok data -> match Astring.String.cut ~sep:":" data with
+        | None -> Lwt.return @@ Error (`Msg ("invalid user:pass encoding" ^ data))
         | Some (user, password) ->
           Fs.get_property_map fs (`Dir [config.principals ; user]) >|= fun props ->
           (* no user context yet *)

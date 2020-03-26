@@ -6,7 +6,9 @@ env:
   global:
     - PACKAGE="caldav"
   matrix:
-    - OCAML_VERSION=4.06
-    - OCAML_VERSION=4.07 POST_INSTALL_HOOK="./.travis-test-mirage.sh" TESTS=false
+    - OCAML_VERSION=4.07
+    - OCAML_VERSION=4.08 POST_INSTALL_HOOK="./.travis-test-mirage.sh" TESTS=false
+    - OCAML_VERSION=4.09
+    - OCAML_VERSION=4.10 POST_INSTALL_HOOK="./.travis-test-mirage.sh" TESTS=false
 notifications:
   email: false
