@@ -48,7 +48,7 @@ let apple_testable =
 let main =
   let direct_dependencies = [
     package "uri" ;
-    package ~pin:"git+https://github.com/roburio/caldav.git" "caldav" ;
+    package "caldav" ;
     package ~min:"0.1.3" "icalendar" ;
     package ~min:"2.0.0" "irmin-git" ;
     package ~min:"2.0.0" "irmin-mirage-git" ;
