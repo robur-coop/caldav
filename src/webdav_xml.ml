@@ -1,3 +1,5 @@
+[@@@ocaml.warning "-27"]
+
 open Rresult.R.Infix
 
 module M = Map.Make(String)

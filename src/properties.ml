@@ -1,3 +1,5 @@
+[@@@ocaml.warning "-32"]
+
 module Xml = Webdav_xml
 
 let prop_version = [ Xml.pcdata "2" ]
