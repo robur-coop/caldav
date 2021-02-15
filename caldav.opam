@@ -21,7 +21,8 @@ build: [
 ]
 
 pin-depends: [
-  ["webmachine.dev" "git+https://github.com/roburio/ocaml-webmachine.git#webdav"]
+# use the "webdav" branch, but ocaml-ci requires commit IDs for pin-depends
+  ["webmachine.dev" "git+https://github.com/roburio/ocaml-webmachine.git#fecaf3dfb9ce10821e86ca07e8bfe09afb1f73d0"]
 ]
 
 depends: [

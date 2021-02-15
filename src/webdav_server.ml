@@ -1,3 +1,5 @@
+[@@@ocaml.warning "-27"]
+
 open Webdav_config
 
 open Lwt.Infix

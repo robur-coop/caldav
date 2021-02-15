@@ -1,3 +1,6 @@
+[@@@ocaml.warning "-27"]
+[@@@ocaml.warning "-32"]
+
 module Xml = Webdav_xml
 open Webdav_config
 type tree = Xml.tree
