@@ -9,7 +9,7 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
-module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_clock.MCLOCK) (KEYS: Mirage_kv.RO) (S: HTTP) (Resolver : Resolver_lwt.S) (Conduit : Conduit_mirage.S) (Zap : Mirage_kv.RO) = struct
+module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KEYS: Mirage_kv.RO) (S: HTTP) (Zap : Mirage_kv.RO) = struct
   module X509 = Tls_mirage.X509(KEYS)(Clock)
   module Store = Irmin_mirage_git.KV_RW(Irmin_git.Mem)(Clock)
   module Dav_fs = Caldav.Webdav_fs.Make(Clock)(Store)
@@ -23,15 +23,6 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
       (function
         | Failure _ -> Lwt.fail_with "Could not find server.pem and server.key in the <working directory>/tls."
         | e -> Lwt.fail e)
-
-  let ssh_config () =
-    match Astring.String.cut ~sep:"://" (Key_gen.remote ()) with
-    | Some (pre, _) when
-        Astring.String.is_infix ~affix:"ssh" pre &&
-        not (String.equal (Key_gen.seed ()) "")  ->
-      Cohttp.Header.init_with "config"
-        (Key_gen.seed () ^ ":" ^ Key_gen.authenticator ())
-    | _ -> Cohttp.Header.init ()
 
   (* Redirect to the same address, but in https. *)
   let redirect port request _body =
@@ -87,7 +78,7 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
     in
     S.make ~conn_closed ~callback ()
 
-  let start _random _clock _mclock keys http resolver conduit zap =
+  let start _random _clock ctx keys http zap =
     let author = Lwt.new_key ()
     and user_agent = Lwt.new_key ()
     and http_req = Lwt.new_key ()
@@ -128,9 +119,7 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (Mclock: Mirage_c
             Fmt.(option ~none:(unit "no HTTP request") string) (Lwt.get http_req)
             Fmt.(option ~none:(unit "none") string) (Lwt.get user_agent)
         in
-        Conduit.with_ssh conduit (module Mclock) >>= fun conduit ->
-        let headers = ssh_config () in
-        Store.connect git ~headers ~conduit ~author ~resolver ~msg (Key_gen.remote ()) >>= fun store ->
+        Store.connect git ~depth:1 ~ctx ~author ~msg (Key_gen.remote ()) >>= fun store ->
         Dav.connect store config admin_pass
     in
     let hostname = Key_gen.hostname () in
