@@ -9,7 +9,7 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
-module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KEYS: Mirage_kv.RO) (S: HTTP) (Zap : Mirage_kv.RO) = struct
+module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (Conduit : Conduit_mirage.S) (Resolver : Resolver_lwt.S) (KEYS: Mirage_kv.RO) (S: HTTP) (Zap : Mirage_kv.RO) = struct
   module X509 = Tls_mirage.X509(KEYS)(Clock)
   module Store = Irmin_mirage_git.KV_RW(Irmin_git.Mem)(Clock)
   module Dav_fs = Caldav.Webdav_fs.Make(Clock)(Store)
@@ -78,7 +78,8 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
     in
     S.make ~conn_closed ~callback ()
 
-  let start _random _clock ctx keys http zap =
+  let start _random _clock ctx conduit resolver keys http zap =
+    let ctx = Git_cohttp_mirage.with_conduit (Cohttp_mirage.Client.ctx resolver conduit) ctx in
     let author = Lwt.new_key ()
     and user_agent = Lwt.new_key ()
     and http_req = Lwt.new_key ()

@@ -120,7 +120,9 @@ let authenticator =
   Key.(create "authenticator" Arg.(opt (some string) None doc))
 
 (* set ~tls to false to get a plain-http server *)
-let http_srv = cohttp_server @@ conduit_direct ~tls:true net
+let conduit_ = conduit_direct ~tls:true net
+
+let http_srv = cohttp_server @@ conduit_
 
 (* TODO: make it possible to enable and disable schemes without providing a port *)
 let http_port =
@@ -161,7 +163,8 @@ let main =
     package ~min:"0.1.3" "icalendar" ;
     package ~min:"2.3.0" "irmin-git" ;
     package ~min:"2.3.0" "irmin-mirage-git" ;
-    package ~min:"3.2.0" "git-mirage";
+    package ~min:"3.3.1" "git-mirage";
+    package "git-cohttp-mirage";
   ] in
   let keys =
     [ Key.abstract seed ; Key.abstract authenticator ;
@@ -172,7 +175,7 @@ let main =
   in
   foreign
     ~packages:direct_dependencies ~keys
-    "Unikernel.Main" (random @-> pclock @-> mimic @-> kv_ro @-> http @-> kv_ro @-> job)
+    "Unikernel.Main" (random @-> pclock @-> mimic @-> conduit @-> resolver @-> kv_ro @-> http @-> kv_ro @-> job)
 
 let mimic ~kind ~seed ~authenticator stackv4 random mclock time =
   let mtcp = mimic_tcp_impl stackv4 in
@@ -185,4 +188,4 @@ let mimic =
     default_random default_monotonic_clock default_time
 
 let () =
-  register "caldav" [main $ default_random $ default_posix_clock $ mimic $ certs $ http_srv $ zap ]
+  register "caldav" [main $ default_random $ default_posix_clock $ mimic $ conduit_ $ resolver_dns net $ certs $ http_srv $ zap ]
