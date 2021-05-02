@@ -39,7 +39,7 @@
 
     To use this module, apply the {{!Make}[Make]} functor to an {{!IO}[IO]}
     and a {{!CLOCK}[CLOCK]} module, and subclass the
-    {{!classtype:S.resource}resouce} virtual class. *)
+    {{!class-type:S.resource}resouce} virtual class. *)
 
 open Cohttp
 
@@ -81,10 +81,10 @@ module Rd : sig
   (** [make ~request ()] returns a ['body t] with the following fields
       pouplated from the [request] argument:
       {ul
-      {- [uri]};
-      {- [version]};
-      {- [meth]}; and
-      {- [req_headers]}}.
+      {- [uri];}
+      {- [version];}
+      {- [meth]; and}
+      {- [req_headers]}}
 
       All other fields will be populated with default values unless they are
       provided as optional arguments *)
@@ -353,7 +353,7 @@ module type S = sig
     (string * (unit -> 'body resource)) list ->
     body:'body -> request:Request.t ->
     (Code.status_code * Header.t * 'body * string list) option io
-  (** [dispatch' routes ~body ~request] works in the same way as {dispatch'}
+  (** [dispatch' routes ~body ~request] works in the same way as {!dispatch}
       except the user can specify path patterns using a string shorthand. For
       example, the following route entry:
 
