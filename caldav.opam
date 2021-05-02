@@ -20,11 +20,6 @@ build: [
   ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]
 
-pin-depends: [
-# use the "webdav" branch, but ocaml-ci requires commit IDs for pin-depends
-  ["webmachine.dev" "git+https://github.com/roburio/ocaml-webmachine.git#fecaf3dfb9ce10821e86ca07e8bfe09afb1f73d0"]
-]
-
 depends: [
   "ocaml" {>= "4.07.0"}
   "dune" {build}
@@ -38,7 +33,6 @@ depends: [
   "mirage-clock" {>= "2.0.0"}
   "mirage-random" {>= "2.0.0"}
   "ppx_deriving" {>= "4.3"}
-  "webmachine"
   "lwt" {>= "4.0"}
   "ptime" {>= "0.8.5"}
   "cohttp" {>= "2.0.0"}
@@ -56,6 +50,10 @@ depends: [
   "logs" {>= "0.6.3"}
   "hex" {>= "1.4.0"}
   "metrics"
+  #from webmachine
+  "dispatch" {>= "0.5.0"}
+  "re" {>= "1.7.2"}
+  "uri" {>= "4.0.0"}
 ]
 synopsis: "A CalDAV server"
 description: """

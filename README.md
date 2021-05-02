@@ -27,7 +27,6 @@ Now we're ready to compile the CalDAV server. Let's get the code (don't worry th
     make depend
     make
 
-If the above commands fail while installing caldav, run `opam remove webmachine` and run `make depend` again.
 The `make` command creates a `caldav` executable in `caldav/mirage`. This is the unikernel.
 If you compiled for unix (the default unless you specify `-t xen/hvt/..`, this is an executable you can run directly:
 We can see all its options:
@@ -187,3 +186,7 @@ Make the calendar `TESTCALENDAR` private, only accessible for the `OWNER`.
         </D:prop>
       </D:set>
     </D:propertyupdate>' "https://calendar.example.com/calendars/TESTCALENDAR"
+
+## Vendored ocaml-webmachine
+
+This project contains a vendored [ocaml-webmachine](https://github.com/inhabitedtype/ocaml-webmachine) (developed by Spiros Eliopoulos), using the webdav branch of https://github.com/roburio/ocaml-webmachine in the `ocaml-webmachine` subdirectory (at commit fecaf3dfb9ce10821e86ca07e8bfe09afb1f73d0). The reason is because this version of webmachine has support for PROPFIND, PROPPATCH, REPORT HTTP verbs, as required by wedav. This is installed as `caldav.webmachine` sublibrary.
