@@ -1,0 +1,7 @@
+.*.sw[pon]
+_build/
+*.native
+*.byte
+*.docdir
+.merlin
+*.install
