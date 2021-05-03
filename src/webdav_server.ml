@@ -96,7 +96,17 @@ end
 
 let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 
-module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.S) (S: Cohttp_lwt.S.Server) = struct
+module type Server = sig
+  val respond :
+    ?headers:Cohttp.Header.t ->
+    ?flush:bool ->
+    status:Cohttp.Code.status_code ->
+    body:Cohttp_lwt.Body.t ->
+    unit ->
+    (Cohttp.Response.t * Cohttp_lwt.Body.t) Lwt.t
+end
+
+module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.S) (S: Server) = struct
 
   module WmClock = struct
     let now () =
