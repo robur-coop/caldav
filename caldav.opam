@@ -15,7 +15,7 @@ doc: "https://roburio.github.io/caldav/"
 license: "ISC"
 
 build: [
-  ["dune" "subst"] {pinned}
+  ["dune" "subst"] {dev}
   ["dune" "build" "-p" name "-j" jobs]
   ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]
@@ -57,6 +57,6 @@ depends: [
 ]
 synopsis: "A CalDAV server"
 description: """
-A CalDAV server. Supports everything from the roburio/icalendar library.
-Also supports a bit of WebDAV.
+A CalDAV server (RFC 4791). Supports everything from the roburio/icalendar
+library. Also includes a partial WebDAV implementation.
 """
