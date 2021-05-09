@@ -17,9 +17,8 @@ libraries that are not yet released for git-via-ssh. It is recommended to use a 
     opam switch create caldav 4.11.1
     eval `opam env`
     opam install lwt mirage
-    opam pin add caldav https://github.com/roburio/caldav.git
 
-Now we're ready to compile the CalDAV server. Let's get the code (don't worry that we already pinned caldav, we now need the source code of the unikernel):
+Now we're ready to compile the CalDAV server. Let's get the code:
 
     git clone https://github.com/roburio/caldav.git
     cd caldav/mirage
