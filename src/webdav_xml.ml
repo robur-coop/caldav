@@ -1,6 +1,6 @@
 [@@@ocaml.warning "-27"]
 
-open Rresult.R.Infix
+let ( let* ) = Result.bind
 
 module M = Map.Make(String)
 
@@ -245,8 +245,17 @@ let tree_to_tyxml t =
 
 let tree_to_string t = tyxml_to_body @@ tree_to_tyxml t
 
+(* from OCaml 4.13 bytes.ml *)
+let for_all p s =
+  let n = String.length s in
+  let rec loop i =
+    if i = n then true
+    else if p (String.unsafe_get s i) then loop (succ i)
+    else false in
+  loop 0
+
 let is_whitespace_node = function
-  | Pcdata str -> Astring.String.for_all (function ' ' | '\n' | '\r' | '\t' -> true | _ -> false) str
+  | Pcdata str -> for_all (function ' ' | '\n' | '\r' | '\t' -> true | _ -> false) str
   | Node _ -> false
 
 let string_to_tree str =
@@ -277,7 +286,7 @@ let rec filter_map f = function
 
 let tree_lift f node_p children_p =
   (fun tree ->
-     node_p tree >>= fun node ->
+     let* node = node_p tree in
      let ch' = match tree with
        | Node (_, _, _, ch) -> filter_map children_p ch
        | Pcdata _           -> []
@@ -352,56 +361,56 @@ let href_parser =
     extract_pcdata
 
 let privilege_children_parser =
-  (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Read)
+  (tree_lift (fun _ c -> let* _ = is_empty c in Ok `Read)
      (name_ns "read" dav_ns) any)
-  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Write)
+  ||| (tree_lift (fun _ c -> let* _ = is_empty c in Ok `Write)
          (name_ns "write" dav_ns) any)
-  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Write_content)
+  ||| (tree_lift (fun _ c -> let* _ = is_empty c in Ok `Write_content)
          (name_ns "write-content" dav_ns) any)
-  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Write_properties)
+  ||| (tree_lift (fun _ c -> let* _ = is_empty c in Ok `Write_properties)
          (name_ns "write-properties" dav_ns) any)
-  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Unlock)
+  ||| (tree_lift (fun _ c -> let* _ = is_empty c in Ok `Unlock)
          (name_ns "unlock" dav_ns) any)
-  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Read_acl)
+  ||| (tree_lift (fun _ c -> let* _ = is_empty c in Ok `Read_acl)
          (name_ns "read-acl" dav_ns) any)
-  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Read_current_user_privilege_set)
+  ||| (tree_lift (fun _ c -> let* _ = is_empty c in Ok `Read_current_user_privilege_set)
          (name_ns "read-current-user-privilege-set" dav_ns) any)
-  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Write_acl)
+  ||| (tree_lift (fun _ c -> let* _ = is_empty c in Ok `Write_acl)
          (name_ns "write-acl" dav_ns) any)
-  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Bind)
+  ||| (tree_lift (fun _ c -> let* _ = is_empty c in Ok `Bind)
          (name_ns "bind" dav_ns) any)
-  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `Unbind)
+  ||| (tree_lift (fun _ c -> let* _ = is_empty c in Ok `Unbind)
          (name_ns "unbind" dav_ns) any)
-  ||| (tree_lift (fun _ c -> is_empty c >>| fun _ -> `All)
+  ||| (tree_lift (fun _ c -> let* _ = is_empty c in Ok `All)
          (name_ns "all" dav_ns) any)
 
 let privilege_parser =
-  tree_lift (fun _ c -> non_empty c >>| fun () -> c)
+  tree_lift (fun _ c -> let* () = non_empty c in Ok c)
     (name_ns "privilege" dav_ns) privilege_children_parser
 
 let xml_to_ace : tree -> (ace, string) result =
   let principal = (* TODO other principals, property, invert *)
     tree_lift
-      (fun _ c -> exactly_one c >>| fun c' -> `Principal c')
+      (fun _ c -> let* c' = exactly_one c in Ok (`Principal c'))
       (name_ns "principal" dav_ns)
-      ((tree_lift (fun _ c -> is_empty c >>| fun () -> `All)
+      ((tree_lift (fun _ c -> let* () = is_empty c in Ok `All)
           (name_ns "all" dav_ns) any)
-       ||| (tree_lift (fun _ c -> is_empty c >>| fun () -> `Authenticated)
+       ||| (tree_lift (fun _ c -> let* () = is_empty c in Ok `Authenticated)
               (name_ns "authenticated" dav_ns) any)
-       ||| (tree_lift (fun _ c -> is_empty c >>| fun () -> `Unauthenticated)
+       ||| (tree_lift (fun _ c -> let* () = is_empty c in Ok `Unauthenticated)
               (name_ns "unauthenticated" dav_ns) any)
-       ||| (tree_lift (fun _ c -> is_empty c >>| fun () -> `Self)
+       ||| (tree_lift (fun _ c -> let* () = is_empty c in Ok `Self)
               (name_ns "self" dav_ns) any)
        ||| (href_parser >>~ fun href -> Ok (`Href (Uri.of_string href))))
   and grant_or_deny =
     tree_lift
-      (fun _ c -> exactly_one c >>| fun c' -> `Grant c')
+      (fun _ c -> let* c' = exactly_one c in Ok (`Grant c'))
       (name_ns "grant" dav_ns) privilege_parser
-    ||| tree_lift (fun _ c -> exactly_one c >>| fun c' -> `Deny c')
+    ||| tree_lift (fun _ c -> let* c' = exactly_one c in Ok (`Deny c'))
       (name_ns "deny" dav_ns) privilege_parser
   and inherited =
     tree_lift
-      (fun _ c -> exactly_one c >>| fun c' -> `Inherited c')
+      (fun _ c -> let* c' = exactly_one c in Ok (`Inherited c'))
       (name_ns "inherited" dav_ns)
       (href_parser >>~ fun href -> Ok (Uri.of_string href))
   in
@@ -462,16 +471,16 @@ let ace_to_xml (principal, privilege) =
 
 let propfind_prop_parser : tree -> ([ propfind | `Include of string list ], string) result =
   ((tree_lift
-      (fun _ c -> is_empty c >>| fun () -> `Propname)
+      (fun _ c -> let* () = is_empty c in Ok `Propname)
       (name_ns "propname" dav_ns) any)
    ||| (tree_lift
-          (fun _ c -> non_empty c >>| fun () -> `Props c)
+          (fun _ c -> let* () = non_empty c in Ok (`Props c))
           (name_ns "prop" dav_ns) (any >>~ extract_ns_name))
    ||| (tree_lift
-          (fun _ c -> is_empty c >>| fun () -> `All_prop [])
+          (fun _ c -> let* () = is_empty c in Ok (`All_prop []))
           (name_ns "allprop" dav_ns) any)
    ||| (tree_lift
-          (fun _ c -> non_empty c >>| fun () -> `Include c)
+          (fun _ c -> let* () = non_empty c in Ok (`Include c))
           (name_ns "include" dav_ns) (any >>~ extract_name)))
 
 let parse_propfind_xml tree =
@@ -528,7 +537,8 @@ let rec comp_parser tree : (component, string) result =
          else
            Error "broken")
     (name_ns "comp" caldav_ns >>~ extract_attributes)
-    ((tree_lift (fun _ c -> is_empty c >>| fun () -> `Allprop) (name_ns "allprop" caldav_ns) any)
+    ((tree_lift (fun _ c -> let* () = is_empty c in Ok `Allprop)
+        (name_ns "allprop" caldav_ns) any)
      ||| (tree_lift
             (fun a c ->
                let novalue = match find_attribute "novalue" a with
@@ -537,16 +547,19 @@ let rec comp_parser tree : (component, string) result =
                in
                match find_attribute "name" a with
                | None -> Error "No name in prop"
-               | Some name' -> is_empty c >>| fun () -> (`Prop (name', novalue)))
+               | Some name' -> let* () = is_empty c in Ok (`Prop (name', novalue)))
             (name_ns "prop" caldav_ns >>~ extract_attributes) any)
-     ||| (tree_lift (fun _ c -> is_empty c >>| fun () -> `Allcomp) (name_ns "allcomp" caldav_ns) any)
+     ||| (tree_lift (fun _ c -> let* () = is_empty c in Ok `Allcomp)
+            (name_ns "allcomp" caldav_ns) any)
      ||| (comp_parser >>~ fun (s, p, c) -> Ok (`Comp (s, p, c))))
     tree
 
 (* RFC 4791 Section 9.9: Both attributes MUST be specified as "date with UTC time" value. *)
 let range_parser name : tree -> (timerange, string) result =
   tree_lift
-    (fun a c -> is_empty c >>= fun () -> match find_attribute "start" a, find_attribute "end" a with
+    (fun a c ->
+       let* () = is_empty c in
+       match find_attribute "start" a, find_attribute "end" a with
        | None, _ | _, None -> Error "Missing attribute \"start\" or \"end\""
        | Some s, Some e -> match Icalendar.parse_datetime s, Icalendar.parse_datetime e with
          | Ok (`Utc s'), Ok (`Utc e') ->
@@ -597,27 +610,27 @@ let extract_and_tag_prop = function
 
 let report_prop_parser : tree -> (report_prop, string) result =
   (tree_lift
-     (fun _ c -> is_empty c >>| fun () -> `Propname)
+     (fun _ c -> let* () = is_empty c in Ok `Propname)
      (name_ns "propname" dav_ns) any)
   ||| (tree_lift
-         (fun _ c -> is_empty c >>| fun () -> `All_props)
+         (fun _ c -> let* () = is_empty c in Ok `All_props)
          (name_ns "allprop" dav_ns) any)
   ||| (tree_lift
-         (fun _ c -> non_empty c >>| fun () -> `Proplist c)
+         (fun _ c -> let* () = non_empty c in Ok (`Proplist c))
          (name_ns "prop" dav_ns)
          ((calendar_data_parser >>~ fun c -> Ok (`Calendar_data c))
           ||| (any >>~ extract_and_tag_prop)))
 
 let is_not_defined_parser =
   tree_lift
-    (fun _ c -> is_empty c >>| fun () -> `Is_not_defined)
+    (fun _ c -> let* () = is_empty c in Ok `Is_not_defined)
     (name_ns "is-not-defined" caldav_ns)
     any
 
 let text_match_parser =
   tree_lift
     (fun a c ->
-      exactly_one c >>| fun str ->
+      let* str = exactly_one c in
       let collation =
         match find_attribute "collation" a with
         | None -> "i;ascii-casemap"
@@ -628,7 +641,7 @@ let text_match_parser =
         | Some "yes" -> true
         | _ -> false
       in
-      `Text_match (str, collation, negate)
+      Ok (`Text_match (str, collation, negate))
     )
     (name_ns "text-match" caldav_ns >>~ extract_attributes)
     extract_pcdata
@@ -660,8 +673,12 @@ let prop_filter_parser : tree -> (prop_filter, string) result =
       | Some n -> match c with
         | [] -> Ok (n, `Is_defined)
         | [ `Is_not_defined ] -> Ok (n, `Is_not_defined)
-        | `Timerange t :: pfs -> all_param_filters pfs >>| fun pfs' -> (n, `Range (t, pfs'))
-        | `Text_match t :: pfs -> all_param_filters pfs >>| fun pfs' -> (n, `Text (t, pfs'))
+        | `Timerange t :: pfs ->
+          let* pfs' = all_param_filters pfs in
+          Ok (n, `Range (t, pfs'))
+        | `Text_match t :: pfs ->
+          let* pfs' = all_param_filters pfs in
+          Ok (n, `Text (t, pfs'))
         | _ -> Error "Invalid prop-filter.")
     (name_ns "prop-filter" caldav_ns >>~ extract_attributes)
     (is_not_defined_parser ||| time_range_parser ||| text_match_parser ||| param_filter_parser)
@@ -685,10 +702,10 @@ let rec comp_filter_parser tree : (component_filter, string) result =
          | [] -> Ok (n, `Is_defined)
          | [ `Is_not_defined ] -> Ok (n, `Is_not_defined)
          | `Timerange (a, b)::xs ->
-           f xs >>= fun (props, comps) ->
+           let* props, comps = f xs in
            Ok (n, `Comp_filter (Some (a, b), props, comps))
          | xs ->
-           f xs >>= fun (props, comps) ->
+           let* props, comps = f xs in
            Ok (n, `Comp_filter (None, props, comps)))
     (name_ns "comp-filter" caldav_ns >>~ extract_attributes)
     (is_not_defined_parser ||| time_range_parser
@@ -743,13 +760,13 @@ let proppatch_prop_parser f =
 
 let set_parser : tree -> ([>`Set of attribute list * fqname * tree list] list, string) result =
   tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
-    (fun _ c -> exactly_one c >>| List.map (fun k -> `Set k))
+    (fun _ c -> let* ks = exactly_one c in Ok (List.map (fun k -> `Set k) ks))
     (name_ns "set" dav_ns)
     (proppatch_prop_parser extract_name_value)
 
 let remove_parser : tree -> ([>`Remove of fqname] list, string) result =
   tree_lift (* exactly one prop tag, but a list of property trees below that tag *)
-    (fun _ c -> exactly_one c >>| List.map (fun k -> `Remove k))
+    (fun _ c -> let* ks = exactly_one c in Ok (List.map (fun k -> `Remove k) ks))
     (name_ns "remove" dav_ns)
     (proppatch_prop_parser extract_ns_name)
 

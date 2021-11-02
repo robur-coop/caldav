@@ -49,8 +49,12 @@ let http_status =
   let src = counter_metrics ~f "http_response" in
   (fun r -> Metrics.add src (fun x -> x) (fun d -> d r))
 
+let is_alphanum = function
+  | 'a'..'z' | '0'..'9' | 'A'..'Z' -> true
+  | _ -> false
+
 let sane username =
-  username <> "" && Astring.String.for_all Astring.Char.Ascii.is_alphanum username
+  username <> "" && Xml.for_all is_alphanum username
 
 module Headers = struct
   let get_content_type headers =
@@ -71,8 +75,8 @@ module Headers = struct
     | None -> false
     | Some x ->
       (* Apple seems to use the regular expression 'Mozilla/.*Gecko.*' *)
-      Astring.String.is_prefix ~affix:"Mozilla/" x &&
-      Astring.String.is_infix ~affix:"Gecko" x
+      let re = Re.compile (Re.Perl.re "^Mozilla/.*Gecko.*") in
+      Re.execp re x
 
   let replace_location location headers =
     Cohttp.Header.replace headers "Location" (Uri.to_string @@ location)
@@ -415,7 +419,7 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
       match Uri.get_query_param rd.uri "members" with
       | None -> Ok []
       | Some x ->
-        let members = Astring.String.cuts ~sep:"," x in
+        let members = String.split_on_char ',' x in
         if List.for_all sane members
         then Ok members
         else Error `Bad_request
@@ -591,7 +595,7 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
 (*    Access_log.debug (fun m -> m "%s %s path: %s"
                          (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
                          (Uri.path (Cohttp.Request.uri request))
-                         (Astring.String.concat ~sep:", " path)) ; *)
+                         (String.concat ", " path)) ; *)
     Time_log.debug (fun m -> m "%s\t%s\t%d\t%f"
                          (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
                          (Cohttp.Request.resource request)

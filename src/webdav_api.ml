@@ -786,12 +786,6 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
       (* TODO: treat pfs *)
       matches_timerange && matches_cfs
 
-  let get_timezones_for_resp calendar tzids =
-    let get_timezone tzid =
-      let has_matching_tzid props = List.exists (function `Timezone_id (_, (_, tzid')) -> tzid = tzid' | _ -> false) props in
-      List.find (function `Timezone props -> has_matching_tzid props | _ -> false ) (snd calendar) in
-    List.map get_timezone @@ Astring.String.Set.elements tzids
-
   (* returns the entire calendar if any component matches the component filter.
      this is fine, because in caldav rfc and apple testsuite, each calendar only uses one component per file *)
   let vcalendar_matches_comp_filter filter (props, comps) =
@@ -975,14 +969,17 @@ let hash_password password salt =
   base64_encode @@ Mirage_crypto.Hash.SHA256.digest @@ Cstruct.of_string (salt ^ "-" ^ password)
 
 let verify_auth_header fs config v =
-  match Astring.String.cut ~sep:"Basic " v with
-  | Some ("", b64) ->
-    begin match Base64.decode b64 with
-      | Error `Msg msg ->
-        Lwt.return @@ Rresult.R.error_msgf "invalid base64 encoding %s: %s" msg b64
-      | Ok data -> match Astring.String.cut ~sep:":" data with
-        | None -> Lwt.return @@ Error (`Msg ("invalid user:pass encoding" ^ data))
-        | Some (user, password) ->
+  let basic = "Basic " in
+  let blen = String.length basic in
+  let vlen = String.length v in
+  if vlen >= blen && String.(equal (sub v 0 blen) basic) then
+    let b64 = String.sub v blen (vlen - blen) in
+    match Base64.decode b64 with
+    | Error `Msg msg ->
+      Lwt.return (Error (`Msg (Fmt.str "invalid base64 encoding %s: %s" msg b64)))
+    | Ok data -> match String.split_on_char ':' data with
+      | [user; password] ->
+        begin
           Fs.get_property_map fs (`Dir [config.principals ; user]) >|= fun props ->
           (* no user context yet *)
           match
@@ -995,8 +992,10 @@ let verify_auth_header fs config v =
             then Ok user
             else Error (`Msg "password does not match")
           | _ -> Error (`Unknown_user (user, password))
-    end
-  | _ -> Lwt.return @@ Error (`Msg ("invalid auth header " ^ v))
+        end
+      | _ -> Lwt.return @@ Error (`Msg ("invalid user:pass encoding" ^ data))
+  else
+    Lwt.return @@ Error (`Msg ("invalid auth header " ^ v))
 
 let last_modified fs ~path =
   Fs.from_string fs path >>= function
@@ -1132,10 +1131,12 @@ let href_to_principal principals_directory tree =
   | Ok principal ->
     let path = Uri.path (Uri.of_string principal) in
     let dir = Fs.to_string (`Dir [principals_directory]) in
-    if Astring.String.is_prefix ~affix:dir path then
-      match Astring.String.cut ~sep:dir path with
-      | Some ("", p) -> Ok p
-      | _ -> Error "invalid path"
+    let dlen = String.length dir
+    and plen = String.length path
+    in
+    if plen >= dlen && String.(equal (sub path 0 dlen) dir) then
+      let p = String.sub path 0 dlen in
+      Ok p
     else
       Error "invalid path"
   | Error msg -> Error msg

@@ -99,7 +99,9 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:Mirage_kv.RW) = struct
     `File (data @ [name])
 
   (* TODO: no handling of .. done here yet *)
-  let data_to_list str = Astring.String.cuts ~empty:false ~sep:"/" str
+  let data_to_list str =
+    String.split_on_char '/' str |>
+    List.filter_map (function "" -> None | x -> Some x)
   let data str = Mirage_kv.Key.v str
 
   let dir_from_string str = `Dir (data_to_list str)
@@ -107,7 +109,7 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:Mirage_kv.RW) = struct
   let file_from_string str = `File (data_to_list str)
 
   let to_string =
-    let a = Astring.String.concat ~sep:"/" in
+    let a = String.concat "/" in
     function
     | `File data -> "/" ^ a data
     | `Dir data -> "/" ^ a data ^ "/"
@@ -142,7 +144,7 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:Mirage_kv.RW) = struct
     | `File data -> match List.rev data with
       | filename :: path -> List.rev path @ [ filename ^ propfile_ext ]
       | [] -> assert false (* no file without a name *) in
-    Mirage_kv.Key.v (Astring.String.concat ~sep:"/" segments)
+    Mirage_kv.Key.v (String.concat "/" segments)
 
   let get_properties fs f_or_d =
     let propfile = propfilename f_or_d in
@@ -187,7 +189,10 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:Mirage_kv.RW) = struct
     | Error e -> Error e
     | Ok files ->
       let files = List.fold_left (fun acc (step, kind) ->
-          if Astring.String.is_suffix ~affix:propfile_ext step then
+          let slen = String.length step
+          and plen = String.length propfile_ext
+          in
+          if slen >= plen && String.(equal (sub step (slen - plen) plen) propfile_ext) then
             acc
           else
             (* TODO check whether step is the entire path, or dir needs to be included *)
