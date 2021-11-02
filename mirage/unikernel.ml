@@ -47,15 +47,18 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
 
   let get_user_from_auth = function
     | None -> None
-    | Some v -> match Astring.String.cut ~sep:"Basic " v with
-      | Some ("", b64) ->
-        begin match Base64.decode b64 with
-          | Error _ -> Some "bad b64 encoding"
-          | Ok data -> match Astring.String.cut ~sep:":" data with
-            | Some (user, _) -> Some user
-            | None -> Some "no : between user and password"
-        end
-      | _ -> Some "not basic"
+    | Some v ->
+      let basic = "Basic " in
+      let blen = String.length basic
+      and vlen = String.length v
+      in
+      if vlen >= blen && String.(equal (sub v 0 blen) basic) then
+        let b64 = String.sub v blen (vlen - blen) in
+        match Base64.decode b64 with
+        | Error _ -> Some "bad b64 encoding"
+        | Ok data -> Some (List.hd (String.split_on_char ':' data))
+      else
+        Some "not basic"
 
   let serve (author_k, user_agent_k, request_k) callback =
     let callback (_, cid) request body =
