@@ -205,7 +205,7 @@ let main =
     package ~min:"0.1.3" "icalendar" ;
     package ~min:"2.10.0" "irmin-git" ;
     package ~min:"2.10.0" "irmin-mirage-git" ;
-    package ~min:"3.7.0" "git-mirage";
+    package ~min:"3.7.0" ~max:"3.8.0" "git-mirage";
     package ~min:"0.0.8" ~sublibs:["mirage"] "paf";
   ] in
   let keys =
