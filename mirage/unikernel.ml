@@ -77,7 +77,7 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
       let hdr = request.Request.headers in
       Lwt.with_value author_k (get_user_from_auth (Header.get hdr "Authorization")) @@ fun () ->
       Lwt.with_value user_agent_k (Header.get hdr "User-Agent") @@ fun () ->
-      let req = Fmt.strf "%s %s" (Code.string_of_method request.Request.meth) (Uri.path uri) in
+      let req = Fmt.str "%s %s" (Code.string_of_method request.Request.meth) (Uri.path uri) in
       Lwt.with_value request_k (Some req) @@ fun () ->
       callback request body
     and conn_closed (_,cid) =
@@ -114,18 +114,18 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
         (* TODO maybe source IP address? turns out to be not trivial
                 (unclear how to get it from http/conduit) *)
         let author () =
-          Fmt.strf "%a (via caldav)"
-            Fmt.(option ~none:(unit "no author") string) (Lwt.get author)
+          Fmt.str "%a (via caldav)"
+            Fmt.(option ~none:(any "no author") string) (Lwt.get author)
         and msg op =
           let op_str = function
-            | `Set k -> Fmt.strf "updating %a" Mirage_kv.Key.pp k
-            | `Remove k -> Fmt.strf "removing %a" Mirage_kv.Key.pp k
+            | `Set k -> Fmt.str "updating %a" Mirage_kv.Key.pp k
+            | `Remove k -> Fmt.str "removing %a" Mirage_kv.Key.pp k
             | `Batch -> "batch operation"
           in
-          Fmt.strf "calendar change %s@.during processing HTTP request %a@.by user-agent %a"
+          Fmt.str "calendar change %s@.during processing HTTP request %a@.by user-agent %a"
             (op_str op)
-            Fmt.(option ~none:(unit "no HTTP request") string) (Lwt.get http_req)
-            Fmt.(option ~none:(unit "none") string) (Lwt.get user_agent)
+            Fmt.(option ~none:(any "no HTTP request") string) (Lwt.get http_req)
+            Fmt.(option ~none:(any "none") string) (Lwt.get user_agent)
         in
         let remote, branch = decompose_git_url () in
         Store.connect git ?branch ~depth:1 ~ctx ~author ~msg remote >>= fun store ->
