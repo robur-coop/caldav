@@ -6,6 +6,14 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
+let decompose_git_url () =
+  match String.split_on_char '#' (Key_gen.remote ()) with
+  | [ url ] -> url, None
+  | [ url ; branch ] -> url, Some branch
+  | _ ->
+    Logs.err (fun m -> m "expected at most a single # in remote");
+    exit 64
+
 module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
   module X509 = Tls_mirage.X509(KEYS)(Clock)
   module Store = Irmin_mirage_git.KV_RW(Irmin_git.Mem)(Clock)
@@ -119,7 +127,8 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
             Fmt.(option ~none:(unit "no HTTP request") string) (Lwt.get http_req)
             Fmt.(option ~none:(unit "none") string) (Lwt.get user_agent)
         in
-        Store.connect git ~depth:1 ~ctx ~author ~msg (Key_gen.remote ()) >>= fun store ->
+        let remote, branch = decompose_git_url () in
+        Store.connect git ?branch ~depth:1 ~ctx ~author ~msg remote >>= fun store ->
         Dav.connect store config admin_pass
     in
     let hostname = Key_gen.hostname () in
