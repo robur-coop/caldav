@@ -1134,8 +1134,15 @@ let href_to_principal principals_directory tree =
     let dlen = String.length dir
     and plen = String.length path
     in
-    if plen >= dlen && String.(equal (sub path 0 dlen) dir) then
-      let p = String.sub path 0 dlen in
+    if plen > dlen && String.(equal (sub path 0 dlen) dir) then
+      let length =
+        let base = plen - dlen in
+        if String.get path (dlen - 1) = '/' then
+          base - 1
+        else
+          base
+      in
+      let p = String.sub path dlen length in
       Ok p
     else
       Error "invalid path"
