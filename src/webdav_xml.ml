@@ -101,12 +101,12 @@ type privilege = [
 ] [@@deriving show]
 
 (* internal rep on storage *)
-type ace = 
+type ace =
   principal * [ `Grant of privilege list | `Deny of privilege list | `Inherited of Uri.t ]
 [@@deriving show]
 
 (* rep for client *)
-type webdav_ace = 
+type webdav_ace =
   principal * [ `Grant of privilege list | `Deny of privilege list ] * [ `Inherited of Uri.t ] option
 [@@deriving show]
 
@@ -150,7 +150,7 @@ let rec tree_fold_left f s forest = match forest with
 let new_identifier map ns =
   let taken s = M.exists (fun _ v -> String.equal v s) map in
   let alphabet_start = int_of_char 'A' in
-  let gen_char i =  
+  let gen_char i =
     let alphabet_len = 26 in
     i / alphabet_len, String.make 1 (char_of_int @@ alphabet_start + (i mod alphabet_len)) in
   let rec gen_id i =
@@ -173,7 +173,7 @@ let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
     let ns_map', a' = List.fold_left (fun (m, a) ((ns, key), value as attr) ->
         if ns = Xmlm.ns_xmlns then
           match M.find_opt value m with
-          | Some binding -> m, a 
+          | Some binding -> m, a
           | None ->
             if key = "xmlns" then
               M.add value "" m, a

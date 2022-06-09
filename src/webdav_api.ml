@@ -104,22 +104,22 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
   let privilege_met fs requirement ~auth_user_props resource_props =
     let privileges = Properties.privileges ~auth_user_props resource_props in
     (match Properties.inherited_acls ~auth_user_props resource_props with
-    | [ url ] -> 
+    | [ url ] ->
       Log.debug (fun m -> m "Inherited %s" (Uri.to_string url)) ;
       (Fs.from_string fs (Uri.to_string url) >>= function
-      | Error e -> 
-      Log.warn (fun m -> m "privilege_met: Could not convert to file %a" Fs.pp_error e) ;
-      Lwt.return []
-      | Ok inherited -> 
-      Fs.get_property_map fs inherited >|= fun inherited_props ->
-      Properties.privileges ~auth_user_props inherited_props)
-    | urls -> 
+        | Error e ->
+          Log.warn (fun m -> m "privilege_met: Could not convert to file %a" Fs.pp_error e) ;
+          Lwt.return []
+        | Ok inherited ->
+          Fs.get_property_map fs inherited >|= fun inherited_props ->
+          Properties.privileges ~auth_user_props inherited_props)
+    | urls ->
       Log.debug (fun m -> m "Inherited %s" (String.concat "\n" @@ List.map Uri.to_string urls)) ;
-     Lwt.return []) >|= fun inherited_privileges ->
-    let privileges = privileges @ inherited_privileges in 
+      Lwt.return []) >|= fun inherited_privileges ->
+    let privileges = privileges @ inherited_privileges in
     Log.debug (fun m -> m "Privileges size: %d " (List.length privileges)) ;
     if not (Privileges.is_met ~requirement privileges) then `Forbidden else `Ok
-    
+
   let parse_calendar ~path data =
     match Icalendar.parse data with
     | Error e ->
@@ -134,8 +134,8 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
   let list_dir fs (`Dir dir) =
     let list_file f_or_d =
       begin Fs.last_modified fs f_or_d >|= function
-      | Error e -> Ptime.epoch
-      | Ok ts -> ts 
+        | Error e -> Ptime.epoch
+        | Ok ts -> ts
       end >|= fun ts ->
       let is_dir = match f_or_d with | `File _ -> false | `Dir _ -> true in
       (Fs.to_string f_or_d, is_dir, Ptime.to_rfc3339 ts)
@@ -276,7 +276,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     Fs.get_property_map fs f_or_d >>= fun resource_props ->
     privilege_met fs `Read ~auth_user_props resource_props >|= function
     | `Forbidden -> `Forbidden
-    | `Ok -> 
+    | `Ok ->
       if resource_props = Properties.empty
       then `Not_found
       else
@@ -410,7 +410,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
           is_calendar fs parent' >>= fun parent_is_calendar ->
           if resource_is_calendar && parent_is_calendar
           then Lwt.return @@ Error `Conflict
-          else 
+          else
             let acl = [ ( `Href (Uri.of_string (Fs.to_string (`Dir [config.principals ; user]))), `Grant [`All])] in
             create_collection_dir fs acl set_props now resourcetype dir
 
@@ -853,7 +853,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         | Error _ -> Lwt.return @@ Error `Bad_request
         | Ok (data, resource_props) ->
           privilege_met fs `Read ~auth_user_props resource_props >|= function
-          | `Forbidden -> 
+          | `Forbidden ->
             let node = Xml.dav_node "response"
                 [ Xml.dav_node "href" [ Xml.pcdata (Fs.to_string (`File f)) ] ;
                   Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
@@ -910,7 +910,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         Lwt.return @@ Ok node
       | Ok (data, resource_props) ->
         privilege_met fs `Read ~auth_user_props resource_props >|= function
-        | `Forbidden -> 
+        | `Forbidden ->
           let node = Xml.dav_node "response"
               [ Xml.dav_node "href" [ Xml.pcdata (Fs.to_string (file :> Webdav_fs.file_or_dir)) ] ;
                 Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
