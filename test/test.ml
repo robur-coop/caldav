@@ -1828,6 +1828,41 @@ let property_update_tests = [
   "Propertyupdate conflicting namespace", `Quick, property_update_conflicting_ns ;
 ]
 
+let default_group () =
+  (* in config.principals we've a default_groups property - when a user is
+     created, it should have joined the default_groups groups *)
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let creation_time = Ptime.v (1, 0L) in
+    let robur_principal =
+      [], [Xml.dav_node "href" [ Xml.Pcdata (Uri.to_string @@ principal_url "robur") ]]
+    in
+    let initial_props = [ ((Xml.robur_ns, "default_groups"), robur_principal) ] in
+    let dir_props = Properties.create_dir ~initial_props [] creation_time "Special Resource" in
+    Fs.write_property_map fs (`Dir [config.principals]) dir_props >>= fun _ ->
+    Dav.make_user fs creation_time config ~name:"user1" ~password:"foo" ~salt:Cstruct.empty >>= fun resource ->
+    (* check that resource is user1*)
+    Alcotest.(check bool __LOC__ true (String.equal (Uri.path resource) ("/" ^ config.principals ^ "/user1/")));
+    Fs.get_property_map fs (`Dir [config.principals ; "user1"]) >>= fun props ->
+    let is_robur_principal = function
+      | None -> false
+      | Some (_, principals) ->
+        List.exists (fun tree ->
+            match Xml.href_parser tree with Ok p ->
+              print_endline ("principal " ^ p);
+              String.equal p ("/" ^ config.principals ^ "/robur/") | _ -> false)
+          principals
+    in
+    Alcotest.(check bool __LOC__ true
+                (is_robur_principal (Properties.unsafe_find (Xml.dav_ns, "group-membership") props)));
+    Lwt.return_unit
+  )
+
+let regression_tests = [
+  "Default group", `Quick, default_group
+]
+
 let tests = [
   "Read propfind", parse_propfind_xml_tests ;
   "Read propertyupdate", parse_propupdate_xml_tests ;
@@ -1838,6 +1873,7 @@ let tests = [
   "Properties.find_many tests", properties_find_many_tests ;
   "Report with ACL tests", report_with_acl_tests ;
   "Propertyupdate tests", property_update_tests ;
+  "Regression", regression_tests ;
 ]
 
 let () =
