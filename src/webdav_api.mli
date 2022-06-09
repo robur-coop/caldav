@@ -18,7 +18,7 @@ sig
   val report : state -> config -> path:string -> user:string -> data:string ->
     (string, [> `Bad_request ]) result Lwt.t
 
-  val write_component : state -> config -> path:string -> user:string -> Ptime.t -> content_type:content_type -> data:string ->
+  val write_component : state -> path:string -> Ptime.t -> content_type:content_type -> data:string ->
     (string, [> `Bad_request | `Conflict | `Forbidden | `Internal_server_error ]) result Lwt.t
 
   val delete : state -> path:string -> Ptime.t -> bool Lwt.t

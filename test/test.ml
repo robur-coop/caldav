@@ -1309,9 +1309,8 @@ let write_and_update_parent_mtime () =
         Re.replace re ~f:(fun _ -> "\r\n") ics_example
       in
       Fs.write fs (`File ["parent"; "child"]) ics file_props >>= fun _ ->
-      let user = "karl" in
       let data = ics_example in
-      Dav.write_component res_fs config ~content_type:"text/calendar" ~path:"parent/child" ~user ~data updated_time >|= fun r ->
+      Dav.write_component res_fs ~content_type:"text/calendar" ~path:"parent/child" ~data updated_time >|= fun r ->
       ( match r with
       | Ok _ -> ()
       | Error `Bad_request -> Printf.printf "bad request \n"

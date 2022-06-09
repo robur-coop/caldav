@@ -1,5 +1,3 @@
-[@@@ocaml.warning "-27"]
-
 type file = [ `File of string list ]
 
 type dir = [ `Dir of string list ]
@@ -170,7 +168,7 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:Mirage_kv.RW) = struct
   let exists fs str =
     let file = data str in
     Fs.exists fs file >|= function
-    | Error e -> (* Error e *) false
+    | Error _e -> (* Error e *) false
     | Ok None -> false
     | Ok (Some _) -> true
     (*Fs.mem fs file*)
@@ -178,7 +176,7 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:Mirage_kv.RW) = struct
   let dir_exists fs (`Dir dir) =
     let key = data @@ to_string (`Dir dir) in
     Fs.exists fs key >|= function
-    | Error e -> (* Error e *) false
+    | Error _e -> (* Error e *) false
     | Ok None -> false
     | Ok (Some `Value) -> false
     | Ok (Some `Dictionary) -> true

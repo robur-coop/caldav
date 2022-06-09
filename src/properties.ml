@@ -1,5 +1,3 @@
-[@@@ocaml.warning "-32"]
-
 module Xml = Webdav_xml
 
 let prop_version = [ Xml.pcdata "2" ]
@@ -248,13 +246,6 @@ let get_prop auth_user_props m = function
   | ns, "current-user-privilege-set" when ns = Xml.dav_ns -> current_user_privilege_set ~auth_user_props m
   | ns, "current-user-principal" when ns = Xml.dav_ns -> current_user_principal auth_user_props
   | fqname -> unsafe_find fqname m
-
-let authorized_properties_for_resource ~auth_user_props requested_props propmap_for_resource =
-  let privileges = privileges ~auth_user_props propmap_for_resource in
-  let requested_allowed, requested_forbidden =
-    List.partition (fun prop -> Privileges.can_read_prop prop privileges) requested_props
-  in
-  (requested_allowed, requested_forbidden)
 
 let find ~auth_user_props ~resource_props property_fqname =
   let privileges = privileges ~auth_user_props resource_props in

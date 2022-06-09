@@ -1,6 +1,3 @@
-[@@@ocaml.warning "-27"]
-[@@@ocaml.warning "-32"]
-
 module Xml = Webdav_xml
 open Webdav_config
 type tree = Xml.tree
@@ -22,7 +19,7 @@ sig
   val report : state -> config -> path:string -> user:string -> data:string ->
     (string, [> `Bad_request ]) result Lwt.t
 
-  val write_component : state -> config -> path:string -> user:string -> Ptime.t -> content_type:content_type -> data:string ->
+  val write_component : state -> path:string -> Ptime.t -> content_type:content_type -> data:string ->
     (string, [> `Bad_request | `Conflict | `Forbidden | `Internal_server_error ]) result Lwt.t
 
   val delete : state -> path:string -> Ptime.t -> bool Lwt.t
@@ -91,16 +88,6 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     let user_path = `Dir [ config.principals ; user ] in
     Fs.get_property_map fs user_path
 
-  let acl fs config user path =
-    properties_for_current_user fs config user >>= fun auth_user_props ->
-    Fs.get_property_map fs path >|= fun resource_props ->
-    match Properties.find ~auth_user_props ~resource_props (Xml.dav_ns, "acl") with
-    | Error `Forbidden as e -> e
-    | Error `Not_found -> Ok []
-    | Ok (_, aces) ->
-      let aces' = List.map Xml.xml_to_ace aces in
-      Ok (List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces')
-
   let privilege_met fs requirement ~auth_user_props resource_props =
     let privileges = Properties.privileges ~auth_user_props resource_props in
     (match Properties.inherited_acls ~auth_user_props resource_props with
@@ -134,14 +121,14 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
   let list_dir fs (`Dir dir) =
     let list_file f_or_d =
       begin Fs.last_modified fs f_or_d >|= function
-        | Error e -> Ptime.epoch
+        | Error _e -> Ptime.epoch
         | Ok ts -> ts
       end >|= fun ts ->
       let is_dir = match f_or_d with | `File _ -> false | `Dir _ -> true in
       (Fs.to_string f_or_d, is_dir, Ptime.to_rfc3339 ts)
     in
     Fs.listdir fs (`Dir dir) >>= function
-    | Error e -> assert false
+    | Error _e -> assert false
     | Ok files -> Lwt_list.map_p list_file files
 
   let directory_as_html fs (`Dir dir) =
@@ -162,7 +149,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     | Error e -> Log.warn (fun m -> m "increasing last modified of parent failed %a, ignoring" Fs.pp_write_error e)
     | Ok () -> ()
 
-  let write_if_parent_exists fs config (file : Webdav_fs.file) timestamp content_type user ics =
+  let write_if_parent_exists fs (file : Webdav_fs.file) timestamp content_type ics =
     let file' = (file :> Webdav_fs.file_or_dir) in
     let parent = Fs.parent file' in
     let parent' = (parent :> Webdav_fs.file_or_dir) in
@@ -180,17 +167,17 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         let props = Properties.create ~content_type acl timestamp (String.length ics) (Fs.to_string file') in
         Fs.write fs file ics props >>= function
         (* TODO map error to internal server error and log it, as function *)
-        | Error e -> Lwt.return @@ Error `Internal_server_error
+        | Error _e -> Lwt.return @@ Error `Internal_server_error
         | Ok () ->
           update_parent_after_child_write fs file' timestamp >>= fun () ->
           Fs.etag fs file' >|= function
-          | Error e -> Error `Internal_server_error
+          | Error _e -> Error `Internal_server_error
           | Ok etag -> Ok etag
 
-  let write_component fs config ~path ~user timestamp ~content_type ~data =
+  let write_component fs ~path timestamp ~content_type ~data =
     match parse_calendar ~path data with
     | Error e -> Lwt.return @@ Error e
-    | Ok (ics, file) -> write_if_parent_exists fs config file timestamp content_type user ics
+    | Ok (ics, file) -> write_if_parent_exists fs file timestamp content_type ics
 
   let directory_as_ics fs (`Dir dir) =
     let calendar_components = function
@@ -251,7 +238,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     Fs.from_string fs path >>= function
     | Error _ -> Lwt.return false
     | Ok f_or_d ->
-      Fs.destroy fs f_or_d >>= fun res ->
+      Fs.destroy fs f_or_d >>= fun _res ->
       update_parent_after_child_write fs f_or_d now >|= fun () ->
       true
 
@@ -283,7 +270,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         (* results for props, grouped by code *)
         let propstats = match propfind_request with
           | `Propname -> [`OK, Properties.names resource_props]
-          | `All_prop includes -> [`OK, Properties.all resource_props] (* TODO: finish this *)
+          | `All_prop _includes -> [`OK, Properties.all resource_props] (* TODO: finish this *)
           | `Props ps -> Properties.find_many ~auth_user_props ~resource_props ps
         in
         let ps = List.map propstat_node propstats in
@@ -357,11 +344,9 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
   let proppatch fs config ~path ~user ~data =
     build_req_tree fs config path user data >>= function
     | Error e -> Lwt.return @@ Error e
-    | Ok (f_or_d, auth_user_props, req_tree) -> match Xml.parse_propupdate_xml req_tree with
+    | Ok (f_or_d, _auth_user_props, req_tree) -> match Xml.parse_propupdate_xml req_tree with
       | Error _ -> Lwt.return @@ Error `Bad_request
-      | Ok updates ->
-
-        update_properties fs f_or_d updates >|= function
+      | Ok updates -> update_properties fs f_or_d updates >|= function
         | Error _      -> Error `Bad_request
         | Ok propstats ->
           let nodes =
@@ -414,9 +399,9 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
             let acl = [ ( `Href (Uri.of_string (Fs.to_string (`Dir [config.principals ; user]))), `Grant [`All])] in
             create_collection_dir fs acl set_props now resourcetype dir
 
-  let check_in_bounds p s e = true
-  let apply_to_params pfs p = true
-  let text_matches s c n p = true
+  let check_in_bounds _p _s _e = true
+  let apply_to_params _pfs _p = true
+  let text_matches _s _c _n _p = true
 
   let apply_to_props props =
     let key p = Icalendar.Writer.cal_prop_to_ics_key p in
@@ -505,7 +490,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     match dtend, duration, duration_gt_0, dtstart_is_datetime with
     | Some dtend, None, false, _    -> start < dtend && end_ > dtstart
     | None, Some duration, true, _  -> start < (dtstart + duration) && end_ > dtstart
-    | None, Some duration, false, _ -> start <= dtstart && end_ > dtstart
+    | None, Some _duration, false, _ -> start <= dtstart && end_ > dtstart
     | None, None, false, true       -> start <= dtstart && end_ > dtstart
     | None, None, false, false      -> start < (dtstart + p1d) && end_ > dtstart
     | _                             -> assert false (* duration_gt_0 is dependent on duration *)
@@ -520,7 +505,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     span_in_timerange range dtstart dtend duration dtstart_is_datetime
 
   let expand_event_in_range timezones f acc range exceptions event =
-    let (s, e) = range in
+    let (s, _e) = range in
     let next_event = Icalendar.recur_events event in
     let rec next_r () = match next_event () with
       | None -> None
@@ -560,12 +545,6 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     | `Freebusy fb -> freebusy_in_timerange range fb
     | `Timezone _  -> true
     | _ -> false
-
-  let date_to_ptime date = match Ptime.of_date_time (date, ((0, 0, 0), 0)) with
-    | None -> assert false
-    | Some t -> t
-
-  let ptime_to_date ts = fst @@ Ptime.to_date_time ts
 
   let normalize_timestamp timezones = function
     | `Utc ts -> `Utc ts
@@ -621,7 +600,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
   (* both range and freebusy are in utc *)
   let fb_in_timerange range = function
     | `Freebusy fb ->
-      let in_range (s, span, was_explicit) =
+      let in_range (s, span, _was_explicit) =
         let e = add_span s span in
         let (s_req, e_req) = range in
         let (<) a b = Ptime.is_later ~than:a b in
@@ -653,7 +632,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
               | (_, `Date d)          -> d
               | (_, `Datetime (`Utc d)) -> fst @@ Ptime.to_date_time d
               | (_, `Datetime (`Local d)) -> fst @@ Ptime.to_date_time d
-              | (_, `Datetime (`With_tzid (d, tzid))) -> fst @@ Ptime.to_date_time d
+              | (_, `Datetime (`With_tzid (d, _tzid))) -> fst @@ Ptime.to_date_time d
             end
           | _ -> assert false)
         events
@@ -727,7 +706,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     | `Is_defined, false -> false
     | `Is_not_defined, false -> true
     | `Comp_filter (_, _, _), false -> false
-    | `Comp_filter (tr_opt, pfs, cfs), true ->
+    | `Comp_filter (tr_opt, _pfs, cfs), true ->
       let matches_timerange = match tr_opt with
       | None -> true
       | Some range ->
@@ -896,7 +875,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         let resp_tree = multistatus responses' in
         Ok (Xml.tree_to_string resp_tree)
 
-  let handle_calendar_multiget_report (transformation, filenames) fs path ~auth_user_props =
+  let handle_calendar_multiget_report (transformation, filenames) fs ~auth_user_props =
     let report_one (filename : string) =
       Log.debug (fun m -> m "calendar_multiget: filename %s" filename) ;
       let file = Fs.file_from_string filename in
@@ -944,8 +923,8 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     | Ok (f_or_d, auth_user_props, req_tree) ->
       match Xml.parse_calendar_query_xml req_tree, Xml.parse_calendar_multiget_xml req_tree with
       | Ok calendar_query, _ -> handle_calendar_query_report calendar_query fs f_or_d ~auth_user_props
-      | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget fs f_or_d ~auth_user_props
-      | Error e, Error _ -> Lwt.return (Error `Bad_request)
+      | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget fs ~auth_user_props
+      | Error _, Error _ -> Lwt.return (Error `Bad_request)
 
   let read_target_or_parent_properties fs path target_or_parent =
     (match target_or_parent with
@@ -1014,9 +993,6 @@ let compute_etag fs ~path =
     Fs.etag fs f_or_d >|= function
     | Error _ -> None
     | Ok etag -> Some etag
-
-let server_ns = "http://calendarserver.org/ns/"
-let carddav_ns = "urn:ietf:params:xml:ns:carddav"
 
 let make_dir fs now acl ?(resourcetype = []) ?(props=[]) dir =
   let propmap =

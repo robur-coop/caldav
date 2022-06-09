@@ -1,5 +1,3 @@
-[@@@ocaml.warning "-27"]
-
 open Webdav_config
 
 open Lwt.Infix
@@ -134,7 +132,7 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
       let content_type = Headers.get_content_type rd.req_headers in
       let user = Headers.get_user rd.req_headers in
       Access_log.debug (fun m -> m "write_component path %s user %s body @.%s" path user body);
-      Dav.write_component fs config ~path (now ()) ~content_type ~user ~data:body >>= function
+      Dav.write_component fs ~path (now ()) ~content_type ~data:body >>= function
       | Error e -> Wm.respond (to_status e) rd
       | Ok etag ->
         let location = Uri.with_path config.host path in
@@ -193,7 +191,7 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
               let salt = generate_salt () in
               Dav.make_user fs now config ~name ~password ~salt >>= function
               | Error e -> Wm.respond (to_status e) rd
-              | Ok principal ->
+              | Ok _principal ->
                 let rd' = with_req_headers (Headers.replace_authorization name) rd in
                 Wm.continue `Authorized rd'
             end else begin
@@ -496,7 +494,7 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         Wm.continue (not principals_granted) rd
   end
 
-  class group_users config fs now = object(self)
+  class group_users config fs = object(self)
     inherit [Cohttp_lwt.Body.t] Wm.resource
 
     method private requested_group rd =
@@ -568,7 +566,7 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
   let routes config fs now generate_salt = [
     ("/.well-known/caldav", fun () -> new redirect config) ;
     ("/users/:id", fun () -> new user config fs now generate_salt) ;
-    ("/groups/:group_id/users/:user_id", fun () -> new group_users config fs now) ;
+    ("/groups/:group_id/users/:user_id", fun () -> new group_users config fs) ;
     ("/groups/:id", fun () -> new group config fs now) ;
     ("/" ^ config.principals, fun () -> new handler config fs now generate_salt) ;
     ("/" ^ config.principals ^ "/*", fun () -> new handler config fs now generate_salt) ;
@@ -592,7 +590,7 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
       | None        -> (`Not_found, Cohttp.Header.init (), `String "Not found", [])
       | Some result -> result
     end
-    >>= fun (status, headers, body, path) ->
+    >>= fun (status, headers, body, _path) ->
     let stop = now () in
     let diff = Ptime.diff stop start in
     Access_log.debug (fun m -> m "response %d response time %a"
