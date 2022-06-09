@@ -38,11 +38,11 @@ sig
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, [> `Msg of string | `Unknown_user of string * string ]) result Lwt.t
 
   val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:Cstruct.t ->
-    Uri.t Lwt.t
+    (Uri.t, [> `Conflict ]) result Lwt.t
   val change_user_password : state -> config -> name:string -> password:string -> salt:Cstruct.t -> (unit, [> `Internal_server_error ]) result Lwt.t
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
-  val make_group : state -> Ptime.t -> config -> string -> string list -> Uri.t Lwt.t
+  val make_group : state -> Ptime.t -> config -> string -> string list -> (Uri.t, [> `Conflict ]) result Lwt.t
   val enroll : state -> config -> member:string -> group:string -> unit Lwt.t
   val resign : state -> config -> member:string -> group:string -> unit Lwt.t
   val replace_group_members : state -> config -> string -> string list -> unit Lwt.t
@@ -359,7 +359,9 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     | Error e -> Lwt.return @@ Error e
     | Ok (f_or_d, auth_user_props, req_tree) -> match Xml.parse_propupdate_xml req_tree with
       | Error _ -> Lwt.return @@ Error `Bad_request
-      | Ok updates -> update_properties fs f_or_d updates >|= function
+      | Ok updates ->
+
+        update_properties fs f_or_d updates >|= function
         | Error _      -> Error `Bad_request
         | Ok propstats ->
           let nodes =
@@ -1108,19 +1110,25 @@ let change_user_password fs config ~name ~password ~salt =
 let make_principal props fs now config name =
   let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
   let principal_dir = `Dir [ config.principals ; name ] in
-  let principal_url_string = Fs.to_string (principal_dir :> Webdav_fs.file_or_dir) in
-  let props' =
-    ((Xml.dav_ns, "principal-URL"),
-     ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata principal_url_string ] ]))
-    :: props
-  in
-  let principal_url = Uri.of_string principal_url_string in
-  let acl = (`Href principal_url, `Grant [ `All ]) in
-  unsafe_read_acl fs (`Dir [config.principals]) >>= fun principal_acl ->
-  (* maybe only allow root to write principal_dir (for password reset) *)
-  make_dir_if_not_present fs now (acl :: principal_acl) ~resourcetype ~props:props' principal_dir >>= fun _ ->
-  create_calendar fs now [acl] (`Dir [config.calendars ; name ]) >|= fun _ ->
-  principal_url
+  let calendar_dir = `Dir [ config.calendars ; name ] in
+  Fs.dir_exists fs principal_dir >>= fun p_exists ->
+  Fs.dir_exists fs calendar_dir >>= fun c_exists ->
+  if p_exists || c_exists then
+    Lwt.return (Error `Conflict)
+  else
+    let principal_url_string = Fs.to_string (principal_dir :> Webdav_fs.file_or_dir) in
+    let props' =
+      ((Xml.dav_ns, "principal-URL"),
+       ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata principal_url_string ] ]))
+      :: props
+    in
+    let principal_url = Uri.of_string principal_url_string in
+    let acl = (`Href principal_url, `Grant [ `All ]) in
+    unsafe_read_acl fs (`Dir [config.principals]) >>= fun principal_acl ->
+    (* maybe only allow root to write principal_dir (for password reset) *)
+    make_dir_if_not_present fs now (acl :: principal_acl) ~resourcetype ~props:props' principal_dir >>= fun _ ->
+    create_calendar fs now [acl] calendar_dir >|= fun _ ->
+    Ok principal_url
 
 let principal_to_href principals_directory principal_string =
   let uri_string = Fs.to_string (`Dir [ principals_directory ; principal_string]) in

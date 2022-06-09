@@ -191,9 +191,11 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
             if sane name then begin
               let now = now () in
               let salt = generate_salt () in
-              Dav.make_user fs now config ~name ~password ~salt >>= fun principal ->
-              let rd' = with_req_headers (Headers.replace_authorization name) rd in
-              Wm.continue `Authorized rd'
+              Dav.make_user fs now config ~name ~password ~salt >>= function
+              | Error e -> Wm.respond (to_status e) rd
+              | Ok principal ->
+                let rd' = with_req_headers (Headers.replace_authorization name) rd in
+                Wm.continue `Authorized rd'
             end else begin
               Access_log.warn (fun m -> m "is_authorized failed with unknown invalid username %s" name);
               Wm.continue (`Basic "invalid authorization") rd
@@ -345,9 +347,11 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
       | Ok name, Ok password ->
         let now = now () in
         let salt = generate_salt () in
-        Dav.make_user fs now config ~name ~password ~salt >>= fun principal_url ->
-        let rd' = with_resp_headers (Headers.replace_location principal_url) rd in
-        Wm.continue true rd'
+        Dav.make_user fs now config ~name ~password ~salt >>= function
+        | Error e -> Wm.respond (to_status e) rd
+        | Ok principal_url ->
+          let rd' = with_resp_headers (Headers.replace_location principal_url) rd in
+          Wm.continue true rd'
 
     (* TODO? allow a user to delete themselves *)
     (* TODO? soft-delete: "mark as deleted" *)
@@ -435,9 +439,11 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
       | Error _, _ | _, Error _ -> Wm.respond (to_status `Bad_request) rd
       | Ok name, Ok members ->
         let now = now () in
-        Dav.make_group fs now config name members >>= fun principal_url ->
-        let rd' = with_resp_headers (Headers.replace_location principal_url) rd in
-        Wm.continue true rd'
+        Dav.make_group fs now config name members >>= function
+        | Error e -> Wm.respond (to_status e) rd
+        | Ok principal_url ->
+          let rd' = with_resp_headers (Headers.replace_location principal_url) rd in
+          Wm.continue true rd'
 
     method! delete_resource rd =
       match self#requested_group rd with

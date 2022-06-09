@@ -1841,22 +1841,24 @@ let default_group () =
     let initial_props = [ ((Xml.robur_ns, "default_groups"), robur_principal) ] in
     let dir_props = Properties.create_dir ~initial_props [] creation_time "Special Resource" in
     Fs.write_property_map fs (`Dir [config.principals]) dir_props >>= fun _ ->
-    Dav.make_user fs creation_time config ~name:"user1" ~password:"foo" ~salt:Cstruct.empty >>= fun resource ->
-    (* check that resource is user1*)
-    Alcotest.(check bool __LOC__ true (String.equal (Uri.path resource) ("/" ^ config.principals ^ "/user1/")));
-    Fs.get_property_map fs (`Dir [config.principals ; "user1"]) >>= fun props ->
-    let is_robur_principal = function
-      | None -> false
-      | Some (_, principals) ->
-        List.exists (fun tree ->
-            match Xml.href_parser tree with Ok p ->
-              print_endline ("principal " ^ p);
-              String.equal p ("/" ^ config.principals ^ "/robur/") | _ -> false)
-          principals
-    in
-    Alcotest.(check bool __LOC__ true
-                (is_robur_principal (Properties.unsafe_find (Xml.dav_ns, "group-membership") props)));
-    Lwt.return_unit
+    Dav.make_user fs creation_time config ~name:"user1" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "user already exists"
+    | Ok resource ->
+      (* check that resource is user1*)
+      Alcotest.(check bool __LOC__ true (String.equal (Uri.path resource) ("/" ^ config.principals ^ "/user1/")));
+      Fs.get_property_map fs (`Dir [config.principals ; "user1"]) >>= fun props ->
+      let is_robur_principal = function
+        | None -> false
+        | Some (_, principals) ->
+          List.exists (fun tree ->
+              match Xml.href_parser tree with Ok p ->
+                print_endline ("principal " ^ p);
+                String.equal p ("/" ^ config.principals ^ "/robur/") | _ -> false)
+            principals
+      in
+      Alcotest.(check bool __LOC__ true
+                  (is_robur_principal (Properties.unsafe_find (Xml.dav_ns, "group-membership") props)));
+      Lwt.return_unit
   )
 
 let regression_tests = [
