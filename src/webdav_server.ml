@@ -132,7 +132,7 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
       let content_type = Headers.get_content_type rd.req_headers in
       let user = Headers.get_user rd.req_headers in
       Access_log.debug (fun m -> m "write_component path %s user %s body @.%s" path user body);
-      Dav.write_component fs ~path (now ()) ~content_type ~data:body >>= function
+      Dav.write_component fs config ~path (now ()) ~content_type ~data:body >>= function
       | Error e -> Wm.respond (to_status e) rd
       | Ok etag ->
         let location = Uri.with_path config.host path in
