@@ -36,13 +36,13 @@ sig
   val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:Cstruct.t ->
     (Uri.t, [> `Conflict ]) result Lwt.t
   val change_user_password : state -> config -> name:string -> password:string -> salt:Cstruct.t -> (unit, [> `Internal_server_error ]) result Lwt.t
-  val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
+  val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found | `Conflict ]) result Lwt.t
 
   val make_group : state -> Ptime.t -> config -> string -> string list -> (Uri.t, [> `Conflict ]) result Lwt.t
-  val enroll : state -> config -> member:string -> group:string -> unit Lwt.t
-  val resign : state -> config -> member:string -> group:string -> unit Lwt.t
-  val replace_group_members : state -> config -> string -> string list -> unit Lwt.t
-  val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
+  val enroll : state -> config -> member:string -> group:string -> (unit, [> `Conflict ]) result Lwt.t
+  val resign : state -> config -> member:string -> group:string -> (unit, [> `Conflict ]) result Lwt.t
+  val replace_group_members : state -> config -> string -> string list -> (unit, [> `Conflict ]) result Lwt.t
+  val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found | `Conflict ]) result Lwt.t
 
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
   val initialize_fs_for_apple_testsuite : state -> Ptime.t -> config -> unit Lwt.t

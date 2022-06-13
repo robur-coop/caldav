@@ -1227,14 +1227,12 @@ let mkcol_success () =
         Properties.create_dir ~resourcetype acl now "Special Resource"
       in
       let properties = Properties.create_dir allow_all_acl now "home" in
-      Fs.mkdir res_fs (`Dir [config.principals]) properties >>= fun _ ->
-      Fs.mkdir res_fs (`Dir [config.principals; "testuser"]) properties >>= fun _ ->
+      Dav.make_user res_fs now config ~name:"testuser" ~password:"abc" ~salt:Cstruct.empty >>= fun _ ->
       Fs.mkdir res_fs (`Dir ["home"]) properties >>= fun _ ->
       Fs.mkdir res_fs (`Dir [ "home" ; "special" ]) props >>= fun _ ->
       KV_mem.connect () >>= fun fs ->
       Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
-      Fs.mkdir fs (`Dir [config.principals]) properties >>= fun _ ->
-      Fs.mkdir fs (`Dir [config.principals; "testuser"]) properties >>= fun _ ->
+      Dav.make_user fs now config ~name:"testuser" ~password:"abc" ~salt:Cstruct.empty >>= fun _ ->
       Dav.mkcol fs config ~path:"home/special/" ~user:"testuser" (`Other "MKCOL") now ~data:body >|= function
       | Error e -> (res_fs, Error e)
       | Ok () -> (res_fs, Ok fs))
@@ -1353,6 +1351,363 @@ let proppatch_success () =
   Alcotest.(check (result state_testable err_testable) __LOC__
               (Ok res_fs) r)
 
+let make_user () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok uri ->
+      let test_url = Uri.of_string "/principals/test/" in
+      Alcotest.(check bool __LOC__ true (Uri.equal test_url uri));
+      Lwt.return_unit)
+
+let make_user_same_name () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+      | Error `Conflict -> Lwt.return_unit
+      | Ok _ -> invalid_arg "expected a conflict")
+
+let make_user_delete_make () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      Dav.delete_user fs config "test" >>= function
+      | Error _ -> invalid_arg "expected to succeed deleting a freshly created user"
+      | Ok () ->
+        Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+        | Error _ -> invalid_arg "expected creating a user to succeed"
+        | Ok uri ->
+          let test_url = Uri.of_string "/principals/test/" in
+          Alcotest.(check bool __LOC__ true (Uri.equal test_url uri));
+          Lwt.return_unit)
+
+let delete_non_existing_user () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    Dav.delete_user fs config "test" >>= function
+    | Ok () -> invalid_arg "expected to fail deleting a non-existing user"
+    | Error _ -> Lwt.return_unit)
+
+let delete_user_is_a_group () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_group fs now config "testgroup" [] >>= function
+    | Error _ -> invalid_arg "expected make group to succeed"
+    | Ok _ ->
+      Dav.delete_user fs config "testgroup" >>= function
+      | Ok () -> invalid_arg "expected to fail deleting a user that is a group"
+      | Error _ -> Lwt.return_unit)
+
+let check_user_group fs ~user ~group =
+  let open Lwt.Infix in
+  Fs.get_property_map fs (`Dir [config.principals ; user ]) >>= fun u_prop ->
+  Fs.get_property_map fs (`Dir [config.principals ; group ]) >>= fun g_prop ->
+  match
+    Properties.unsafe_find (Xml.dav_ns, "group-membership") u_prop,
+    Properties.unsafe_find (Xml.dav_ns, "group-member-set") g_prop
+  with
+  | None, None | None, _ | _, None -> invalid_arg "expected exactly one member"
+  | Some (_, u_mem), Some (_, g_mem) ->
+    let principal_good expected href =
+      match Xml.href_parser href with
+      | Ok principal -> Alcotest.(check string __LOC__ expected principal)
+      | Error _ -> invalid_arg "href parser failed"
+    in
+    List.iter (principal_good ("/principals/" ^ group ^ "/")) u_mem;
+    List.iter (principal_good ("/principals/" ^ user ^ "/")) g_mem;
+    if List.length u_mem <> 1 || List.length g_mem <> 1 then
+      invalid_arg "bad length for users or groups";
+    Lwt.return_unit
+
+let check_user_no_group fs user =
+  let open Lwt.Infix in
+  Fs.get_property_map fs (`Dir [config.principals ; user ]) >>= fun prop ->
+  match Properties.unsafe_find (Xml.dav_ns, "group-membership") prop with
+  | None -> Lwt.return_unit
+  | Some (_, mem) ->
+    if List.length mem <> 0  then
+      invalid_arg "bad length for group membership";
+    Lwt.return_unit
+
+let check_group_no_user fs group =
+  let open Lwt.Infix in
+  Fs.get_property_map fs (`Dir [config.principals ; group ]) >>= fun prop ->
+  match Properties.unsafe_find (Xml.dav_ns, "group-member-set") prop with
+  | None -> Lwt.return_unit
+  | Some (_, mem) ->
+    if List.length mem <> 0  then
+      invalid_arg "bad length for group member set";
+    Lwt.return_unit
+
+let make_group () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      Dav.make_group fs now config "testgroup" ["test"] >>= function
+      | Ok uri ->
+        let test_url = Uri.of_string "/principals/testgroup/" in
+        Alcotest.(check bool __LOC__ true (Uri.equal test_url uri));
+        check_user_group fs ~user:"test" ~group:"testgroup"
+      | Error _ -> invalid_arg "expected making a group to succeed")
+
+let make_group_conflict () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      Dav.make_group fs now config "test" [] >>= function
+      | Ok _ -> invalid_arg "expected making a group with same name as a user to fail"
+      | Error _ -> Lwt.return_unit)
+
+let make_group_user_not_exists () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_group fs now config "test" ["a"; "b"; "c"] >>= function
+    | Ok _ -> invalid_arg "expected making a group with non-existing users to fail"
+    | Error _ -> Lwt.return_unit)
+
+let make_group_nested () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_group fs now config "test" [] >>= function
+    | Error _ -> invalid_arg "expected making a group to succeed"
+    | Ok _ ->
+      Dav.make_group fs now config "test2" ["test"] >>= function
+      | Ok _ -> invalid_arg "expected making a nested group to fail"
+      | Error _ -> Lwt.return_unit)
+
+let replace_group_members_one () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      Dav.make_user fs now config ~name:"test2" ~password:"foo" ~salt:Cstruct.empty >>= function
+      | Error _ -> invalid_arg "expected make_user to succeed"
+      | Ok _ ->
+        Dav.make_group fs now config "testgroup" ["test"] >>= function
+        | Error _ -> invalid_arg "expected make_group to succeed"
+        | Ok _ ->
+          Dav.replace_group_members fs config "testgroup" ["test2"] >>= function
+          | Error _ -> invalid_arg "expected replace_group_members to succeed"
+          | Ok _ -> check_user_group fs ~user:"test2" ~group:"testgroup")
+
+let replace_group_members_two () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      Dav.make_group fs now config "testgroup" ["test"] >>= function
+      | Error _ -> invalid_arg "expected make_group to succeed"
+      | Ok _ ->
+        Dav.replace_group_members fs config "test" [] >>= function
+        | Error _ -> Lwt.return_unit
+        | Ok _ -> invalid_arg "expected replace_group_members to fail")
+
+let replace_group_members_three () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    Dav.replace_group_members fs config "test" [] >>= function
+    | Error _ -> Lwt.return_unit
+    | Ok _ -> invalid_arg "expected replace_group_members to fail")
+
+let replace_group_members_four () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_group fs now config "testgroup" [] >>= function
+    | Error _ -> invalid_arg "expected make_group to succeed"
+    | Ok _ ->
+      Dav.replace_group_members fs config "testgroup" ["testgroup"] >>= function
+      | Error _ -> Lwt.return_unit
+      | Ok _ -> invalid_arg "expected replace_group_members to fail")
+
+let make_group_and_enroll () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      Dav.make_group fs now config "testgroup" [] >>= function
+      | Error _ -> invalid_arg "expected making a group to succeed"
+      | Ok _ ->
+        check_user_no_group fs "test" >>= fun () ->
+        Dav.enroll fs config ~member:"test" ~group:"testgroup" >>= function
+        | Error _ -> invalid_arg "expected enroll to succeed"
+        | Ok () -> check_user_group fs ~user:"test" ~group:"testgroup")
+
+let make_group_and_enroll_no_user () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_group fs now config "testgroup" [] >>= function
+    | Error _ -> invalid_arg "expected making a group to succeed"
+    | Ok _ ->
+      Dav.enroll fs config ~member:"test" ~group:"testgroup" >>= function
+      | Error _ -> Lwt.return_unit
+      | Ok () -> invalid_arg "expected enroll to non-existing user to fail")
+
+let make_group_and_enroll_group () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_group fs now config "testgroup" [] >>= function
+    | Error _ -> invalid_arg "expected making a group to succeed"
+    | Ok _ ->
+      Dav.enroll fs config ~member:"testgroup" ~group:"testgroup" >>= function
+      | Error _ -> Lwt.return_unit
+      | Ok () -> invalid_arg "expected enroll of group to another group to fail")
+
+let make_group_and_resign () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      Dav.make_group fs now config "testgroup" ["test"] >>= function
+      | Error _ -> invalid_arg "expected making a group to succeed"
+      | Ok _ ->
+        Dav.resign fs config ~member:"test" ~group:"testgroup" >>= function
+        | Ok () ->
+          check_user_no_group fs "test" >>= fun () ->
+          check_group_no_user fs "testgroup"
+        | Error _ -> invalid_arg "expected resign to succeed")
+
+let make_group_and_resign_not_member () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      Dav.make_group fs now config "testgroup" [] >>= function
+      | Error _ -> invalid_arg "expected making a group to succeed"
+      | Ok _ ->
+        Dav.resign fs config ~member:"test" ~group:"testgroup" >>= function
+        | Ok () ->
+          check_user_no_group fs "test" >>= fun () ->
+          check_group_no_user fs "testgroup"
+        | Error _ -> invalid_arg "expected resign to succeed")
+
+let make_group_and_resign_not_existing_group () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      Dav.resign fs config ~member:"test" ~group:"testgroup" >>= function
+      | Ok _ -> invalid_arg "expected resign to fail (non-existing group)"
+      | Error _ -> Lwt.return_unit)
+
+let make_group_and_resign_not_existing_user () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+      Dav.make_group fs now config "testgroup" [] >>= function
+      | Error _ -> invalid_arg "expected make_user to succeed"
+      | Ok _ ->
+        Dav.resign fs config ~member:"test" ~group:"testgroup" >>= function
+        | Error _ -> Lwt.return_unit
+        | Ok _ -> invalid_arg "expected resign to fail (non-existing user)")
+
+let make_group_and_resign_no () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    Dav.resign fs config ~member:"test" ~group:"testgroup" >>= function
+    | Ok _ -> invalid_arg "expected resign to fail (group and user do not exist)"
+    | Error _ -> Lwt.return_unit)
+
+let make_group_and_resign_not_a_group () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      Dav.resign fs config ~member:"test" ~group:"test" >>= function
+      | Ok _ -> invalid_arg "expected resign of not a group to fail"
+      | Error _ -> Lwt.return_unit)
+
+let delete_group_fine () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      Dav.make_group fs now config "testgroup" ["test"] >>= function
+      | Error _ -> invalid_arg "expected making a group to succeed"
+      | Ok _ ->
+        check_user_group fs ~user:"test" ~group:"testgroup" >>= fun () ->
+        Dav.delete_group fs config "testgroup" >>= function
+        | Error _ -> invalid_arg "expected delete group to work"
+        | Ok _ -> check_user_no_group fs "test")
+
+let delete_group_no_group () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    Dav.delete_group fs config "testgroup" >>= function
+    | Error _ -> Lwt.return_unit
+    | Ok _ -> invalid_arg "expected delete group to fail")
+
+let delete_group_is_a_user () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      Dav.delete_group fs config "test" >>= function
+      | Error _ -> Lwt.return_unit
+      | Ok _ -> invalid_arg "expected delete group to fail")
 
 let webdav_api_tests = [
   "successful mkcol", `Quick, mkcol_success ;
@@ -1360,6 +1715,31 @@ let webdav_api_tests = [
   "delete and update parent mtime", `Quick, delete_and_update_parent_mtime_and_etag ;
   "write and update parent mtime", `Quick, write_and_update_parent_mtime ;
   "proppatch", `Quick, proppatch_success ;
+  "make a user", `Quick, make_user ;
+  "make a user with same name", `Quick, make_user_same_name ;
+  "make a user, delete, re-create with same name", `Quick, make_user_delete_make ;
+  "delete non-existing user", `Quick, delete_non_existing_user ;
+  "delete user, but is a group", `Quick, delete_user_is_a_group ;
+  "make a group", `Quick, make_group ;
+  "make a group conflict", `Quick, make_group_conflict ;
+  "make a group non-existing users", `Quick, make_group_user_not_exists ;
+  "make a nested group", `Quick, make_group_nested ;
+  "replace group members", `Quick, replace_group_members_one ;
+  "replace group members, not a group", `Quick, replace_group_members_two ;
+  "replace group members, no such user", `Quick, replace_group_members_three ;
+  "replace group members, is a group", `Quick, replace_group_members_four ;
+  "make group and enroll", `Quick, make_group_and_enroll ;
+  "make group and enroll, no such user", `Quick, make_group_and_enroll_no_user ;
+  "make group and enroll, is a group", `Quick, make_group_and_enroll_group ;
+  "make group and resign", `Quick, make_group_and_resign ;
+  "make group and resign, not a member", `Quick, make_group_and_resign_not_member ;
+  "make user and resign, no such group", `Quick, make_group_and_resign_not_existing_group ;
+  "make group and resign, no such user", `Quick, make_group_and_resign_not_existing_user ;
+  "make group and resign, no", `Quick, make_group_and_resign_no ;
+  "make group and resign, not a group", `Quick, make_group_and_resign_not_a_group ;
+  "delete group, all cleaned up", `Quick, delete_group_fine ;
+  "delete group, no such group", `Quick, delete_group_no_group ;
+  "delete group, is a user", `Quick, delete_group_is_a_user ;
 ]
 
 let principal_url principal = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; principal ]))
@@ -1890,8 +2270,7 @@ let proppatch_acl_existing () =
     KV_mem.connect () >>= fun fs ->
     let properties = Properties.create_dir allow_all_acl now "home" in
     Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
-    Fs.mkdir fs (`Dir ["principals"]) properties >>= fun _ ->
-    Fs.mkdir fs (`Dir ["principals" ; "testuser"]) properties >>= fun _ ->
+    Dav.make_user fs now config ~name:"testuser" ~password:"abc" ~salt:Cstruct.empty >>= fun _ ->
     Dav.proppatch fs config ~path:"home" ~user:"testuser" ~data:body >|= function
     | Error _ -> invalid_arg "expected proppatch to succeed (acl existing principal)"
     | Ok _ -> ())
