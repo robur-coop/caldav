@@ -1227,10 +1227,14 @@ let mkcol_success () =
         Properties.create_dir ~resourcetype acl now "Special Resource"
       in
       let properties = Properties.create_dir allow_all_acl now "home" in
+      Fs.mkdir res_fs (`Dir [config.principals]) properties >>= fun _ ->
+      Fs.mkdir res_fs (`Dir [config.principals; "testuser"]) properties >>= fun _ ->
       Fs.mkdir res_fs (`Dir ["home"]) properties >>= fun _ ->
       Fs.mkdir res_fs (`Dir [ "home" ; "special" ]) props >>= fun _ ->
       KV_mem.connect () >>= fun fs ->
       Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
+      Fs.mkdir fs (`Dir [config.principals]) properties >>= fun _ ->
+      Fs.mkdir fs (`Dir [config.principals; "testuser"]) properties >>= fun _ ->
       Dav.mkcol fs config ~path:"home/special/" ~user:"testuser" (`Other "MKCOL") now ~data:body >|= function
       | Error e -> (res_fs, Error e)
       | Ok () -> (res_fs, Ok fs))
@@ -1309,9 +1313,8 @@ let write_and_update_parent_mtime () =
         Re.replace re ~f:(fun _ -> "\r\n") ics_example
       in
       Fs.write fs (`File ["parent"; "child"]) ics file_props >>= fun _ ->
-      let user = "karl" in
       let data = ics_example in
-      Dav.write_component res_fs config ~content_type:"text/calendar" ~path:"parent/child" ~user ~data updated_time >|= fun r ->
+      Dav.write_component res_fs config ~content_type:"text/calendar" ~path:"parent/child" ~data updated_time >|= fun r ->
       ( match r with
       | Ok _ -> ()
       | Error `Bad_request -> Printf.printf "bad request \n"
@@ -1828,6 +1831,107 @@ let property_update_tests = [
   "Propertyupdate conflicting namespace", `Quick, property_update_conflicting_ns ;
 ]
 
+let default_group () =
+  (* in config.principals we've a default_groups property - when a user is
+     created, it should have joined the default_groups groups *)
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let creation_time = Ptime.v (1, 0L) in
+    let robur_principal =
+      [], [Xml.dav_node "href" [ Xml.Pcdata (Uri.to_string @@ principal_url "robur") ]]
+    in
+    let initial_props = [ ((Xml.robur_ns, "default_groups"), robur_principal) ] in
+    let dir_props = Properties.create_dir ~initial_props [] creation_time "Special Resource" in
+    Fs.write_property_map fs (`Dir [config.principals]) dir_props >>= fun _ ->
+    Dav.make_user fs creation_time config ~name:"user1" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "user already exists"
+    | Ok resource ->
+      (* check that resource is user1*)
+      Alcotest.(check bool __LOC__ true (String.equal (Uri.path resource) ("/" ^ config.principals ^ "/user1/")));
+      Fs.get_property_map fs (`Dir [config.principals ; "user1"]) >>= fun props ->
+      let is_robur_principal = function
+        | None -> false
+        | Some (_, principals) ->
+          List.exists (fun tree ->
+              match Xml.href_parser tree with Ok p ->
+                print_endline ("principal " ^ p);
+                String.equal p ("/" ^ config.principals ^ "/robur/") | _ -> false)
+            principals
+      in
+      Alcotest.(check bool __LOC__ true
+                  (is_robur_principal (Properties.unsafe_find (Xml.dav_ns, "group-membership") props)));
+      Lwt.return_unit
+  )
+
+let proppatch_acl_existing () =
+  (* set the permissions to an existing principal *)
+  let body = {|<?xml version="1.0" encoding="utf-8" ?>
+   <D:propertyupdate xmlns:D="DAV:">
+     <D:set>
+       <D:prop>
+          <D:acl>
+            <D:ace>
+              <D:principal><D:href>/principals/testuser/</D:href></D:principal>
+              <D:grant><D:privilege><D:all/></D:privilege></D:grant>
+            </D:ace>
+            <D:ace>
+              <D:principal><D:all/></D:principal>
+              <D:grant><D:privilege><D:read/></D:privilege></D:grant>
+            </D:ace>
+          </D:acl>
+       </D:prop>
+     </D:set>
+   </D:propertyupdate>|}
+  in
+  Lwt_main.run (
+    let open Lwt.Infix in
+    let now = Ptime.v (1, 0L) in
+    KV_mem.connect () >>= fun fs ->
+    let properties = Properties.create_dir allow_all_acl now "home" in
+    Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
+    Fs.mkdir fs (`Dir ["principals"]) properties >>= fun _ ->
+    Fs.mkdir fs (`Dir ["principals" ; "testuser"]) properties >>= fun _ ->
+    Dav.proppatch fs config ~path:"home" ~user:"testuser" ~data:body >|= function
+    | Error _ -> invalid_arg "expected proppatch to succeed (acl existing principal)"
+    | Ok _ -> ())
+
+let proppatch_acl_non_existing () =
+  (* set the permissions to non-existing principal *)
+  let body = {|<?xml version="1.0" encoding="utf-8" ?>
+   <D:propertyupdate xmlns:D="DAV:">
+     <D:set>
+       <D:prop>
+          <D:acl>
+            <D:ace>
+              <D:principal><D:href>/principals/OWNER/</D:href></D:principal>
+              <D:grant><D:privilege><D:all/></D:privilege></D:grant>
+            </D:ace>
+            <D:ace>
+              <D:principal><D:all/></D:principal>
+              <D:grant><D:privilege><D:read/></D:privilege></D:grant>
+            </D:ace>
+          </D:acl>
+       </D:prop>
+     </D:set>
+   </D:propertyupdate>|}
+  in
+  Lwt_main.run (
+    let open Lwt.Infix in
+    let now = Ptime.v (1, 0L) in
+    KV_mem.connect () >>= fun fs ->
+    let properties = Properties.create_dir allow_all_acl now "home" in
+    Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
+    Dav.proppatch fs config ~path:"home" ~user:"testuser" ~data:body >|= function
+    | Error _ -> ()
+    | Ok _ -> invalid_arg "expected proppatch to fail (acl non-existing principal)")
+
+let regression_tests = [
+  "Default group", `Quick, default_group ;
+  "PROPPATCH with existing principal", `Quick, proppatch_acl_existing ;
+  "PROPPATCH with non-existing principal", `Quick, proppatch_acl_non_existing ;
+]
+
 let tests = [
   "Read propfind", parse_propfind_xml_tests ;
   "Read propertyupdate", parse_propupdate_xml_tests ;
@@ -1838,6 +1942,7 @@ let tests = [
   "Properties.find_many tests", properties_find_many_tests ;
   "Report with ACL tests", report_with_acl_tests ;
   "Propertyupdate tests", property_update_tests ;
+  "Regression", regression_tests ;
 ]
 
 let () =

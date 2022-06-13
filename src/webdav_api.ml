@@ -1,6 +1,3 @@
-[@@@ocaml.warning "-27"]
-[@@@ocaml.warning "-32"]
-
 module Xml = Webdav_xml
 open Webdav_config
 type tree = Xml.tree
@@ -22,7 +19,7 @@ sig
   val report : state -> config -> path:string -> user:string -> data:string ->
     (string, [> `Bad_request ]) result Lwt.t
 
-  val write_component : state -> config -> path:string -> user:string -> Ptime.t -> content_type:content_type -> data:string ->
+  val write_component : state -> config -> path:string -> Ptime.t -> content_type:content_type -> data:string ->
     (string, [> `Bad_request | `Conflict | `Forbidden | `Internal_server_error ]) result Lwt.t
 
   val delete : state -> path:string -> Ptime.t -> bool Lwt.t
@@ -38,11 +35,11 @@ sig
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, [> `Msg of string | `Unknown_user of string * string ]) result Lwt.t
 
   val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:Cstruct.t ->
-    Uri.t Lwt.t
+    (Uri.t, [> `Conflict ]) result Lwt.t
   val change_user_password : state -> config -> name:string -> password:string -> salt:Cstruct.t -> (unit, [> `Internal_server_error ]) result Lwt.t
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
 
-  val make_group : state -> Ptime.t -> config -> string -> string list -> Uri.t Lwt.t
+  val make_group : state -> Ptime.t -> config -> string -> string list -> (Uri.t, [> `Conflict ]) result Lwt.t
   val enroll : state -> config -> member:string -> group:string -> unit Lwt.t
   val resign : state -> config -> member:string -> group:string -> unit Lwt.t
   val replace_group_members : state -> config -> string -> string list -> unit Lwt.t
@@ -87,39 +84,45 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
       let aces' = List.map Xml.xml_to_ace aces in
       List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces'
 
+  let principals_exist_for_aces config ids aces =
+    let uris =
+      List.fold_left (fun a id ->
+          Uri.of_string id :: Uri.with_path config.host id :: a) [] ids
+    in
+    let href_is_ok href = List.exists (Uri.equal href) uris in
+    List.for_all (function `Href p, _ -> href_is_ok p | _ -> true) aces
+
+  let existing_principals fs config =
+    Fs.listdir fs (`Dir [ config.principals ]) >|= function
+    | Error _ -> []
+    | Ok s ->
+      List.fold_left (fun a -> function
+          | `Dir _ as d -> Fs.to_string d :: a
+          | _ -> a) [] s
+
   let properties_for_current_user fs config user =
     let user_path = `Dir [ config.principals ; user ] in
     Fs.get_property_map fs user_path
 
-  let acl fs config user path =
-    properties_for_current_user fs config user >>= fun auth_user_props ->
-    Fs.get_property_map fs path >|= fun resource_props ->
-    match Properties.find ~auth_user_props ~resource_props (Xml.dav_ns, "acl") with
-    | Error `Forbidden as e -> e
-    | Error `Not_found -> Ok []
-    | Ok (_, aces) ->
-      let aces' = List.map Xml.xml_to_ace aces in
-      Ok (List.fold_left (fun acc -> function Ok ace -> ace :: acc | _ -> acc) [] aces')
-
   let privilege_met fs requirement ~auth_user_props resource_props =
     let privileges = Properties.privileges ~auth_user_props resource_props in
     (match Properties.inherited_acls ~auth_user_props resource_props with
-    | [ url ] -> 
+    | [ url ] ->
       Log.debug (fun m -> m "Inherited %s" (Uri.to_string url)) ;
       (Fs.from_string fs (Uri.to_string url) >>= function
-      | Error e -> 
-      Log.warn (fun m -> m "privilege_met: Could not convert to file %a" Fs.pp_error e) ;
-      Lwt.return []
-      | Ok inherited -> 
-      Fs.get_property_map fs inherited >|= fun inherited_props ->
-      Properties.privileges ~auth_user_props inherited_props)
-    | urls -> 
+        | Error e ->
+          Log.warn (fun m -> m "privilege_met: Could not convert to file %a" Fs.pp_error e) ;
+          Lwt.return []
+        | Ok inherited ->
+          Fs.get_property_map fs inherited >|= fun inherited_props ->
+          Properties.privileges ~auth_user_props inherited_props)
+    | urls ->
       Log.debug (fun m -> m "Inherited %s" (String.concat "\n" @@ List.map Uri.to_string urls)) ;
-     Lwt.return []) >|= fun inherited_privileges ->
-    let privileges = privileges @ inherited_privileges in 
+      Lwt.return []) >|= fun inherited_privileges ->
+    let privileges = privileges @ inherited_privileges in
     Log.debug (fun m -> m "Privileges size: %d " (List.length privileges)) ;
     if not (Privileges.is_met ~requirement privileges) then `Forbidden else `Ok
-    
+
   let parse_calendar ~path data =
     match Icalendar.parse data with
     | Error e ->
@@ -134,14 +137,14 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
   let list_dir fs (`Dir dir) =
     let list_file f_or_d =
       begin Fs.last_modified fs f_or_d >|= function
-      | Error e -> Ptime.epoch
-      | Ok ts -> ts 
+        | Error _e -> Ptime.epoch
+        | Ok ts -> ts
       end >|= fun ts ->
       let is_dir = match f_or_d with | `File _ -> false | `Dir _ -> true in
       (Fs.to_string f_or_d, is_dir, Ptime.to_rfc3339 ts)
     in
     Fs.listdir fs (`Dir dir) >>= function
-    | Error e -> assert false
+    | Error _e -> assert false
     | Ok files -> Lwt_list.map_p list_file files
 
   let directory_as_html fs (`Dir dir) =
@@ -162,7 +165,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     | Error e -> Log.warn (fun m -> m "increasing last modified of parent failed %a, ignoring" Fs.pp_write_error e)
     | Ok () -> ()
 
-  let write_if_parent_exists fs config (file : Webdav_fs.file) timestamp content_type user ics =
+  let write_if_parent_exists fs config (file : Webdav_fs.file) timestamp content_type ics =
     let file' = (file :> Webdav_fs.file_or_dir) in
     let parent = Fs.parent file' in
     let parent' = (parent :> Webdav_fs.file_or_dir) in
@@ -177,20 +180,24 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         Lwt.return @@ Error `Bad_request
       | true ->
         let acl = [(`All, `Inherited (Uri.of_string (Fs.to_string parent')))] in
-        let props = Properties.create ~content_type acl timestamp (String.length ics) (Fs.to_string file') in
-        Fs.write fs file ics props >>= function
-        (* TODO map error to internal server error and log it, as function *)
-        | Error e -> Lwt.return @@ Error `Internal_server_error
-        | Ok () ->
-          update_parent_after_child_write fs file' timestamp >>= fun () ->
-          Fs.etag fs file' >|= function
-          | Error e -> Error `Internal_server_error
-          | Ok etag -> Ok etag
+        existing_principals fs config >>= fun ids ->
+        if not (principals_exist_for_aces config ids acl) then
+          Lwt.return (Error `Bad_request)
+        else
+          let props = Properties.create ~content_type acl timestamp (String.length ics) (Fs.to_string file') in
+          Fs.write fs file ics props >>= function
+            (* TODO map error to internal server error and log it, as function *)
+          | Error _e -> Lwt.return @@ Error `Internal_server_error
+          | Ok () ->
+            update_parent_after_child_write fs file' timestamp >>= fun () ->
+            Fs.etag fs file' >|= function
+            | Error _e -> Error `Internal_server_error
+            | Ok etag -> Ok etag
 
-  let write_component fs config ~path ~user timestamp ~content_type ~data =
+  let write_component fs config ~path timestamp ~content_type ~data =
     match parse_calendar ~path data with
     | Error e -> Lwt.return @@ Error e
-    | Ok (ics, file) -> write_if_parent_exists fs config file timestamp content_type user ics
+    | Ok (ics, file) -> write_if_parent_exists fs config file timestamp content_type ics
 
   let directory_as_ics fs (`Dir dir) =
     let calendar_components = function
@@ -251,7 +258,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     Fs.from_string fs path >>= function
     | Error _ -> Lwt.return false
     | Ok f_or_d ->
-      Fs.destroy fs f_or_d >>= fun res ->
+      Fs.destroy fs f_or_d >>= fun _res ->
       update_parent_after_child_write fs f_or_d now >|= fun () ->
       true
 
@@ -276,14 +283,14 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     Fs.get_property_map fs f_or_d >>= fun resource_props ->
     privilege_met fs `Read ~auth_user_props resource_props >|= function
     | `Forbidden -> `Forbidden
-    | `Ok -> 
+    | `Ok ->
       if resource_props = Properties.empty
       then `Not_found
       else
         (* results for props, grouped by code *)
         let propstats = match propfind_request with
           | `Propname -> [`OK, Properties.names resource_props]
-          | `All_prop includes -> [`OK, Properties.all resource_props] (* TODO: finish this *)
+          | `All_prop _includes -> [`OK, Properties.all resource_props] (* TODO: finish this *)
           | `Props ps -> Properties.find_many ~auth_user_props ~resource_props ps
         in
         let ps = List.map propstat_node propstats in
@@ -354,20 +361,51 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     | Error e -> Error e
     | Ok () -> Ok propstats
 
+  let aces = function
+    | `Set (_, (ns, tag), aces) when ns = Xml.dav_ns && tag = "acl" ->
+      let aces = List.map Xml.xml_to_ace aces in
+      List.fold_left (fun acc ace ->
+          match acc, ace with
+          | Ok acc, Ok ace -> Ok (ace :: acc)
+          | Error _, _ -> Error ()
+          | _, Error _ -> Error ())
+        (Ok []) aces
+    | _ -> Ok []
+
+  let collect_aces updates =
+    List.fold_left (fun acc up ->
+        match acc with
+        | Error _ as e -> e
+        | Ok a -> match aces up with
+          | Ok [] -> Ok a
+          | Ok x -> Ok (a @ x)
+          | Error _ as e -> e)
+      (Ok []) updates
+
+  let principals_exist fs config aces =
+    existing_principals fs config >|= fun ps ->
+    principals_exist_for_aces config ps aces
+
   let proppatch fs config ~path ~user ~data =
     build_req_tree fs config path user data >>= function
     | Error e -> Lwt.return @@ Error e
-    | Ok (f_or_d, auth_user_props, req_tree) -> match Xml.parse_propupdate_xml req_tree with
+    | Ok (f_or_d, _auth_user_props, req_tree) -> match Xml.parse_propupdate_xml req_tree with
       | Error _ -> Lwt.return @@ Error `Bad_request
-      | Ok updates -> update_properties fs f_or_d updates >|= function
-        | Error _      -> Error `Bad_request
-        | Ok propstats ->
-          let nodes =
-            Xml.dav_node "response"
-              (Xml.dav_node "href" [ Xml.Pcdata (Fs.to_string f_or_d) ] :: propstats)
-          in
-          let resp = multistatus [ nodes ] in
-          Ok (Xml.tree_to_string resp)
+      | Ok updates ->
+        match collect_aces updates with
+        | Error () -> Lwt.return (Error `Bad_request)
+        | Ok aces -> principals_exist fs config aces >>= function
+          | false -> Lwt.return (Error `Bad_request)
+          | true ->
+            update_properties fs f_or_d updates >|= function
+            | Error _      -> Error `Bad_request
+            | Ok propstats ->
+              let nodes =
+                Xml.dav_node "response"
+                  (Xml.dav_node "href" [ Xml.Pcdata (Fs.to_string f_or_d) ] :: propstats)
+              in
+              let resp = multistatus [ nodes ] in
+              Ok (Xml.tree_to_string resp)
 
   let mkcol_tree_to_proppatch = function
     | None -> Ok []
@@ -375,18 +413,28 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
       | Error _ -> Error `Bad_request
       | Ok set_props -> Ok set_props
 
-  let create_collection_dir fs acl set_props now resourcetype dir =
-    let col_props = Properties.create_dir ~resourcetype acl now (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
-    match Properties.patch ~is_mkcol:true col_props set_props with
-    | None, errs ->
-      let propstats = List.map propstat_node errs in
-      let xml = Xml.dav_node "mkcol-response" propstats in
-      let res = Xml.tree_to_string xml in
-      Lwt.return @@ Error (`Forbidden res)
-    | Some map, _ ->
-      Fs.mkdir fs dir map >|= function
-      | Error _ -> Error `Conflict
-      | Ok () -> Ok ()
+  let create_collection_dir fs config acl set_props now resourcetype dir =
+    existing_principals fs config >>= fun ids ->
+    if not (principals_exist_for_aces config ids acl) then
+      Lwt.return (Error `Bad_request)
+    else
+      match collect_aces set_props with
+      | Error () -> Lwt.return (Error `Bad_request)
+      | Ok aces ->
+        if not (principals_exist_for_aces config ids aces) then
+          Lwt.return (Error `Bad_request)
+        else
+          let col_props = Properties.create_dir ~resourcetype acl now (Fs.to_string (dir :> Webdav_fs.file_or_dir)) in
+          match Properties.patch ~is_mkcol:true col_props set_props with
+          | None, errs ->
+            let propstats = List.map propstat_node errs in
+            let xml = Xml.dav_node "mkcol-response" propstats in
+            let res = Xml.tree_to_string xml in
+            Lwt.return @@ Error (`Forbidden res)
+          | Some map, _ ->
+            Fs.mkdir fs dir map >|= function
+            | Error _ -> Error `Conflict
+            | Ok () -> Ok ()
 
   (* assumption: path is a relative path! *)
   let mkcol fs config ~path ~user http_verb now ~data =
@@ -408,13 +456,13 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
           is_calendar fs parent' >>= fun parent_is_calendar ->
           if resource_is_calendar && parent_is_calendar
           then Lwt.return @@ Error `Conflict
-          else 
+          else
             let acl = [ ( `Href (Uri.of_string (Fs.to_string (`Dir [config.principals ; user]))), `Grant [`All])] in
-            create_collection_dir fs acl set_props now resourcetype dir
+            create_collection_dir fs config acl set_props now resourcetype dir
 
-  let check_in_bounds p s e = true
-  let apply_to_params pfs p = true
-  let text_matches s c n p = true
+  let check_in_bounds _p _s _e = true
+  let apply_to_params _pfs _p = true
+  let text_matches _s _c _n _p = true
 
   let apply_to_props props =
     let key p = Icalendar.Writer.cal_prop_to_ics_key p in
@@ -503,7 +551,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     match dtend, duration, duration_gt_0, dtstart_is_datetime with
     | Some dtend, None, false, _    -> start < dtend && end_ > dtstart
     | None, Some duration, true, _  -> start < (dtstart + duration) && end_ > dtstart
-    | None, Some duration, false, _ -> start <= dtstart && end_ > dtstart
+    | None, Some _duration, false, _ -> start <= dtstart && end_ > dtstart
     | None, None, false, true       -> start <= dtstart && end_ > dtstart
     | None, None, false, false      -> start < (dtstart + p1d) && end_ > dtstart
     | _                             -> assert false (* duration_gt_0 is dependent on duration *)
@@ -518,7 +566,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     span_in_timerange range dtstart dtend duration dtstart_is_datetime
 
   let expand_event_in_range timezones f acc range exceptions event =
-    let (s, e) = range in
+    let (s, _e) = range in
     let next_event = Icalendar.recur_events event in
     let rec next_r () = match next_event () with
       | None -> None
@@ -558,12 +606,6 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     | `Freebusy fb -> freebusy_in_timerange range fb
     | `Timezone _  -> true
     | _ -> false
-
-  let date_to_ptime date = match Ptime.of_date_time (date, ((0, 0, 0), 0)) with
-    | None -> assert false
-    | Some t -> t
-
-  let ptime_to_date ts = fst @@ Ptime.to_date_time ts
 
   let normalize_timestamp timezones = function
     | `Utc ts -> `Utc ts
@@ -619,7 +661,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
   (* both range and freebusy are in utc *)
   let fb_in_timerange range = function
     | `Freebusy fb ->
-      let in_range (s, span, was_explicit) =
+      let in_range (s, span, _was_explicit) =
         let e = add_span s span in
         let (s_req, e_req) = range in
         let (<) a b = Ptime.is_later ~than:a b in
@@ -651,7 +693,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
               | (_, `Date d)          -> d
               | (_, `Datetime (`Utc d)) -> fst @@ Ptime.to_date_time d
               | (_, `Datetime (`Local d)) -> fst @@ Ptime.to_date_time d
-              | (_, `Datetime (`With_tzid (d, tzid))) -> fst @@ Ptime.to_date_time d
+              | (_, `Datetime (`With_tzid (d, _tzid))) -> fst @@ Ptime.to_date_time d
             end
           | _ -> assert false)
         events
@@ -725,7 +767,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     | `Is_defined, false -> false
     | `Is_not_defined, false -> true
     | `Comp_filter (_, _, _), false -> false
-    | `Comp_filter (tr_opt, pfs, cfs), true ->
+    | `Comp_filter (tr_opt, _pfs, cfs), true ->
       let matches_timerange = match tr_opt with
       | None -> true
       | Some range ->
@@ -851,7 +893,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         | Error _ -> Lwt.return @@ Error `Bad_request
         | Ok (data, resource_props) ->
           privilege_met fs `Read ~auth_user_props resource_props >|= function
-          | `Forbidden -> 
+          | `Forbidden ->
             let node = Xml.dav_node "response"
                 [ Xml.dav_node "href" [ Xml.pcdata (Fs.to_string (`File f)) ] ;
                   Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
@@ -894,7 +936,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         let resp_tree = multistatus responses' in
         Ok (Xml.tree_to_string resp_tree)
 
-  let handle_calendar_multiget_report (transformation, filenames) fs path ~auth_user_props =
+  let handle_calendar_multiget_report (transformation, filenames) fs ~auth_user_props =
     let report_one (filename : string) =
       Log.debug (fun m -> m "calendar_multiget: filename %s" filename) ;
       let file = Fs.file_from_string filename in
@@ -908,7 +950,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
         Lwt.return @@ Ok node
       | Ok (data, resource_props) ->
         privilege_met fs `Read ~auth_user_props resource_props >|= function
-        | `Forbidden -> 
+        | `Forbidden ->
           let node = Xml.dav_node "response"
               [ Xml.dav_node "href" [ Xml.pcdata (Fs.to_string (file :> Webdav_fs.file_or_dir)) ] ;
                 Xml.dav_node "status" [ Xml.pcdata (statuscode_to_string `Forbidden) ] ]
@@ -942,8 +984,8 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     | Ok (f_or_d, auth_user_props, req_tree) ->
       match Xml.parse_calendar_query_xml req_tree, Xml.parse_calendar_multiget_xml req_tree with
       | Ok calendar_query, _ -> handle_calendar_query_report calendar_query fs f_or_d ~auth_user_props
-      | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget fs f_or_d ~auth_user_props
-      | Error e, Error _ -> Lwt.return (Error `Bad_request)
+      | _, Ok calendar_multiget -> handle_calendar_multiget_report calendar_multiget fs ~auth_user_props
+      | Error _, Error _ -> Lwt.return (Error `Bad_request)
 
   let read_target_or_parent_properties fs path target_or_parent =
     (match target_or_parent with
@@ -1013,23 +1055,27 @@ let compute_etag fs ~path =
     | Error _ -> None
     | Ok etag -> Some etag
 
-let server_ns = "http://calendarserver.org/ns/"
-let carddav_ns = "urn:ietf:params:xml:ns:carddav"
+let make_dir ?additional_id fs config now acl ?(resourcetype = []) ?(props=[]) dir =
+  existing_principals fs config >>= fun ids ->
+  let ids = match additional_id with None -> ids | Some id -> id :: ids in
+  if not (principals_exist_for_aces config ids acl) then
+    Lwt.return (Error `Bad_request)
+  else
+    let propmap =
+      Properties.create_dir ~initial_props:props ~resourcetype acl now (Fs.basename (dir :> Webdav_fs.file_or_dir))
+    in
+    Fs.mkdir fs dir propmap >|= function
+    | Ok () -> Ok ()
+    | Error _ -> Error `Internal_server_error
 
-let make_dir fs now acl ?(resourcetype = []) ?(props=[]) dir =
-  let propmap =
-    Properties.create_dir ~initial_props:props ~resourcetype acl now (Fs.basename (dir :> Webdav_fs.file_or_dir))
-  in
-  Fs.mkdir fs dir propmap
-
-let make_dir_if_not_present fs now acl ?resourcetype ?props dir =
+let make_dir_if_not_present ?additional_id fs config now acl ?resourcetype ?props dir =
   Fs.dir_exists fs dir >>= fun exists ->
   if not exists then
-    make_dir fs now acl ?resourcetype ?props dir >|= fun _ -> ()
+    make_dir ?additional_id fs config now acl ?resourcetype ?props dir
   else
-    Lwt.return_unit
+    Lwt.return (Ok ())
 
-let create_calendar fs now acl name =
+let create_calendar fs config now acl name =
   let props =
     let reports = [
       Xml.caldav_ns, "calendar-query" ;
@@ -1062,7 +1108,7 @@ let create_calendar fs now acl name =
       (* (Xml.dav_ns, "owner"), ([], [ Xml.pcdata "/principals/__uids__/10000000-0000-0000-0000-000000000001" ]) ; *)
     ] in
   let resourcetype = [ Xml.node ~ns:Xml.caldav_ns "calendar" [] ] in
-  make_dir_if_not_present fs now acl ~resourcetype ~props name
+  make_dir_if_not_present fs config now acl ~resourcetype ~props name
 
 let initialize_fs_for_apple_testsuite fs now config =
   let acl = [ (`All, `Grant [ `All ]) ] in
@@ -1075,18 +1121,18 @@ let initialize_fs_for_apple_testsuite fs now config =
     (Xml.caldav_ns, "calendar-home-set"),
     ([], [Xml.node "href" ~ns:Xml.dav_ns [Xml.pcdata (Uri.to_string url) ]])
   ] in
-  make_dir_if_not_present fs now acl ~props:calendars_properties (`Dir [config.calendars]) >>= fun _ ->
-  make_dir_if_not_present fs now acl (`Dir [config.calendars ; "users"]) >>= fun _ ->
-  make_dir_if_not_present fs now acl (`Dir [config.calendars ; "__uids__"]) >>= fun _ ->
-  make_dir_if_not_present fs now acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001"]) >>= fun _ ->
-  create_calendar fs now acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "calendar" ]) >>= fun _ ->
-  make_dir_if_not_present fs now acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "tasks"]) >>= fun _ ->
-  make_dir_if_not_present fs now acl (`Dir [config.principals]) >>= fun _ ->
+  make_dir_if_not_present fs config now acl ~props:calendars_properties (`Dir [config.calendars]) >>= fun _ ->
+  make_dir_if_not_present fs config now acl (`Dir [config.calendars ; "users"]) >>= fun _ ->
+  make_dir_if_not_present fs config now acl (`Dir [config.calendars ; "__uids__"]) >>= fun _ ->
+  make_dir_if_not_present fs config now acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001"]) >>= fun _ ->
+  create_calendar fs config now acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "calendar" ]) >>= fun _ ->
+  make_dir_if_not_present fs config now acl (`Dir [config.calendars ; "__uids__" ; "10000000-0000-0000-0000-000000000001" ; "tasks"]) >>= fun _ ->
+  make_dir_if_not_present fs config now acl (`Dir [config.principals]) >>= fun _ ->
   Lwt.return_unit
 
 let initialize_fs fs now config =
-  make_dir_if_not_present fs now (admin_acl config) (`Dir [config.principals]) >>= fun _ ->
-  make_dir_if_not_present fs now (calendars_acl config) (`Dir [config.calendars]) >>= fun _ ->
+  make_dir_if_not_present ~additional_id:"root" fs config now (admin_acl config) (`Dir [config.principals]) >>= fun _ ->
+  make_dir_if_not_present fs config now (calendars_acl config) (`Dir [config.calendars]) >>= fun _ ->
   Lwt.return_unit
 
 let change_user_password fs config ~name ~password ~salt =
@@ -1108,19 +1154,25 @@ let change_user_password fs config ~name ~password ~salt =
 let make_principal props fs now config name =
   let resourcetype = [ Xml.node ~ns:Xml.dav_ns "principal" [] ] in
   let principal_dir = `Dir [ config.principals ; name ] in
-  let principal_url_string = Fs.to_string (principal_dir :> Webdav_fs.file_or_dir) in
-  let props' =
-    ((Xml.dav_ns, "principal-URL"),
-     ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata principal_url_string ] ]))
-    :: props
-  in
-  let principal_url = Uri.of_string principal_url_string in
-  let acl = (`Href principal_url, `Grant [ `All ]) in
-  unsafe_read_acl fs (`Dir [config.principals]) >>= fun principal_acl ->
-  (* maybe only allow root to write principal_dir (for password reset) *)
-  make_dir_if_not_present fs now (acl :: principal_acl) ~resourcetype ~props:props' principal_dir >>= fun _ ->
-  create_calendar fs now [acl] (`Dir [config.calendars ; name ]) >|= fun _ ->
-  principal_url
+  let calendar_dir = `Dir [ config.calendars ; name ] in
+  Fs.dir_exists fs principal_dir >>= fun p_exists ->
+  Fs.dir_exists fs calendar_dir >>= fun c_exists ->
+  if p_exists || c_exists then
+    Lwt.return (Error `Conflict)
+  else
+    let principal_url_string = Fs.to_string (principal_dir :> Webdav_fs.file_or_dir) in
+    let props' =
+      ((Xml.dav_ns, "principal-URL"),
+       ([], [ Xml.node ~ns:Xml.dav_ns "href" [ Xml.pcdata principal_url_string ] ]))
+      :: props
+    in
+    let principal_url = Uri.of_string principal_url_string in
+    let acl = (`Href principal_url, `Grant [ `All ]) in
+    unsafe_read_acl fs (`Dir [config.principals]) >>= fun principal_acl ->
+    (* maybe only allow root to write principal_dir (for password reset) *)
+    make_dir_if_not_present ~additional_id:principal_url_string fs config now (acl :: principal_acl) ~resourcetype ~props:props' principal_dir >>= fun _ ->
+    create_calendar fs config now [acl] calendar_dir >|= fun _ ->
+    Ok principal_url
 
 let principal_to_href principals_directory principal_string =
   let uri_string = Fs.to_string (`Dir [ principals_directory ; principal_string]) in
@@ -1134,8 +1186,15 @@ let href_to_principal principals_directory tree =
     let dlen = String.length dir
     and plen = String.length path
     in
-    if plen >= dlen && String.(equal (sub path 0 dlen) dir) then
-      let p = String.sub path 0 dlen in
+    if plen > dlen && String.(equal (sub path 0 dlen) dir) then
+      let length =
+        let base = plen - dlen in
+        if String.get path (dlen - 1) = '/' then
+          base - 1
+        else
+          base
+      in
+      let p = String.sub path dlen length in
       Ok p
     else
       Error "invalid path"

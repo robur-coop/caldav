@@ -1,5 +1,3 @@
-[@@@ocaml.warning "-27"]
-
 let ( let* ) = Result.bind
 
 module M = Map.Make(String)
@@ -101,13 +99,8 @@ type privilege = [
 ] [@@deriving show]
 
 (* internal rep on storage *)
-type ace = 
+type ace =
   principal * [ `Grant of privilege list | `Deny of privilege list | `Inherited of Uri.t ]
-[@@deriving show]
-
-(* rep for client *)
-type webdav_ace = 
-  principal * [ `Grant of privilege list | `Deny of privilege list ] * [ `Inherited of Uri.t ] option
 [@@deriving show]
 
 let caldav_ns = "urn:ietf:params:xml:ns:caldav"
@@ -150,7 +143,7 @@ let rec tree_fold_left f s forest = match forest with
 let new_identifier map ns =
   let taken s = M.exists (fun _ v -> String.equal v s) map in
   let alphabet_start = int_of_char 'A' in
-  let gen_char i =  
+  let gen_char i =
     let alphabet_len = 26 in
     i / alphabet_len, String.make 1 (char_of_int @@ alphabet_start + (i mod alphabet_len)) in
   let rec gen_id i =
@@ -173,7 +166,7 @@ let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
     let ns_map', a' = List.fold_left (fun (m, a) ((ns, key), value as attr) ->
         if ns = Xmlm.ns_xmlns then
           match M.find_opt value m with
-          | Some binding -> m, a 
+          | Some _binding -> m, a
           | None ->
             if key = "xmlns" then
               M.add value "" m, a
@@ -194,7 +187,7 @@ let rec tree_unapply_namespaces ?(ns_map = M.empty) = function
       | Some short -> (m, short, name, [])
     in
     let (ns_map'', ns', n', new_ns) = unapply ns n ns_map' in
-    let (ns_map''', a'', new_ns') =
+    let (ns_map''', a'', _new_ns') =
       List.fold_left (fun (m, attributes, new_ns) ((ns, n), value) ->
           let (m', ns', n', new_ns'') = unapply ns n m in
           m', ((ns', n'), value) :: attributes, new_ns'' @ new_ns)
@@ -237,7 +230,7 @@ let attrib_to_tyxml ((ns, name), value) =
 let tree_to_tyxml t =
   let t' = attach_namespaces t in
   let f s children tail = match s with
-    | Node (ns, n, a, c) ->
+    | Node (ns, n, a, _c) ->
       let a' = List.map attrib_to_tyxml a in
       Tyxml.Xml.node ~a:a' (apply_ns ns n) (Tyxml_xml.W.return children) :: tail
     | Pcdata str -> Tyxml.Xml.pcdata (Tyxml_xml.W.return str) :: tail
@@ -281,7 +274,7 @@ let rec filter_map f = function
   | []    -> []
   | x::xs ->
     match f x with
-    | Error e ->       filter_map f xs
+    | Error _e ->      filter_map f xs
     | Ok x'   -> x' :: filter_map f xs
 
 let tree_lift f node_p children_p =
@@ -416,12 +409,12 @@ let xml_to_ace : tree -> (ace, string) result =
   in
   tree_lift (fun _ c ->
       match List.partition (function `Principal _ -> true | _ -> false) c with
-      | [ `Principal p ], rest ->
+      | [ `Principal p ], _rest ->
         begin
         match List.partition (function `Inherited _ -> true | _ -> false) c with
         | [ `Inherited uri ], _ -> Ok (p, `Inherited uri)
         | _ -> begin match List.partition (function `Grant_or_deny _ -> true | _ -> false) c with
-          | [ `Grant_or_deny grant_or_deny ], rest' -> Ok (p, grant_or_deny)
+          | [ `Grant_or_deny grant_or_deny ], _rest' -> Ok (p, grant_or_deny)
           | _ -> Error "couldn't parse ace"
         end
       end
@@ -728,8 +721,8 @@ let parse_calendar_query_xml tree : (calendar_query, string) result =
            | xs -> None, xs
          in
          match rest with
-         | `Filter f :: xs -> Ok (prop, f)
-         | xs -> Error "wrong input in calendar-query")
+         | `Filter f :: _xs -> Ok (prop, f)
+         | _xs -> Error "wrong input in calendar-query")
       (name_ns "calendar-query" caldav_ns)
       ((report_prop_parser >>~ fun p -> Ok (`Report p))
        ||| (filter_parser >>~ fun f -> Ok (`Filter f)))
