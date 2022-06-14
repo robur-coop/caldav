@@ -98,7 +98,9 @@ The arguments for the command line vary depending on the setup:
     --admin-password="somecoolpassword" --host="calendar.example.com" --http=80 --https=443 --remote=https://user:pass@git.example.com/calendar-data.git
 
 ### With HTTPS + trust on first use (tofu) and git via ssh:
-    --admin-password="somecoolpassword" --host="calendar.example.com" --http=80 --https=443 --tofu --remote=ssh://git@git.example.com/calendar-data.git --seed=abcdef --authenticator=SHA256:b64-encoded-hash-of-server-key
+    --admin-password="somecoolpassword" --host="calendar.example.com" --http=80 --https=443 --tofu --remote=git@git.example.com:calendar-data.git --ssh-key=ed25519:<b64-data> --authenticator=SHA256:b64-encoded-hash-of-server-key
+
+Use `awa_gen_key --keytype=ed25519` to create a ssh private key at random.
 
 ## Server administration
 
