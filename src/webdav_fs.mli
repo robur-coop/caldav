@@ -48,8 +48,10 @@ sig
 
   val mkdir : t -> dir -> Properties.t -> (unit, write_error) result Lwt.t
 
+  (** be careful to call only in a batch, since it writes two files *)
   val write : t -> file -> string -> Properties.t -> (unit, write_error) result Lwt.t
 
+  (** be careful to call only in a batch, since it removes two files *)
   val destroy : t -> file_or_dir -> (unit, write_error) result Lwt.t
 
   val pp_error : error Fmt.t
@@ -61,6 +63,8 @@ sig
   val last_modified : t -> file_or_dir -> (Ptime.t, error) result Lwt.t
 
   val etag : t -> file_or_dir -> (string, error) result Lwt.t
+
+  val batch: t -> ?retries:int -> (t -> 'a Lwt.t) -> 'a Lwt.t
 end
 
 module Make (Pclock : Mirage_clock.PCLOCK) (Fs: Mirage_kv.RW) : S with type t = Fs.t

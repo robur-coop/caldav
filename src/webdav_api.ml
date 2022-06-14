@@ -212,14 +212,15 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
           Lwt.return (Error `Bad_request)
         else
           let props = Properties.create ~content_type acl timestamp (String.length ics) (Fs.to_string file') in
-          Fs.write fs file ics props >>= function
-            (* TODO map error to internal server error and log it, as function *)
-          | Error _e -> Lwt.return @@ Error `Internal_server_error
-          | Ok () ->
-            update_parent_after_child_write fs file' timestamp >>= fun () ->
-            Fs.etag fs file' >|= function
-            | Error _e -> Error `Internal_server_error
-            | Ok etag -> Ok etag
+          Fs.batch fs (fun batch ->
+              Fs.write batch file ics props >>= function
+                (* TODO map error to internal server error and log it, as function *)
+              | Error _e -> Lwt.return @@ Error `Internal_server_error
+              | Ok () ->
+                update_parent_after_child_write batch file' timestamp >>= fun () ->
+                Fs.etag fs file' >|= function
+                | Error _e -> Error `Internal_server_error
+                | Ok etag -> Ok etag)
 
   let write_component fs config ~path timestamp ~content_type ~data =
     match parse_calendar ~path data with
@@ -285,9 +286,10 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     Fs.from_string fs path >>= function
     | Error _ -> Lwt.return false
     | Ok f_or_d ->
-      Fs.destroy fs f_or_d >>= fun _res ->
-      update_parent_after_child_write fs f_or_d now >|= fun () ->
-      true
+      Fs.batch fs (fun batch ->
+          Fs.destroy batch f_or_d >>= fun _res ->
+          update_parent_after_child_write batch f_or_d now >|= fun () ->
+          true)
 
   let statuscode_to_string res =
     Format.sprintf "%s %s"
@@ -1273,7 +1275,8 @@ let enroll fs config ~member ~group =
     if not (List.mem (Fs.to_string (`Dir [ config.principals ; member ])) ids) then
       Lwt.return (Error `Conflict)
     else
-      enroll_unsafe fs config ~member ~group >|= fun () -> Ok ()
+      Fs.batch fs (fun batch ->
+          enroll_unsafe batch config ~member ~group >|= fun () -> Ok ())
 
 let resign_unsafe =
   let remove_href href (attrs, values) =
@@ -1290,7 +1293,8 @@ let resign fs config ~member ~group =
     if not (List.mem (Fs.to_string (`Dir [ config.principals ; member ])) ids) then
       Lwt.return (Error `Conflict)
     else
-      resign_unsafe fs config ~member ~group >|= fun () -> Ok ()
+      Fs.batch fs (fun batch ->
+          resign_unsafe batch config ~member ~group >|= fun () -> Ok ())
 
 let collect_principals fs config principal_dir key =
   Fs.get_property_map fs principal_dir >|= fun prop_map ->
@@ -1316,10 +1320,11 @@ let make_user ?(props = []) fs now config ~name ~password ~salt =
         ([], [Xml.pcdata salt]))
     :: props
   in
-  make_principal props' fs now config name >>= fun principal_url ->
-  collect_principals fs config (`Dir [config.principals]) (Xml.robur_ns, "default_groups") >>= fun groups ->
-  Lwt_list.iter_s (fun group -> enroll_unsafe fs config ~member:name ~group) groups >|= fun () ->
-  principal_url
+  Fs.batch fs (fun batch ->
+      make_principal props' batch now config name >>= fun principal_url ->
+      collect_principals batch config (`Dir [config.principals]) (Xml.robur_ns, "default_groups") >>= fun groups ->
+      Lwt_list.iter_s (fun group -> enroll_unsafe batch config ~member:name ~group) groups >|= fun () ->
+      principal_url)
 
 let delete_home_and_calendars fs principal_dir user_calendar_dir =
   Fs.destroy fs principal_dir >>= function
@@ -1348,13 +1353,14 @@ let delete_user fs config name =
   else
     collect_principals fs config (`Dir [ config.principals ; name ]) (Xml.dav_ns, "group-membership") >>= fun groups ->
     existing_principals ~include_groups:`Only fs config >>= fun existing_groups ->
-    Lwt_list.iter_s (fun group ->
-        if not (List.mem (Fs.to_string (`Dir [ config.principals ; group ])) existing_groups) then
-          Lwt.return_unit
-        else
-          resign_unsafe fs config ~member:name ~group)
-      groups >>= fun () ->
-    delete_principal fs config name
+    Fs.batch fs (fun batch ->
+        Lwt_list.iter_s (fun group ->
+            if not (List.mem (Fs.to_string (`Dir [ config.principals ; group ])) existing_groups) then
+              Lwt.return_unit
+            else
+              resign_unsafe batch config ~member:name ~group)
+          groups >>= fun () ->
+        delete_principal batch config name)
 
 let delete_group_members fs config group =
   let principal_dir = `Dir [ config.principals ; group ] in
@@ -1372,8 +1378,9 @@ let delete_group fs config name =
   if not (List.mem (Fs.to_string (`Dir [ config.principals ; name ])) groups) then
     Lwt.return (Error `Conflict)
   else
-    delete_group_members fs config name >>= fun () ->
-    delete_principal fs config name
+    Fs.batch fs (fun batch ->
+        delete_group_members batch config name >>= fun () ->
+        delete_principal batch config name)
 
 let replace_group_members fs config group new_members =
   existing_principals ~include_groups:`Only fs config >>= fun groups ->
@@ -1384,9 +1391,10 @@ let replace_group_members fs config group new_members =
     if not (List.for_all (fun m -> List.mem (Fs.to_string (`Dir [ config.principals ; m ])) ids) new_members) then
       Lwt.return (Error `Conflict)
     else
-      delete_group_members fs config group >>= fun () ->
-      Lwt_list.iter_s (fun member -> enroll_unsafe fs config ~member ~group) new_members >|= fun () ->
-      Ok ()
+      Fs.batch fs (fun batch ->
+          delete_group_members batch config group >>= fun () ->
+          Lwt_list.iter_s (fun member -> enroll_unsafe batch config ~member ~group) new_members >|= fun () ->
+          Ok ())
 
 (* TODO find out whether we should modify calendar-home-set of group or members *)
 let make_group fs now config name members =
@@ -1394,11 +1402,12 @@ let make_group fs now config name members =
   if not (List.for_all (fun m -> List.mem (Fs.to_string (`Dir [ config.principals ; m ])) ids) members) then
     Lwt.return (Error `Conflict)
   else
-    make_principal [] fs now config name >>= function
-    | Ok uri ->
-      Lwt_list.iter_s (fun member -> enroll_unsafe fs config ~member ~group:name) members >|= fun () ->
-      Ok uri
-    | Error _ as e -> Lwt.return e
+    Fs.batch fs (fun batch ->
+        make_principal [] batch now config name >>= function
+        | Ok uri ->
+          Lwt_list.iter_s (fun member -> enroll_unsafe batch config ~member ~group:name) members >|= fun () ->
+          Ok uri
+        | Error _ as e -> Lwt.return e)
 
   let generate_salt () = R.generate 15
 

@@ -60,6 +60,8 @@ sig
   val last_modified : t -> file_or_dir -> (Ptime.t, error) result Lwt.t
 
   val etag : t -> file_or_dir -> (string, error) result Lwt.t
+
+  val batch: t -> ?retries:int -> (t -> 'a Lwt.t) -> 'a Lwt.t
 end
 
 let src = Logs.Src.create "webdav.fs" ~doc:"webdav fs logs"
@@ -262,20 +264,18 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:Mirage_kv.RW) = struct
     write_property_map fs (`Dir dir) propmap
 
   let write fs (`File file) value propmap =
-    Fs.batch fs (fun batch ->
-        let kv_file = data @@ to_string (`File file) in
-        Fs.set batch kv_file value >>= function
-        | Error e -> Lwt.return (Error e)
-        | Ok () -> write_property_map batch (`File file) propmap)
+    let kv_file = data @@ to_string (`File file) in
+    Fs.set fs kv_file value >>= function
+    | Error e -> Lwt.return (Error e)
+    | Ok () -> write_property_map fs (`File file) propmap
 
   let destroy_file_or_empty_dir fs f_or_d =
-    Fs.batch fs (fun batch ->
-        let propfile = propfilename f_or_d in
-        Fs.remove batch propfile >>= function
-        | Error e -> Lwt.return (Error e)
-        | Ok () ->
-          let file = data @@ to_string f_or_d in
-          Fs.remove batch file)
+    let propfile = propfilename f_or_d in
+    Fs.remove fs propfile >>= function
+    | Error e -> Lwt.return (Error e)
+    | Ok () ->
+      let file = data @@ to_string f_or_d in
+      Fs.remove fs file
 
   let destroy fs f_or_d =
     destroy_file_or_empty_dir fs f_or_d
@@ -293,4 +293,6 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:Mirage_kv.RW) = struct
     with
     | Some _, Some _ -> Ok ()
     | _ -> Error (`Msg "root user does not have password and salt")
+
+  let batch fs ?retries f = Fs.batch fs ?retries f
 end
