@@ -6,6 +6,9 @@
   (#24 @hannesm)
 * when modifying an ACL, check that all referenced principals exist
   (#24 @hannesm)
+* check for groups and principals on operations thereof (i.e. disallow deleting
+  a group when the principal is a user, etc.) and test cases (#25 @hannesm)
+* use batch in Webdav_api instead of Webdav_fs to reduce commits (#26 @hannesm)
 
 ## v0.1.1 (2021-11-02)
 
