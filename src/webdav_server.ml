@@ -458,8 +458,11 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         Fs.dir_exists fs (`Dir [config.principals ; name ]) >>= fun group_exists ->
         match group_exists, self#requested_members rd with
         | true, Ok members ->
-          Dav.replace_group_members fs config name members >>= fun () ->
-          Wm.respond (to_status `OK) rd
+          begin
+            Dav.replace_group_members fs config name members >>= function
+            | Ok () -> Wm.respond (to_status `OK) rd
+            | Error e -> Wm.respond (to_status e) rd
+          end
         | _ -> Wm.continue group_exists rd
 
     method content_types_provided rd =
@@ -517,15 +520,17 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
       match self#requested_group rd, self#requested_member rd with
       | Error _, _ | _, Error _ -> Wm.respond (to_status `Bad_request) rd
       | Ok group, Ok member ->
-        Dav.enroll fs config ~group ~member >>= fun () ->
-        Wm.continue true rd
+        Dav.enroll fs config ~group ~member >>= function
+        | Ok () -> Wm.continue true rd
+        | Error e -> Wm.respond (to_status e) rd
 
     method! delete_resource rd =
       match self#requested_group rd, self#requested_member rd with
       | Error `Bad_request, _ | _, Error `Bad_request -> Wm.respond (to_status `Bad_request) rd
       | Ok group, Ok member ->
-        Dav.resign fs config ~group ~member >>= fun () ->
-        Wm.continue true rd
+        Dav.resign fs config ~group ~member >>= function
+        | Ok () -> Wm.continue true rd
+        | Error e -> Wm.respond (to_status e) rd
 
     method content_types_provided rd =
       Wm.continue [ ("*/*", Wm.continue `Empty) ] rd

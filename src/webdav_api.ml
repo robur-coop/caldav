@@ -37,13 +37,13 @@ sig
   val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:Cstruct.t ->
     (Uri.t, [> `Conflict ]) result Lwt.t
   val change_user_password : state -> config -> name:string -> password:string -> salt:Cstruct.t -> (unit, [> `Internal_server_error ]) result Lwt.t
-  val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
+  val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found | `Conflict ]) result Lwt.t
 
   val make_group : state -> Ptime.t -> config -> string -> string list -> (Uri.t, [> `Conflict ]) result Lwt.t
-  val enroll : state -> config -> member:string -> group:string -> unit Lwt.t
-  val resign : state -> config -> member:string -> group:string -> unit Lwt.t
-  val replace_group_members : state -> config -> string -> string list -> unit Lwt.t
-  val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found ]) result Lwt.t
+  val enroll : state -> config -> member:string -> group:string -> (unit, [> `Conflict ]) result Lwt.t
+  val resign : state -> config -> member:string -> group:string -> (unit, [> `Conflict ]) result Lwt.t
+  val replace_group_members : state -> config -> string -> string list -> (unit, [> `Conflict ]) result Lwt.t
+  val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found | `Conflict ]) result Lwt.t
 
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
   val initialize_fs_for_apple_testsuite : state -> Ptime.t -> config -> unit Lwt.t
@@ -92,13 +92,40 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     let href_is_ok href = List.exists (Uri.equal href) uris in
     List.for_all (function `Href p, _ -> href_is_ok p | _ -> true) aces
 
-  let existing_principals fs config =
-    Fs.listdir fs (`Dir [ config.principals ]) >|= function
-    | Error _ -> []
+  let existing_principals ?(include_groups = `Yes) fs config =
+    Fs.listdir fs (`Dir [ config.principals ]) >>= function
+    | Error _ -> Lwt.return []
     | Ok s ->
-      List.fold_left (fun a -> function
-          | `Dir _ as d -> Fs.to_string d :: a
-          | _ -> a) [] s
+      List.fold_left (fun a p ->
+          a >>= fun a ->
+          match p with
+          | `File _ -> Lwt.return a
+          | `Dir _ as d ->
+            Fs.get_property_map fs d >|= fun props ->
+            let has_pw =
+              match Properties.unsafe_find (Xml.robur_ns, "password") props with
+              | Some _ -> true
+              | None -> false
+            in
+            if
+              (match
+                 Properties.unsafe_find (Xml.dav_ns, "resourcetype") props
+               with
+               | Some (_, xs) ->
+                 List.exists (function
+                     | Xml.Node (ns, name, _, _) ->
+                       ns = Xml.dav_ns && name = "principal"
+                     | _ -> false)
+                   xs
+               | None -> false) &&
+              (match include_groups with
+               | `Yes -> true
+               | `No -> has_pw
+               | `Only -> not has_pw)
+            then
+              Fs.to_string d :: a
+            else
+              a) (Lwt.return []) s
 
   let properties_for_current_user fs config user =
     let user_path = `Dir [ config.principals ; user ] in
@@ -1229,7 +1256,7 @@ let enroll_or_resign modify_membership fs config ~member ~group =
   update_properties modify_member_in_group (`Dir [ config.principals ; group ]) >>= fun () ->
   update_properties modify_group_in_member (`Dir [ config.principals ; member ])
 
-let enroll =
+let enroll_unsafe =
   let modify_membership href (attrs, values) =
     if List.mem href values
     then (attrs, values)
@@ -1237,11 +1264,33 @@ let enroll =
   in
   enroll_or_resign modify_membership
 
-let resign =
+let enroll fs config ~member ~group =
+  existing_principals ~include_groups:`Only fs config >>= fun groups ->
+  if not (List.mem (Fs.to_string (`Dir [ config.principals ; group ])) groups) then
+    Lwt.return (Error `Conflict)
+  else
+    existing_principals ~include_groups:`No fs config >>= fun ids ->
+    if not (List.mem (Fs.to_string (`Dir [ config.principals ; member ])) ids) then
+      Lwt.return (Error `Conflict)
+    else
+      enroll_unsafe fs config ~member ~group >|= fun () -> Ok ()
+
+let resign_unsafe =
   let remove_href href (attrs, values) =
     (attrs, List.filter (fun href' -> not (href = href')) values)
   in
   enroll_or_resign remove_href
+
+let resign fs config ~member ~group =
+  existing_principals ~include_groups:`Only fs config >>= fun groups ->
+  if not (List.mem (Fs.to_string (`Dir [ config.principals ; group ])) groups) then
+    Lwt.return (Error `Conflict)
+  else
+    existing_principals ~include_groups:`No fs config >>= fun ids ->
+    if not (List.mem (Fs.to_string (`Dir [ config.principals ; member ])) ids) then
+      Lwt.return (Error `Conflict)
+    else
+      resign_unsafe fs config ~member ~group >|= fun () -> Ok ()
 
 let collect_principals fs config principal_dir key =
   Fs.get_property_map fs principal_dir >|= fun prop_map ->
@@ -1269,7 +1318,7 @@ let make_user ?(props = []) fs now config ~name ~password ~salt =
   in
   make_principal props' fs now config name >>= fun principal_url ->
   collect_principals fs config (`Dir [config.principals]) (Xml.robur_ns, "default_groups") >>= fun groups ->
-  Lwt_list.iter_s (fun group -> enroll fs config ~member:name ~group) groups >|= fun () ->
+  Lwt_list.iter_s (fun group -> enroll_unsafe fs config ~member:name ~group) groups >|= fun () ->
   principal_url
 
 let delete_home_and_calendars fs principal_dir user_calendar_dir =
@@ -1277,7 +1326,7 @@ let delete_home_and_calendars fs principal_dir user_calendar_dir =
   | Error e -> Lwt.return @@ Error e
   | Ok () -> Fs.destroy fs user_calendar_dir
 
-let delete_user fs config name =
+let delete_principal fs config name =
   let principal_dir = `Dir [config.principals ; name] in
   let user_calendar_dir = `Dir [config.calendars ; name] in
   (* TODO also delete an users other calendars besides their default calendar *)
@@ -1286,32 +1335,70 @@ let delete_user fs config name =
   Fs.dir_exists fs principal_dir >>= function
   | false -> Lwt.return @@ Error `Not_found
   | true ->
-    collect_principals fs config principal_dir (Xml.dav_ns, "group-membership") >>= fun groups ->
-    Lwt_list.iter_s (fun group -> resign fs config ~member:name ~group) groups >>= fun () ->
     delete_home_and_calendars fs principal_dir user_calendar_dir >|= function
     | Error e ->
       Log.err (fun m -> m "error %a while removing home and calendars" Fs.pp_write_error e) ;
       Error `Internal_server_error
     | Ok () -> Ok ()
 
+let delete_user fs config name =
+  existing_principals ~include_groups:`No fs config >>= fun ids ->
+  if not (List.mem (Fs.to_string (`Dir [ config.principals ; name ])) ids) then
+    Lwt.return (Error `Conflict)
+  else
+    collect_principals fs config (`Dir [ config.principals ; name ]) (Xml.dav_ns, "group-membership") >>= fun groups ->
+    existing_principals ~include_groups:`Only fs config >>= fun existing_groups ->
+    Lwt_list.iter_s (fun group ->
+        if not (List.mem (Fs.to_string (`Dir [ config.principals ; group ])) existing_groups) then
+          Lwt.return_unit
+        else
+          resign_unsafe fs config ~member:name ~group)
+      groups >>= fun () ->
+    delete_principal fs config name
+
 let delete_group_members fs config group =
   let principal_dir = `Dir [ config.principals ; group ] in
   collect_principals fs config principal_dir (Xml.dav_ns, "group-member-set") >>= fun members ->
-  Lwt_list.iter_s (fun member -> resign fs config ~member ~group) members
+  existing_principals ~include_groups:`No fs config >>= fun ids ->
+  Lwt_list.iter_s (fun member ->
+      if not (List.mem (Fs.to_string (`Dir [ config.principals ; member ])) ids) then
+        Lwt.return_unit
+      else
+        resign_unsafe fs config ~member ~group)
+    members
 
 let delete_group fs config name =
-  delete_group_members fs config name >>= fun () ->
-  delete_user fs config name
+  existing_principals ~include_groups:`Only fs config >>= fun groups ->
+  if not (List.mem (Fs.to_string (`Dir [ config.principals ; name ])) groups) then
+    Lwt.return (Error `Conflict)
+  else
+    delete_group_members fs config name >>= fun () ->
+    delete_principal fs config name
 
 let replace_group_members fs config group new_members =
-  delete_group_members fs config group >>= fun () ->
-  Lwt_list.iter_s (fun member -> enroll fs config ~member ~group) new_members
+  existing_principals ~include_groups:`Only fs config >>= fun groups ->
+  if not (List.mem (Fs.to_string (`Dir [ config.principals ; group ])) groups) then
+    Lwt.return (Error `Conflict)
+  else
+    existing_principals ~include_groups:`No fs config >>= fun ids ->
+    if not (List.for_all (fun m -> List.mem (Fs.to_string (`Dir [ config.principals ; m ])) ids) new_members) then
+      Lwt.return (Error `Conflict)
+    else
+      delete_group_members fs config group >>= fun () ->
+      Lwt_list.iter_s (fun member -> enroll_unsafe fs config ~member ~group) new_members >|= fun () ->
+      Ok ()
 
 (* TODO find out whether we should modify calendar-home-set of group or members *)
 let make_group fs now config name members =
-  make_principal [] fs now config name >>= fun principal_uri ->
-  Lwt_list.iter_s (fun member -> enroll fs config ~member ~group:name) members >|= fun () ->
-  principal_uri
+  existing_principals ~include_groups:`No fs config >>= fun ids ->
+  if not (List.for_all (fun m -> List.mem (Fs.to_string (`Dir [ config.principals ; m ])) ids) members) then
+    Lwt.return (Error `Conflict)
+  else
+    make_principal [] fs now config name >>= function
+    | Ok uri ->
+      Lwt_list.iter_s (fun member -> enroll_unsafe fs config ~member ~group:name) members >|= fun () ->
+      Ok uri
+    | Error _ as e -> Lwt.return e
 
   let generate_salt () = R.generate 15
 
