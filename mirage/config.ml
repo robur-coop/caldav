@@ -208,6 +208,8 @@ let main =
     package ~min:"3.7.0" ~max:"3.8.0" "git-mirage";
     package ~min:"0.0.8" ~max:"0.0.9" ~sublibs:["mirage"] "paf";
     package ~min:"0.8.7" "fmt";
+    package "landmarks";
+    package "landmarks-ppx";
   ] in
   let keys =
     [ Key.abstract http_port ; Key.abstract https_port ;

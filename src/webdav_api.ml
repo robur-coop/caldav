@@ -1,3 +1,5 @@
+[@@@landmark "auto"]
+
 module Xml = Webdav_xml
 open Webdav_config
 type tree = Xml.tree
@@ -58,6 +60,7 @@ let src = Logs.Src.create "webdav.robur.io" ~doc:"webdav api logs"
 module Log = (val Logs.src_log src : Logs.LOG)
 
 module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) = struct
+  [@@@landmark "auto"]
   open Lwt.Infix
 
   type state = Fs.t
@@ -124,6 +127,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     if not (Privileges.is_met ~requirement privileges) then `Forbidden else `Ok
 
   let parse_calendar ~path data =
+    Log.warn (fun m -> m "DEBUG: parse_calendar input: \n%s" data);
     match Icalendar.parse data with
     | Error e ->
       Log.err (fun m -> m "%s while parsing calendar" e) ;
@@ -147,7 +151,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     | Error _e -> assert false
     | Ok files -> Lwt_list.map_p list_file files
 
-  let directory_as_html fs (`Dir dir) =
+  let[@landmark] directory_as_html fs (`Dir dir) =
     list_dir fs (`Dir dir) >|= fun files ->
     let print_file (file, is_dir, last_modified) =
       Printf.sprintf "<tr><td><a href=\"%s\">%s</a></td><td>%s</td><td>%s</td></tr>"
@@ -199,7 +203,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
     | Error e -> Lwt.return @@ Error e
     | Ok (ics, file) -> write_if_parent_exists fs config file timestamp content_type ics
 
-  let directory_as_ics fs (`Dir dir) =
+  let[@landmark] directory_as_ics fs (`Dir dir) = (*goo*)
     let calendar_components = function
       | `Dir d ->
         Log.info (fun m -> m "empty calendar components of directory %s" (Fs.to_string (`Dir d))) ;
@@ -233,7 +237,7 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
       let data = Icalendar.to_ics (calprops, List.flatten components) in
       ("text/calendar", data)
 
-  let read fs ~path ~is_mozilla =
+  let[@landmark] read fs ~path ~is_mozilla =
     Fs.from_string fs path >>= function
     | Error _ -> Lwt.return @@ Error `Not_found
     | Ok (`Dir dir) ->

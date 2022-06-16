@@ -1,3 +1,24 @@
 (test
  (name caldav_server)
- (libraries logs logs.fmt caldav webmachine lwt ptime ptime.clock.os cohttp cohttp-lwt-unix mirage-kv oUnit mirage-clock-unix tcpip tcpip.stack-socket mirage-random-test mirage-kv-mem))
+ (libraries
+  logs
+  logs.fmt
+  caldav
+  webmachine
+  lwt
+  ptime
+  ptime.clock.os
+  cohttp
+  cohttp-lwt-unix
+  mirage-kv
+  oUnit
+  mirage-clock-unix
+  tcpip
+  tcpip.stack-socket
+  mirage-random-test
+  mirage-kv-mem
+  landmarks
+  )
+ (preprocess (pps landmarks-ppx --auto))
+ (instrumentation (backend landmarks --auto))
+ )

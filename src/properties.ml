@@ -1,3 +1,5 @@
+[@@@landmark "auto"]
+
 module Xml = Webdav_xml
 
 let prop_version = [ Xml.pcdata "2" ]
@@ -20,7 +22,7 @@ let to_sexp t =
   let bindings = PairMap.bindings t in
   sexp_of_property_list bindings
 
-let of_sexp now s =
+let[@landmark] of_sexp now s =
   let bindings = property_list_of_sexp s in
   let map =
     List.fold_left (fun map (k, v) -> PairMap.add k v map) PairMap.empty bindings
@@ -49,9 +51,11 @@ let of_sexp now s =
     end
   | _ -> (* shouldn't happen *)
     Logs.warn (fun m -> m "property map without version"); map
+(*< goto this happens - make issue? -
+  could also be because of manually constructed data-repo?*)
 
 (* not safe *)
-let unsafe_find = PairMap.find_opt
+let[@landmark] unsafe_find = PairMap.find_opt
 
 let unsafe_add = PairMap.add
 

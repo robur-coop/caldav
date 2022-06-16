@@ -1,5 +1,6 @@
 (library
   (name        caldav)
   (public_name caldav)
-  (preprocess (pps ppx_deriving.std ppx_sexp_conv))
-  (libraries logs lwt ptime mirage-kv cohttp xmlm tyxml icalendar mirage-crypto mirage-crypto-rng base64 caldav.webmachine cohttp-lwt mirage-clock mirage-random sexplib hex metrics))
+  (preprocess (pps ppx_deriving.std ppx_sexp_conv landmarks-ppx --auto))
+  (instrumentation (backend landmarks --auto))
+  (libraries logs lwt ptime mirage-kv cohttp xmlm tyxml icalendar mirage-crypto mirage-crypto-rng base64 caldav.webmachine cohttp-lwt mirage-clock mirage-random sexplib hex metrics landmarks))

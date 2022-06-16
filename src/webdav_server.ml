@@ -1,3 +1,5 @@
+[@@@landmark "auto"]
+
 open Webdav_config
 
 open Lwt.Infix
@@ -139,7 +141,7 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
         let rd' = with_resp_headers (Headers.replace_etag_add_location etag location) rd in
         Wm.continue true rd'
 
-    method private read_calendar rd =
+    method[@landmark] private read_calendar rd = (*goo*)
       let path = self#path rd in
       let is_mozilla = Headers.is_user_agent_mozilla rd.req_headers in
       Access_log.debug (fun m -> m "read_calendar path %s is_mozilla %b" path is_mozilla);
@@ -574,7 +576,7 @@ module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.
     ("/" ^ config.calendars ^ "/*", fun () -> new handler config fs now generate_salt) ;
   ]
 
-  let dispatch config fs request body =
+  let[@landmark] dispatch config fs request body =
     (* Perform route dispatch. If [None] is returned, then the URI path did not
      * match any of the route patterns. In this case the server should return a
      * 404 [`Not_found]. *)

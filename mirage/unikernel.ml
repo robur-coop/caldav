@@ -1,3 +1,5 @@
+[@@@landmark "auto"]
+
 open Lwt.Infix
 
 let server_src = Logs.Src.create "http.server" ~doc:"HTTP server"
@@ -46,12 +48,16 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
       | "/" -> "/index.html"
       | p -> p
     in
+    Logs.warn (fun m -> m "DEBUG: opt_static_file: %a" Uri.pp uri);
     Zap.get zap_data (Mirage_kv.Key.v path) >>= function
     | Ok data ->
       let mime_type = Magic_mime.lookup path in
       let headers = Cohttp.Header.init_with "content-type" mime_type in
+      Logs.warn (fun m -> m "DEBUG: opt_static_file: %a <just before S.respond>" Uri.pp uri);
       S.respond ~headers ~status:`OK ~body:(`String data) ()
-    | _ -> next request body
+    | _ ->
+      Logs.warn (fun m -> m "DEBUG: opt_static_file: %a <just before next request>" Uri.pp uri);
+      next request body
 
   let get_user_from_auth = function
     | None -> None
@@ -86,7 +92,18 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
     in
     S.make ~conn_closed ~callback ()
 
-  let start _random _clock ctx keys http zap =
+  let loop_landmarks_report () =
+    let rec aux () =
+      Lwt_unix.sleep 10. >>= fun () ->
+      Landmark.export_and_reset () |> Landmark.Graph.output stderr;
+      aux ()
+    in
+    aux ()
+  
+  let[@landmark] start _random _clock ctx keys http zap =
+    (* Landmark.start_profiling (); *)
+    (*> goto remove *)
+    Lwt.async loop_landmarks_report;
     let author = Lwt.new_key ()
     and user_agent = Lwt.new_key ()
     and http_req = Lwt.new_key ()
