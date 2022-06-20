@@ -1709,6 +1709,46 @@ let delete_group_is_a_user () =
       | Error _ -> Lwt.return_unit
       | Ok _ -> invalid_arg "expected delete group to fail")
 
+let write_calendar_event () =
+  Lwt_main.run (
+    let open Lwt.Infix in
+    KV_mem.connect () >>= fun fs ->
+    let now = Ptime.v (1, 0L) in
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    | Error _ -> invalid_arg "expected make_user to succeed"
+    | Ok _ ->
+      let data = {|BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VTIMEZONE
+LAST-MODIFIED:20040110T032845Z
+TZID:US/Eastern
+BEGIN:DAYLIGHT
+DTSTART:20000404T020000
+RRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=4
+TZNAME:EDT
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0400
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20001026T020000
+RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10
+TZNAME:EST
+TZOFFSETFROM:-0400
+TZOFFSETTO:-0500
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:DC6C50A017428C5216A2F1CD@example.com
+DTSTART;TZID=US/Eastern:20060104T100000
+DURATION:PT1H
+SUMMARY:Event #3
+END:VEVENT
+END:VCALENDAR
+|} in
+      Dav.write_component fs config ~path:"/calendars/test/1234.ics" now  ~content_type:"text/calendar" ~data >>= function
+      | Ok _ -> Lwt.return_unit
+      | Error _ -> invalid_arg "expected success when writing an event")
+
 let webdav_api_tests = [
   "successful mkcol", `Quick, mkcol_success ;
   "delete", `Quick, delete_test ;
@@ -1740,6 +1780,7 @@ let webdav_api_tests = [
   "delete group, all cleaned up", `Quick, delete_group_fine ;
   "delete group, no such group", `Quick, delete_group_no_group ;
   "delete group, is a user", `Quick, delete_group_is_a_user ;
+  "write calendar event", `Quick, write_calendar_event ;
 ]
 
 let principal_url principal = Uri.with_path config.host (Fs.to_string (`Dir [ config.principals ; principal ]))
