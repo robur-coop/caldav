@@ -1231,7 +1231,7 @@ let href_to_principal principals_directory tree =
       Error "invalid path"
   | Error msg -> Error msg
 
-let enroll_or_resign modify_membership fs config ~member ~group =
+let enroll_or_resign ~group_or_user modify_membership fs config ~member ~group =
   let update_properties modify_property_map home =
     Fs.get_property_map fs home >>= fun prop_map ->
     let prop_map' = modify_property_map prop_map in
@@ -1257,16 +1257,22 @@ let enroll_or_resign modify_membership fs config ~member ~group =
     let values' = modify_membership group_href values in
     Properties.unsafe_add (Xml.dav_ns, "group-membership") values' prop_map
   in
-  update_properties modify_member_in_group (`Dir [ config.principals ; group ]) >>= fun () ->
-  update_properties modify_group_in_member (`Dir [ config.principals ; member ])
+  match group_or_user with
+  | `Group ->
+    update_properties modify_member_in_group (`Dir [ config.principals ; group ])
+  | `User ->
+    update_properties modify_group_in_member (`Dir [ config.principals ; member ])
+  | `Both ->
+    update_properties modify_member_in_group (`Dir [ config.principals ; group ]) >>= fun () ->
+    update_properties modify_group_in_member (`Dir [ config.principals ; member ])
 
-let enroll_unsafe =
+let enroll_unsafe ?(group_or_user = `Both) =
   let modify_membership href (attrs, values) =
     if List.mem href values
     then (attrs, values)
     else (attrs, href :: values)
   in
-  enroll_or_resign modify_membership
+  enroll_or_resign ~group_or_user modify_membership
 
 let enroll fs config ~member ~group =
   existing_principals ~include_groups:`Only fs config >>= fun groups ->
@@ -1280,11 +1286,11 @@ let enroll fs config ~member ~group =
       Fs.batch fs (fun batch ->
           enroll_unsafe batch config ~member ~group >|= fun () -> Ok ())
 
-let resign_unsafe =
+let resign_unsafe ?(group_or_user = `Both) =
   let remove_href href (attrs, values) =
     (attrs, List.filter (fun href' -> not (href = href')) values)
   in
-  enroll_or_resign remove_href
+  enroll_or_resign ~group_or_user remove_href
 
 let resign fs config ~member ~group =
   existing_principals ~include_groups:`Only fs config >>= fun groups ->
@@ -1312,6 +1318,7 @@ let collect_principals fs config principal_dir key =
 let make_user ?(props = []) fs now config ~name ~password ~salt =
   let home_set_dir = `Dir [ config.calendars ] in
   let home_set_url_string = Fs.to_string (home_set_dir :> Webdav_fs.file_or_dir) in
+  collect_principals fs config (`Dir [config.principals]) (Xml.robur_ns, "default_groups") >>= fun groups ->
   let props' =
     let salt = base64_encode salt in
     ((Xml.caldav_ns, "calendar-home-set"),
@@ -1320,12 +1327,13 @@ let make_user ?(props = []) fs now config ~name ~password ~salt =
         ([], [Xml.pcdata @@ hash_password password salt]))
     :: ((Xml.robur_ns, "salt"),
         ([], [Xml.pcdata salt]))
+    :: ((Xml.dav_ns, "group-membership"),
+        ([], List.map (principal_to_href config.principals) groups))
     :: props
   in
   Fs.batch fs (fun batch ->
       make_principal props' batch now config name >>= fun principal_url ->
-      collect_principals batch config (`Dir [config.principals]) (Xml.robur_ns, "default_groups") >>= fun groups ->
-      Lwt_list.iter_s (fun group -> enroll_unsafe batch config ~member:name ~group) groups >|= fun () ->
+      Lwt_list.iter_s (fun group -> enroll_unsafe ~group_or_user:`Group batch config ~member:name ~group) groups >|= fun () ->
       principal_url)
 
 let delete_home_and_calendars fs principal_dir user_calendar_dir =
@@ -1360,11 +1368,11 @@ let delete_user fs config name =
             if not (List.mem (Fs.to_string (`Dir [ config.principals ; group ])) existing_groups) then
               Lwt.return_unit
             else
-              resign_unsafe batch config ~member:name ~group)
+              resign_unsafe ~group_or_user:`Group batch config ~member:name ~group)
           groups >>= fun () ->
         delete_principal batch config name)
 
-let delete_group_members fs config group =
+let delete_group_members ?group_or_user fs config group =
   let principal_dir = `Dir [ config.principals ; group ] in
   collect_principals fs config principal_dir (Xml.dav_ns, "group-member-set") >>= fun members ->
   existing_principals ~include_groups:`No fs config >>= fun ids ->
@@ -1372,7 +1380,7 @@ let delete_group_members fs config group =
       if not (List.mem (Fs.to_string (`Dir [ config.principals ; member ])) ids) then
         Lwt.return_unit
       else
-        resign_unsafe fs config ~member ~group)
+        resign_unsafe ?group_or_user fs config ~member ~group)
     members
 
 let delete_group fs config name =
@@ -1381,7 +1389,7 @@ let delete_group fs config name =
     Lwt.return (Error `Conflict)
   else
     Fs.batch fs (fun batch ->
-        delete_group_members batch config name >>= fun () ->
+        delete_group_members ~group_or_user:`User batch config name >>= fun () ->
         delete_principal batch config name)
 
 let replace_group_members fs config group new_members =
@@ -1405,9 +1413,13 @@ let make_group fs now config name members =
     Lwt.return (Error `Conflict)
   else
     Fs.batch fs (fun batch ->
-        make_principal [] batch now config name >>= function
+        let props =
+          [ (Xml.dav_ns, "group-member-set"),
+            ([], List.map (principal_to_href config.principals) members) ]
+        in
+        make_principal props batch now config name >>= function
         | Ok uri ->
-          Lwt_list.iter_s (fun member -> enroll_unsafe batch config ~member ~group:name) members >|= fun () ->
+          Lwt_list.iter_s (fun member -> enroll_unsafe ~group_or_user:`User batch config ~member ~group:name) members >|= fun () ->
           Ok uri
         | Error _ as e -> Lwt.return e)
 
