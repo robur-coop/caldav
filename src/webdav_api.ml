@@ -217,10 +217,12 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
                 (* TODO map error to internal server error and log it, as function *)
               | Error _e -> Lwt.return @@ Error `Internal_server_error
               | Ok () ->
-                update_parent_after_child_write batch file' timestamp >>= fun () ->
-                Fs.etag fs file' >|= function
-                | Error _e -> Error `Internal_server_error
-                | Ok etag -> Ok etag)
+                update_parent_after_child_write batch file' timestamp >|= fun () -> Ok ()) >>= function
+          | Error _ as e -> Lwt.return e
+          | Ok () ->
+            Fs.etag fs file' >|= function
+            | Error _e -> Error `Internal_server_error
+            | Ok etag -> Ok etag
 
   let write_component fs config ~path timestamp ~content_type ~data =
     match parse_calendar ~path data with
