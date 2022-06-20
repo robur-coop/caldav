@@ -8,7 +8,8 @@
   (#24 @hannesm)
 * check for groups and principals on operations thereof (i.e. disallow deleting
   a group when the principal is a user, etc.) and test cases (#25 @hannesm)
-* use batch in Webdav_api instead of Webdav_fs to reduce commits (#26 @hannesm)
+* use batch in Webdav_api instead of Webdav_fs to reduce commits
+  (#26, fixes in #27 @hannesm)
 
 ## v0.1.1 (2021-11-02)
 
