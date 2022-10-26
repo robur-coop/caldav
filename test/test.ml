@@ -2346,10 +2346,98 @@ let proppatch_acl_non_existing () =
     | Error _ -> ()
     | Ok _ -> invalid_arg "expected proppatch to fail (acl non-existing principal)")
 
+let report_freq_yearly () =
+  let calendar = {|BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+UID:19970901T130000Z-123403@example.com
+DTSTAMP:19970901T130000Z
+DTSTART;VALUE=DATE:19971102
+SUMMARY:Our Blissful Anniversary
+TRANSP:TRANSPARENT
+CLASS:CONFIDENTIAL
+CATEGORIES:ANNIVERSARY,PERSONAL,SPECIAL OCCASION
+RRULE:FREQ=YEARLY
+END:VEVENT
+END:VCALENDAR|}
+  and xml = header ^ {|<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:prop>
+    <C:calendar-data>
+      <C:expand start="20081101T160000Z"
+                end="20091103T160000Z"/>
+    </C:calendar-data>
+  </D:prop>
+  <C:filter>
+    <C:comp-filter name="VCALENDAR">
+      <C:comp-filter name="VEVENT">
+        <C:time-range start="20081101T160000Z" end="20091103T160000Z"/>
+      </C:comp-filter>
+    </C:comp-filter>
+  </C:filter>
+</C:calendar-query>|}
+  and expected = header ^ {|
+<D:multistatus xmlns:D="DAV:"
+                  xmlns:C="urn:ietf:params:xml:ns:caldav">
+     <D:response>
+       <D:href>/bernard/work/1.ics</D:href>
+       <D:propstat>
+         <D:prop>
+           <C:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example Corp.//CalDAV Client//EN
+BEGIN:VEVENT
+UID:19970901T130000Z-123403@example.com
+DTSTAMP:19970901T130000Z
+DTSTART;VALUE=DATE:20091102
+RECURRENCE-ID;VALUE=DATE:20091102
+SUMMARY:Our Blissful Anniversary
+TRANSP:TRANSPARENT
+CLASS:CONFIDENTIAL
+CATEGORIES:ANNIVERSARY,PERSONAL,SPECIAL OCCASION
+END:VEVENT
+BEGIN:VEVENT
+UID:19970901T130000Z-123403@example.com
+DTSTAMP:19970901T130000Z
+DTSTART;VALUE=DATE:20081102
+RECURRENCE-ID;VALUE=DATE:20081102
+SUMMARY:Our Blissful Anniversary
+TRANSP:TRANSPARENT
+CLASS:CONFIDENTIAL
+CATEGORIES:ANNIVERSARY,PERSONAL,SPECIAL OCCASION
+END:VEVENT
+END:VCALENDAR
+</C:calendar-data>
+         </D:prop>
+         <D:status>HTTP/1.1 200 OK</D:status>
+       </D:propstat>
+     </D:response>
+   </D:multistatus>
+|}
+  in
+  let data =
+    let open Lwt.Infix in
+    Lwt_main.run (
+      let now = Ptime.v (1, 0L) in
+      KV_mem.connect () >>= fun res_fs ->
+      let props name = Properties.create_dir allow_all_acl now name in
+      Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
+      Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
+      let props = Properties.create ~content_type:"text/calendar"
+          allow_all_acl now (String.length calendar) ("bernard/work/1.ics")
+      in
+      Fs.write res_fs (`File [ "bernard" ; "work" ; "1.ics" ]) calendar props >|= fun _ ->
+      res_fs)
+  in
+  Alcotest.(check (result t_tree string) __LOC__
+              (Ok (tree expected))
+              (report "bernard/work" xml data))
+
 let regression_tests = [
   "Default group", `Quick, default_group ;
   "PROPPATCH with existing principal", `Quick, proppatch_acl_existing ;
   "PROPPATCH with non-existing principal", `Quick, proppatch_acl_non_existing ;
+  "REPORT with FREQ=YEARLY", `Quick, report_freq_yearly ;
 ]
 
 let tests = [
