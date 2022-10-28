@@ -1,5 +1,6 @@
-## unreleased
+## v0.2.0 (2022-10-28)
 
+* unikernel: upgrade to mirage 4.3 (#31 @hannesm)
 * bugfix: href_to_principal always returned "/principals" (since v0.1.1)
   (#24 @hannesm)
 * error when principal or calendar already exists when adding a new principal
@@ -10,6 +11,9 @@
   a group when the principal is a user, etc.) and test cases (#25 @hannesm)
 * use batch in Webdav_api instead of Webdav_fs to reduce commits
   (#26, fixes in #27 @hannesm)
+* bugfix: adding and removing groups and users, only edit prop file once
+  (#27 @hannesm)
+* bugfix: compute etag after batch (#27 @hannesm)
 
 ## v0.1.1 (2021-11-02)
 
