@@ -4,11 +4,15 @@ A test caldav server is setup at [https://calendar.robur.coop](https://calendar.
 Please try using "mirage" as user and password either on our test server which serves as well a [CalDavZAP](https://www.inf-it.com/open-source/clients/caldavzap/) user interface or configure our test server in your calendar client (`calendar.robur.coop`).
 You can choose any not-yet-used username and password, an account will be created by caldav (using the "trust on first use" argument described below).
 
+## Installing as binary
+
+Reproducible binaries are available at https://builds.robur.coop/job/caldav/
+
 ## Compilation of CalDAV server unikernel
 
 To begin the installation, you need to `ssh` into your server.
 Then, you need to install [`opam`](https://opam.ocaml.org) via your package manager (e.g. `apt install opam`).
-Make sure you have OCaml version `>=4.10.0`, and opam version `>=2.0.0` and mirage version `>=3.7.1` installed via your package manager.
+Make sure you have OCaml version `>=4.10.0`, and opam version `>=2.1.0` and mirage version `>=4.0.0` installed via your package manager.
 You can use `ocaml --version`, `opam --version`, and `mirage --version` to find out.
 
 In addition, you currently need our opam repository overlay because we need some
