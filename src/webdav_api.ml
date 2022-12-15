@@ -214,8 +214,9 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
           let props = Properties.create ~content_type acl timestamp (String.length ics) (Fs.to_string file') in
           Fs.batch fs (fun batch ->
               Fs.write batch file ics props >>= function
-                (* TODO map error to internal server error and log it, as function *)
-              | Error _e -> Lwt.return @@ Error `Internal_server_error
+              | Error e ->
+                Log.err (fun m -> m "writing %s errored: %a" (Fs.to_string file') Fs.pp_write_error e);
+                Lwt.return @@ Error `Internal_server_error
               | Ok () ->
                 update_parent_after_child_write batch file' timestamp >|= fun () -> Ok ()) >>= function
           | Error _ as e -> Lwt.return e
