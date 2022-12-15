@@ -124,7 +124,11 @@ module Http_server = Cohttp_lwt_unix.Server
 module Body = Cohttp_lwt.Body
 
 module KV_mem = Mirage_kv_mem.Make(Pclock)
-module Dav_fs = Caldav.Webdav_fs.Make(Pclock)(KV_mem)
+module KV_RW = struct
+  include KV_mem
+  let batch t f = f t
+end
+module Dav_fs = Caldav.Webdav_fs.Make(Pclock)(KV_RW)
 
 module Webdav_server = Caldav.Webdav_server.Make(Mirage_random_test)(Pclock)(Dav_fs)(Http_server)
 

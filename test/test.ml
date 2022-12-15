@@ -1,6 +1,10 @@
 module Xml = Caldav.Webdav_xml
 module KV_mem = Mirage_kv_mem.Make(Pclock)
-module Fs = Caldav.Webdav_fs.Make(Pclock)(KV_mem)
+module KV_RW = struct
+  include KV_mem
+  let batch t f = f t
+end
+module Fs = Caldav.Webdav_fs.Make(Pclock)(KV_RW)
 module Dav = Caldav.Webdav_api.Make(Mirage_random_test)(Pclock)(Fs)
 module Properties = Caldav.Properties
 
