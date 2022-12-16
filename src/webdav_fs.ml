@@ -61,15 +61,20 @@ sig
 
   val etag : t -> file_or_dir -> (string, error) result Lwt.t
 
-  val batch: t -> ?retries:int -> (t -> 'a Lwt.t) -> 'a Lwt.t
+  val batch: t -> (t -> 'a Lwt.t) -> ('a, [> `Msg of string ]) result Lwt.t
 end
 
 let src = Logs.Src.create "webdav.fs" ~doc:"webdav fs logs"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-let propfile_ext = ".prop" 
+let propfile_ext = ".prop"
 
-module Make (Pclock : Mirage_clock.PCLOCK) (Fs:Mirage_kv.RW) = struct
+module type KV_RW = sig
+  include Mirage_kv.RW
+  val batch : t -> (t -> 'a Lwt.t) -> ('a, [> `Msg of string ]) result Lwt.t
+end
+
+module Make (Pclock : Mirage_clock.PCLOCK) (Fs:KV_RW) = struct
 
   open Lwt.Infix
 
@@ -188,15 +193,18 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:Mirage_kv.RW) = struct
     Fs.list fs kv_dir >|= function
     | Error e -> Error e
     | Ok files ->
-      let files = List.fold_left (fun acc (step, kind) ->
-          let slen = String.length step
-          and plen = String.length propfile_ext
+      let files = List.fold_left (fun acc (file, kind) ->
+          let is_propfile =
+            let step = Mirage_kv.Key.basename file in
+            let slen = String.length step
+            and plen = String.length propfile_ext
+            in
+            slen >= plen && String.(equal (sub step (slen - plen) plen) propfile_ext)
           in
-          if slen >= plen && String.(equal (sub step (slen - plen) plen) propfile_ext) then
+          if is_propfile then
             acc
           else
-            (* TODO check whether step is the entire path, or dir needs to be included *)
-            let file = dir @ [step] in
+            let file = Mirage_kv.Key.segments file in
             match kind with
             | `Value -> `File file :: acc
             | `Dictionary -> `Dir file :: acc)
@@ -294,5 +302,5 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:Mirage_kv.RW) = struct
     | Some _, Some _ -> Ok ()
     | _ -> Error (`Msg "root user does not have password and salt")
 
-  let batch fs ?retries f = Fs.batch fs ?retries f
+  let batch = Fs.batch
 end

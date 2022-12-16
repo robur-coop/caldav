@@ -6,17 +6,26 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
-let decompose_git_url () =
-  match String.split_on_char '#' (Key_gen.remote ()) with
-  | [ url ] -> url, None
-  | [ url ; branch ] -> url, Some branch
-  | _ ->
-    Logs.err (fun m -> m "expected at most a single # in remote");
-    exit 64
-
 module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
+
+  let author = Lwt.new_key ()
+  and user_agent = Lwt.new_key ()
+  and http_req = Lwt.new_key ()
+
   module X509 = Tls_mirage.X509(KEYS)(Clock)
-  module Store = Irmin_mirage_git.KV_RW(Irmin_git.Mem)(Clock)
+  module Store = struct
+    include Git_kv.Make(Clock)
+    let batch t f =
+      let author =
+        Fmt.str "%a (via caldav unikernel)"
+          Fmt.(option ~none:(any "no author") string) (Lwt.get author)
+      and message =
+        Fmt.str "during processing HTTP request %a@.by user-agent %a"
+          Fmt.(option ~none:(any "no HTTP request") string) (Lwt.get http_req)
+          Fmt.(option ~none:(any "none") string) (Lwt.get user_agent)
+      in
+      change_and_push t ~author ~message f
+  end
   module Dav_fs = Caldav.Webdav_fs.Make(Clock)(Store)
   module Dav = Caldav.Webdav_api.Make(R)(Clock)(Dav_fs)
   module Webdav_server = Caldav.Webdav_server.Make(R)(Clock)(Dav_fs)(S)
@@ -87,10 +96,6 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
     S.make ~conn_closed ~callback ()
 
   let start _random _clock ctx keys http zap =
-    let author = Lwt.new_key ()
-    and user_agent = Lwt.new_key ()
-    and http_req = Lwt.new_key ()
-    in
     let dynamic = author, user_agent, http_req in
     let init_http port config store =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
@@ -107,29 +112,8 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
       Caldav.Webdav_config.config ~do_trust_on_first_use host
     in
     let init_store_for_runtime config =
-      let admin_pass = Key_gen.admin_password () in
-      Irmin_git.Mem.v (Fpath.v "bla") >>= function
-      | Error _ -> assert false
-      | Ok git ->
-        (* TODO maybe source IP address? turns out to be not trivial
-                (unclear how to get it from http/conduit) *)
-        let author () =
-          Fmt.str "%a (via caldav)"
-            Fmt.(option ~none:(any "no author") string) (Lwt.get author)
-        and msg op =
-          let op_str = function
-            | `Set k -> Fmt.str "updating %a" Mirage_kv.Key.pp k
-            | `Remove k -> Fmt.str "removing %a" Mirage_kv.Key.pp k
-            | `Batch -> "batch operation"
-          in
-          Fmt.str "calendar change %s@.during processing HTTP request %a@.by user-agent %a"
-            (op_str op)
-            Fmt.(option ~none:(any "no HTTP request") string) (Lwt.get http_req)
-            Fmt.(option ~none:(any "none") string) (Lwt.get user_agent)
-        in
-        let remote, branch = decompose_git_url () in
-        Store.connect git ?branch ~depth:1 ~ctx ~author ~msg remote >>= fun store ->
-        Dav.connect store config admin_pass
+      Git_kv.connect ctx (Key_gen.remote ()) >>= fun store ->
+      Dav.connect store config (Key_gen.admin_password ())
     in
     let hostname = Key_gen.hostname () in
     match Key_gen.http_port (), Key_gen.https_port () with

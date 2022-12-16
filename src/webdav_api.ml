@@ -35,14 +35,14 @@ sig
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, [> `Msg of string | `Unknown_user of string * string ]) result Lwt.t
 
   val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:Cstruct.t ->
-    (Uri.t, [> `Conflict ]) result Lwt.t
+    (Uri.t, [> `Conflict | `Internal_server_error ]) result Lwt.t
   val change_user_password : state -> config -> name:string -> password:string -> salt:Cstruct.t -> (unit, [> `Internal_server_error ]) result Lwt.t
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found | `Conflict ]) result Lwt.t
 
-  val make_group : state -> Ptime.t -> config -> string -> string list -> (Uri.t, [> `Conflict ]) result Lwt.t
-  val enroll : state -> config -> member:string -> group:string -> (unit, [> `Conflict ]) result Lwt.t
-  val resign : state -> config -> member:string -> group:string -> (unit, [> `Conflict ]) result Lwt.t
-  val replace_group_members : state -> config -> string -> string list -> (unit, [> `Conflict ]) result Lwt.t
+  val make_group : state -> Ptime.t -> config -> string -> string list -> (Uri.t, [> `Conflict | `Internal_server_error ]) result Lwt.t
+  val enroll : state -> config -> member:string -> group:string -> (unit, [> `Conflict | `Internal_server_error ]) result Lwt.t
+  val resign : state -> config -> member:string -> group:string -> (unit, [> `Conflict | `Internal_server_error ]) result Lwt.t
+  val replace_group_members : state -> config -> string -> string list -> (unit, [> `Conflict | `Internal_server_error ]) result Lwt.t
   val delete_group : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found | `Conflict ]) result Lwt.t
 
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
@@ -214,12 +214,17 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
           let props = Properties.create ~content_type acl timestamp (String.length ics) (Fs.to_string file') in
           Fs.batch fs (fun batch ->
               Fs.write batch file ics props >>= function
-                (* TODO map error to internal server error and log it, as function *)
-              | Error _e -> Lwt.return @@ Error `Internal_server_error
+              | Error e ->
+                Log.err (fun m -> m "writing %s errored: %a" (Fs.to_string file') Fs.pp_write_error e);
+                Lwt.return @@ Error `Internal_server_error
               | Ok () ->
                 update_parent_after_child_write batch file' timestamp >|= fun () -> Ok ()) >>= function
-          | Error _ as e -> Lwt.return e
-          | Ok () ->
+          | Error `Msg msg ->
+            Log.err (fun m -> m "write errored with %s" msg);
+            Lwt.return (Error `Internal_server_error)
+          | Ok (Error _ as e) ->
+            Lwt.return e
+          | Ok (Ok ()) ->
             Fs.etag fs file' >|= function
             | Error _e -> Error `Internal_server_error
             | Ok etag -> Ok etag
@@ -286,12 +291,24 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
 
   let delete fs ~path now =
     Fs.from_string fs path >>= function
-    | Error _ -> Lwt.return false
+    | Error e ->
+      Log.warn (fun m -> m "error %a in delete (from_string) of %s"
+                   Fs.pp_error e path);
+      Lwt.return false
     | Ok f_or_d ->
       Fs.batch fs (fun batch ->
-          Fs.destroy batch f_or_d >>= fun _res ->
-          update_parent_after_child_write batch f_or_d now >|= fun () ->
-          true)
+          Fs.destroy batch f_or_d >>= function
+          | Error we ->
+            Log.warn (fun m -> m "error %a in delete of %s"
+                         Fs.pp_write_error we path);
+            Lwt.return false
+          | Ok () ->
+            update_parent_after_child_write batch f_or_d now >|= fun () ->
+            true) >|= function
+      | Ok b -> b
+      | Error `Msg msg ->
+        Log.err (fun m -> m "error %s during delete batch" msg);
+        false
 
   let statuscode_to_string res =
     Format.sprintf "%s %s"
@@ -1284,7 +1301,11 @@ let enroll fs config ~member ~group =
       Lwt.return (Error `Conflict)
     else
       Fs.batch fs (fun batch ->
-          enroll_unsafe batch config ~member ~group >|= fun () -> Ok ())
+          enroll_unsafe batch config ~member ~group >|= fun () -> Ok ()) >|= function
+      | Ok r -> r
+      | Error `Msg msg ->
+        Log.err (fun m -> m "error in enroll batch: %s" msg);
+        Error `Internal_server_error
 
 let resign_unsafe ?(group_or_user = `Both) =
   let remove_href href (attrs, values) =
@@ -1302,7 +1323,11 @@ let resign fs config ~member ~group =
       Lwt.return (Error `Conflict)
     else
       Fs.batch fs (fun batch ->
-          resign_unsafe batch config ~member ~group >|= fun () -> Ok ())
+          resign_unsafe batch config ~member ~group >|= fun () -> Ok ()) >|= function
+      | Ok r -> r
+      | Error `Msg msg ->
+        Log.err (fun m -> m "error in resign batch: %s" msg);
+        Error `Internal_server_error
 
 let collect_principals fs config principal_dir key =
   Fs.get_property_map fs principal_dir >|= fun prop_map ->
@@ -1334,7 +1359,11 @@ let make_user ?(props = []) fs now config ~name ~password ~salt =
   Fs.batch fs (fun batch ->
       make_principal props' batch now config name >>= fun principal_url ->
       Lwt_list.iter_s (fun group -> enroll_unsafe ~group_or_user:`Group batch config ~member:name ~group) groups >|= fun () ->
-      principal_url)
+      principal_url) >|= function
+  | Ok r -> r
+  | Error `Msg msg ->
+    Log.err (fun m -> m "error in batch of make_user: %s" msg);
+    Error `Internal_server_error
 
 let delete_home_and_calendars fs principal_dir user_calendar_dir =
   Fs.destroy fs principal_dir >>= function
@@ -1370,7 +1399,11 @@ let delete_user fs config name =
             else
               resign_unsafe ~group_or_user:`Group batch config ~member:name ~group)
           groups >>= fun () ->
-        delete_principal batch config name)
+        delete_principal batch config name) >|= function
+    | Ok r -> r
+    | Error `Msg msg ->
+      Log.err (fun m -> m "error in delete_user batch: %s" msg);
+      Error `Internal_server_error
 
 let delete_group_members ?group_or_user fs config group =
   let principal_dir = `Dir [ config.principals ; group ] in
@@ -1390,7 +1423,11 @@ let delete_group fs config name =
   else
     Fs.batch fs (fun batch ->
         delete_group_members ~group_or_user:`User batch config name >>= fun () ->
-        delete_principal batch config name)
+        delete_principal batch config name) >|= function
+    | Ok r -> r
+    | Error `Msg msg ->
+      Log.err (fun m -> m "error in delete_group batch: %s" msg);
+      Error `Internal_server_error
 
 let replace_group_members fs config group new_members =
   existing_principals ~include_groups:`Only fs config >>= fun groups ->
@@ -1404,7 +1441,11 @@ let replace_group_members fs config group new_members =
       Fs.batch fs (fun batch ->
           delete_group_members batch config group >>= fun () ->
           Lwt_list.iter_s (fun member -> enroll_unsafe batch config ~member ~group) new_members >|= fun () ->
-          Ok ())
+          Ok ()) >|= function
+      | Ok r -> r
+      | Error `Msg msg ->
+        Log.err (fun m -> m "error in replace_group_members batch: %s" msg);
+        Error `Internal_server_error
 
 (* TODO find out whether we should modify calendar-home-set of group or members *)
 let make_group fs now config name members =
@@ -1421,7 +1462,11 @@ let make_group fs now config name members =
         | Ok uri ->
           Lwt_list.iter_s (fun member -> enroll_unsafe ~group_or_user:`User batch config ~member ~group:name) members >|= fun () ->
           Ok uri
-        | Error _ as e -> Lwt.return e)
+        | Error _ as e -> Lwt.return e) >|= function
+    | Ok r -> r
+    | Error `Msg msg ->
+      Log.err (fun m -> m "error in make_group batch: %s" msg);
+      Error `Internal_server_error
 
   let generate_salt () = R.generate 15
 

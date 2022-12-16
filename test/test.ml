@@ -1,6 +1,11 @@
 module Xml = Caldav.Webdav_xml
 module KV_mem = Mirage_kv_mem.Make(Pclock)
-module Fs = Caldav.Webdav_fs.Make(Pclock)(KV_mem)
+module KV_RW = struct
+  open Lwt.Infix
+  include KV_mem
+  let batch t f = f t >|= fun r -> Ok r
+end
+module Fs = Caldav.Webdav_fs.Make(Pclock)(KV_RW)
 module Dav = Caldav.Webdav_api.Make(Mirage_random_test)(Pclock)(Fs)
 module Properties = Caldav.Properties
 
@@ -1373,7 +1378,8 @@ let make_user_same_name () =
     | Ok _ ->
       Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
       | Error `Conflict -> Lwt.return_unit
-      | Ok _ -> invalid_arg "expected a conflict")
+      | Error _ -> invalid_arg "expected a conflict, got a different error"
+      | Ok _ -> invalid_arg "expected a conflict, got ok")
 
 let make_user_delete_make () =
   Lwt_main.run (

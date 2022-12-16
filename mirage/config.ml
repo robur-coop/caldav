@@ -57,10 +57,8 @@ let main =
     package "uri" ;
     package "caldav" ;
     package ~min:"0.1.3" "icalendar" ;
-    package ~min:"2.10.0" "irmin-git" ;
-    package ~min:"2.10.0" "irmin-mirage-git" ;
-    package ~min:"3.10.0" "git-paf";
     package ~min:"0.8.7" "fmt";
+    package ~min:"0.0.3" "git-kv"
   ] in
   let keys =
     [ Key.v http_port ; Key.v https_port ;
