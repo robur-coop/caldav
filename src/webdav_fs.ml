@@ -61,7 +61,7 @@ sig
 
   val etag : t -> file_or_dir -> (string, error) result Lwt.t
 
-  val batch: t -> (t -> 'a Lwt.t) -> 'a Lwt.t
+  val batch: t -> (t -> 'a Lwt.t) -> ('a, [> `Msg of string ]) result Lwt.t
 end
 
 let src = Logs.Src.create "webdav.fs" ~doc:"webdav fs logs"
@@ -71,7 +71,7 @@ let propfile_ext = ".prop"
 
 module type KV_RW = sig
   include Mirage_kv.RW
-  val batch : t -> (t -> 'a Lwt.t) -> 'a Lwt.t
+  val batch : t -> (t -> 'a Lwt.t) -> ('a, [> `Msg of string ]) result Lwt.t
 end
 
 module Make (Pclock : Mirage_clock.PCLOCK) (Fs:KV_RW) = struct

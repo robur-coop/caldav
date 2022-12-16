@@ -126,7 +126,7 @@ module Body = Cohttp_lwt.Body
 module KV_mem = Mirage_kv_mem.Make(Pclock)
 module KV_RW = struct
   include KV_mem
-  let batch t f = f t
+  let batch t f = f t >|= fun r -> Ok r
 end
 module Dav_fs = Caldav.Webdav_fs.Make(Pclock)(KV_RW)
 
