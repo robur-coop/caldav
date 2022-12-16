@@ -1,3 +1,11 @@
+## v0.2.1 (2022-12-16)
+
+* Use Mirage-kv 6.0.0 API (#32 @hannesm)
+* Log more write errors (#32 @hannesm)
+* Refine Webdav_fs.batch to return a ('a, [> `Msg of string ]) result io, so
+  it can fail (#32 @hannesm)
+* unikernel: use git-kv instead of irmin-mirage-git (#32 @hannesm)
+
 ## v0.2.0 (2022-10-28)
 
 * unikernel: upgrade to mirage 4.3 (#31 @hannesm)
