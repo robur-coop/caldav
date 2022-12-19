@@ -15,10 +15,9 @@ Then, you need to install [`opam`](https://opam.ocaml.org) via your package mana
 Make sure you have OCaml version `>=4.10.0`, and opam version `>=2.1.0` and mirage version `>=4.0.0` installed via your package manager.
 You can use `ocaml --version`, `opam --version`, and `mirage --version` to find out.
 
-In addition, you currently need our opam repository overlay because we need some
-libraries that are not yet released for git-via-ssh. It is recommended to use a custom opam switch:
+It is recommended to use a custom opam switch:
 
-    opam switch create caldav 4.11.1
+    opam switch create caldav 4.14.0
     eval `opam env`
     opam install lwt mirage
 
@@ -34,7 +33,7 @@ The `make` command creates a `caldav` executable in `caldav/mirage`. This is the
 If you compiled for unix (the default unless you specify `-t xen/hvt/..`, this is an executable you can run directly:
 We can see all its options:
 
-    ./caldav --help
+    ./dist/caldav --help
 
 For other targets you have to create a virtual machine, e.g. solo5-hvt:
 
