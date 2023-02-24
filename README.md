@@ -12,7 +12,7 @@ Reproducible binaries are available at https://builds.robur.coop/job/caldav/
 
 To begin the installation, you need to `ssh` into your server.
 Then, you need to install [`opam`](https://opam.ocaml.org) via your package manager (e.g. `apt install opam`).
-Make sure you have OCaml version `>=4.10.0`, and opam version `>=2.1.0` and mirage version `>=4.0.0` installed via your package manager.
+Make sure you have OCaml version `>=4.10.0`, and opam version `>=2.1.0` and mirage version `>=4.3.4` installed via your package manager.
 You can use `ocaml --version`, `opam --version`, and `mirage --version` to find out.
 
 It is recommended to use a custom opam switch:
