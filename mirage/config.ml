@@ -72,7 +72,7 @@ let main =
 
 let git_client =
   let dns = generic_dns_client net in
-  let git = git_happy_eyeballs net dns (generic_happy_eyeballs net dns) in
+  let git = mimic_happy_eyeballs net dns (generic_happy_eyeballs net dns) in
   let tcp = tcpv4v6_of_stackv4v6 net in
   merge_git_clients (git_tcp tcp git)
     (merge_git_clients (git_ssh ~key:ssh_key ~authenticator tcp git)
