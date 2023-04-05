@@ -34,9 +34,12 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
     Lwt.catch (fun () ->
         X509.certificate kv `Default >|= fun cert ->
         Tls.Config.server ~certificates:(`Single cert) ())
-      (function
-        | Failure _ -> Lwt.fail_with "Could not find server.pem and server.key in the <working directory>/tls."
-        | e -> Lwt.fail e)
+      (fun e ->
+         (match e with
+          | Failure f ->
+            Logs.err (fun m -> m "Could not find server.pem and server.key in the <working directory>/tls. %s" f)
+          | e -> Logs.err (fun m -> m "Exception %s while reading certificates" (Printexc.to_string e)));
+         exit Functoria_runtime.argument_error)
 
   (* Redirect to the same address, but in https. *)
   let redirect port request _body =
@@ -119,16 +122,27 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
     match Key_gen.http_port (), Key_gen.https_port () with
     | None, None ->
       Logs.err (fun m -> m "no port provided for neither HTTP nor HTTPS, exiting") ;
-      Lwt.return_unit
+      exit Functoria_runtime.argument_error
     | Some port, None ->
-      let config = config @@ Caldav.Webdav_config.host ~port ~hostname () in
+      let scheme, base_port =
+        if Key_gen.tls_proxy () then "https", 443 else "http", port
+      in
+      let config = config @@ Caldav.Webdav_config.host ~scheme ~port:base_port ~hostname () in
       init_store_for_runtime config >>=
       init_http port config
     | None, Some port ->
+      (if Key_gen.tls_proxy () then begin
+          Logs.err (fun m -> m "Both https port and TLS proxy chosen, please choose only one");
+          exit Functoria_runtime.argument_error
+        end);
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port ~hostname () in
       init_store_for_runtime config >>=
       init_https port config
     | Some http_port, Some https_port ->
+      (if Key_gen.tls_proxy () then begin
+          Logs.err (fun m -> m "Both https port and TLS proxy chosen, please choose only one");
+          exit Functoria_runtime.argument_error
+        end);
       Server_log.info (fun f -> f "redirecting on %d/HTTP to %d/HTTPS" http_port https_port);
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname () in
       init_store_for_runtime config >>= fun store ->

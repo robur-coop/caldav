@@ -33,6 +33,11 @@ let https_port =
   let doc = Key.Arg.info ~doc:"Listening HTTPS port." ["https"] ~docv:"PORT" in
   Key.(create "https_port" Arg.(opt (some int) None doc))
 
+let tls_proxy =
+  let doc = "TLS proxy in front (use https://<hostname> as base url)." in
+  let doc = Key.Arg.info ~doc ["tls-proxy"] in
+  Key.(create "tls-proxy" Arg.(opt bool false doc))
+
 let certs = generic_kv_ro ~key:Key.(value @@ kv_ro ()) "tls"
 let zap = generic_kv_ro ~key:Key.(value @@ kv_ro ()) "caldavzap"
 
@@ -65,7 +70,7 @@ let main =
     package ~min:"0.0.3" "git-kv"
   ] in
   let keys =
-    [ Key.v http_port ; Key.v https_port ;
+    [ Key.v http_port ; Key.v https_port ; Key.v tls_proxy ;
       Key.v admin_password ; Key.v remote ;
       Key.v tofu ; Key.v hostname ;
       Key.v apple_testable ]
