@@ -1106,9 +1106,11 @@ let compute_etag fs ~path =
 let make_dir ?additional_id fs config now acl ?(resourcetype = []) ?(props=[]) dir =
   existing_principals fs config >>= fun ids ->
   let ids = match additional_id with None -> ids | Some id -> id :: ids in
-  if not (principals_exist_for_aces config ids acl) then
+  if not (principals_exist_for_aces config ids acl) then begin
+    Log.err (fun m -> m "make_dir: principals do not exist for aces (ids: %s)"
+                (String.concat ", " ids));
     Lwt.return (Error `Bad_request)
-  else
+  end else
     let propmap =
       Properties.create_dir ~initial_props:props ~resourcetype acl now (Fs.basename (dir :> Webdav_fs.file_or_dir))
     in
@@ -1179,9 +1181,17 @@ let initialize_fs_for_apple_testsuite fs now config =
   Lwt.return_unit
 
 let initialize_fs fs now config =
-  make_dir_if_not_present ~additional_id:"root" fs config now (admin_acl config) (`Dir [config.principals]) >>= fun _ ->
-  make_dir_if_not_present fs config now (calendars_acl config) (`Dir [config.calendars]) >>= fun _ ->
-  Lwt.return_unit
+  let log_err dir = function
+    | Ok () -> Lwt.return_unit
+    | Error `Bad_request ->
+      Log.err (fun m -> m "couldn't create dir %s: bad request" dir);
+      Lwt.fail_with "bad request on creation"
+    | Error `Internal_server_error ->
+      Log.err (fun m -> m "couldn't create dir %s: internal server error" dir);
+      Lwt.fail_with "internal error on creation"
+  in
+  make_dir_if_not_present ~additional_id:"root" fs config now (admin_acl config) (`Dir [config.principals]) >>= log_err config.principals >>= fun () ->
+  make_dir_if_not_present fs config now (calendars_acl config) (`Dir [config.calendars]) >>= log_err config.calendars
 
 let change_user_password fs config ~name ~password ~salt =
   let principal_dir = `Dir [ config.principals ; name ] in
