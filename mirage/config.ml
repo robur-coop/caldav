@@ -6,7 +6,6 @@ let net = generic_stackv4v6 default_network
 (* set ~tls to false to get a plain-http server *)
 let http_srv = cohttp_server @@ conduit_direct ~tls:true net
 
-let certs = generic_kv_ro ~key:Key.(value @@ kv_ro ()) "tls"
 let zap = generic_kv_ro ~key:Key.(value @@ kv_ro ()) "caldavzap"
 
 let enable_monitoring =
@@ -76,10 +75,11 @@ let main =
       package ~min:"0.1.3" "icalendar";
       package ~min:"0.8.7" "fmt";
       package ~min:"0.1.0" "git-kv";
+      package ~min:"9.1.0" ~sublibs:["mirage"] "dns-certify";
     ]
   in
   main ~packages:direct_dependencies "Unikernel.Main"
-    (random @-> pclock @-> git_client @-> kv_ro @-> http @-> kv_ro @-> job)
+    (random @-> time @-> pclock @-> stackv4v6 @-> git_client @-> http @-> kv_ro @-> job)
 
 let he = generic_happy_eyeballs net
 let dns = generic_dns_client net he
@@ -94,5 +94,5 @@ let () =
   register "caldav" [
     optional_syslog default_posix_clock management_stack ;
     optional_monitoring default_time default_posix_clock management_stack ;
-    main $ default_random $ default_posix_clock $ git_client $ certs $ http_srv $ zap
+    main $ default_random $ default_time $ default_posix_clock $ net $ git_client $ http_srv $ zap
   ]
