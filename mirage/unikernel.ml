@@ -6,7 +6,6 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
-
 module K = struct
   (* Command line arguments *)
   open Cmdliner
@@ -46,15 +45,34 @@ module K = struct
     let doc = Arg.info ~doc:"Default interface language for CalDAVZAP. Will be added to the configuration as 'globalInterfaceLanguage=\"VAL\"'" [ "language" ] ~docv:"LANGUAGE" in
     Mirage_runtime.register_arg Arg.(value & opt (some string) None doc)
 
+  let key =
+    Arg.conv ~docv:"HOST:HASH:DATA"
+      Dns.Dnskey.(name_key_of_string,
+                  (fun ppf v -> Fmt.string ppf (name_key_to_string v)))
+
+  let dns_key =
+    let doc = Arg.info ~doc:"nsupdate key (name:type:value,...)" ["dns-key"] in
+    Mirage_runtime.register_arg Arg.(required & opt (some key) None doc)
+
+  let dns_server =
+    let doc = Arg.info ~doc:"dns server IP" ["dns-server"] in
+    Mirage_runtime.register_arg Arg.(required & opt (some ip_address) None doc)
+
+  let dns_port =
+    let doc = Arg.info ~doc:"dns server port" ["dns-port"] in
+    Mirage_runtime.register_arg Arg.(value & opt int 53 doc)
+
+  let key_seed =
+    let doc = Arg.info ~doc:"certificate key seed" ["key-seed"] in
+    Mirage_runtime.register_arg Arg.(required & opt (some string) None doc)
 end
 
-module Main (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
+module Main (Stack : Tcpip.Stack.V4V6) (_ : sig end) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
 
   let author = Lwt.new_key ()
   and user_agent = Lwt.new_key ()
   and http_req = Lwt.new_key ()
 
-  module X509 = Tls_mirage.X509(KEYS)
   module Store = struct
     include Git_kv
     let batch t f =
@@ -68,24 +86,11 @@ module Main (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap 
       in
       change_and_push t ~author ~message f
   end
+
   module Dav_fs = Caldav.Webdav_fs.Make(Store)
   module Dav = Caldav.Webdav_api.Make(Dav_fs)
   module Webdav_server = Caldav.Webdav_server.Make(Dav_fs)(S)
-
-  let tls_init kv =
-    Lwt.catch (fun () ->
-        X509.certificate kv `Default >|= fun cert ->
-        match Tls.Config.server ~certificates:(`Single cert) () with
-        | Error `Msg msg ->
-          Logs.err (fun m -> m "Failed to construct TLS configuration: %s" msg);
-          exit Mirage_runtime.argument_error
-        | Ok tls -> tls)
-      (fun e ->
-         (match e with
-          | Failure f ->
-            Logs.err (fun m -> m "Could not find server.pem and server.key in the <working directory>/tls. %s" f)
-          | e -> Logs.err (fun m -> m "Exception %s while reading certificates" (Printexc.to_string e)));
-         exit Mirage_runtime.argument_error)
+  module Dns = Dns_certify_mirage.Make(Stack)
 
   (* Redirect to the same address, but in https. *)
   let redirect port request _body =
@@ -150,17 +155,40 @@ module Main (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap 
     in
     S.make ~conn_closed ~callback ()
 
-  let start ctx keys http zap =
+  let start stack ctx http zap =
     let dynamic = author, user_agent, http_req in
     let init_http port config store =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
       http (`TCP port) @@ serve dynamic @@ opt_static_file zap @@ Webdav_server.dispatch config store
     in
+    let hostname = K.host () in
     let init_https port config store =
-      tls_init keys >>= fun tls_config ->
-      Server_log.info (fun f -> f "listening on %d/HTTPS" port);
-      let tls = `TLS (tls_config, `TCP port) in
-      http tls @@ serve dynamic @@ opt_static_file zap @@ Webdav_server.dispatch config store
+      let hostname = Domain_name.(host_exn (of_string_exn hostname)) in
+      let rec get_cert () =
+        Dns.retrieve_certificate
+          stack (K.dns_key ())
+          ~hostname ~key_seed:(K.key_seed ())
+          (K.dns_server ()) (K.dns_port ()) >>= function
+        | Error (`Msg m) -> Lwt.fail_with m
+        | Ok certificates ->
+          let valid_until =
+            match fst certificates with
+            | cert :: _ -> snd (X509.Certificate.validity cert)
+            | _ -> failwith "empty certificate chain retrieved"
+          in
+          let certificates = `Single certificates in
+          let expiry =
+            fst (Ptime.Span.to_d_ps (Ptime.diff valid_until (Mirage_ptime.now ())))
+          in
+          let tls_config = Result.get_ok (Tls.Config.server ~certificates ()) in
+          Server_log.info (fun f -> f "listening on %d/HTTPS" port);
+          let tls = `TLS (tls_config, `TCP port) in
+          Lwt.pick [
+            Mirage_sleep.ns (max (Duration.of_hour 1) (Duration.of_day (max 0 (expiry - 7))));
+            http tls @@ serve dynamic @@ opt_static_file zap @@  Webdav_server.dispatch config store
+          ] >>= get_cert
+      in
+      get_cert ()
     in
     let config host =
       Caldav.Webdav_config.config ~do_trust_on_first_use:(K.tofu ()) host
