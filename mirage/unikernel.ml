@@ -6,13 +6,12 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
-module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
+module Main (R : Mirage_random.S) (T : Mirage_time.S) (Clock: Mirage_clock.PCLOCK) (Stack : Tcpip.Stack.V4V6) (_ : sig end) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
 
   let author = Lwt.new_key ()
   and user_agent = Lwt.new_key ()
   and http_req = Lwt.new_key ()
 
-  module X509 = Tls_mirage.X509(KEYS)(Clock)
   module Store = struct
     include Git_kv.Make(Clock)
     let batch t f =
@@ -29,17 +28,7 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
   module Dav_fs = Caldav.Webdav_fs.Make(Clock)(Store)
   module Dav = Caldav.Webdav_api.Make(R)(Clock)(Dav_fs)
   module Webdav_server = Caldav.Webdav_server.Make(R)(Clock)(Dav_fs)(S)
-
-  let tls_init kv =
-    Lwt.catch (fun () ->
-        X509.certificate kv `Default >|= fun cert ->
-        Tls.Config.server ~certificates:(`Single cert) ())
-      (fun e ->
-         (match e with
-          | Failure f ->
-            Logs.err (fun m -> m "Could not find server.pem and server.key in the <working directory>/tls. %s" f)
-          | e -> Logs.err (fun m -> m "Exception %s while reading certificates" (Printexc.to_string e)));
-         exit Functoria_runtime.argument_error)
+  module Dns = Dns_certify_mirage.Make(R)(Clock)(T)(Stack)
 
   (* Redirect to the same address, but in https. *)
   let redirect port request _body =
@@ -98,17 +87,40 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
     in
     S.make ~conn_closed ~callback ()
 
-  let start _random _clock ctx keys http zap =
+  let start _random _time _clock stack ctx http zap =
     let dynamic = author, user_agent, http_req in
     let init_http port config store =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
       http (`TCP port) @@ serve dynamic @@ opt_static_file zap @@ Webdav_server.dispatch config store
     in
+    let hostname = Key_gen.hostname () in
     let init_https port config store =
-      tls_init keys >>= fun tls_config ->
-      Server_log.info (fun f -> f "listening on %d/HTTPS" port);
-      let tls = `TLS (tls_config, `TCP port) in
-      http tls @@ serve dynamic @@ opt_static_file zap @@ Webdav_server.dispatch config store
+      let hostname = Domain_name.(host_exn (of_string_exn hostname)) in
+      let rec get_cert () =
+        Dns.retrieve_certificate
+          stack ~dns_key:(Key_gen.dns_key ())
+          ~hostname ~key_seed:(Key_gen.key_seed ())
+          (Key_gen.dns_server ()) (Key_gen.dns_port ()) >>= function
+        | Error (`Msg m) -> Lwt.fail_with m
+        | Ok certificates ->
+          let valid_until =
+            match fst certificates with
+            | cert :: _ -> snd (X509.Certificate.validity cert)
+            | _ -> failwith "empty certificate chain retrieved"
+          in
+          let certificates = `Single certificates in
+          let expiry =
+            fst (Ptime.Span.to_d_ps (Ptime.diff valid_until (Ptime.v (Clock.now_d_ps ()))))
+          in
+          let tls_config = Tls.Config.server ~certificates () in
+          Server_log.info (fun f -> f "listening on %d/HTTPS" port);
+          let tls = `TLS (tls_config, `TCP port) in
+          Lwt.pick [
+            T.sleep_ns (max (Duration.of_hour 1) (Duration.of_day (max 0 (expiry - 7))));
+            http tls @@ serve dynamic @@ opt_static_file zap @@  Webdav_server.dispatch config store
+          ] >>= get_cert
+      in
+      get_cert ()
     in
     let config host =
       let do_trust_on_first_use = Key_gen.tofu () in
@@ -118,7 +130,6 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
       Git_kv.connect ctx (Key_gen.remote ()) >>= fun store ->
       Dav.connect store config (Key_gen.admin_password ())
     in
-    let hostname = Key_gen.hostname () in
     match Key_gen.http_port (), Key_gen.https_port () with
     | None, None ->
       Logs.err (fun m -> m "no port provided for neither HTTP nor HTTPS, exiting") ;

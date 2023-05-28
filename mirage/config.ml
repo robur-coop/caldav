@@ -25,6 +25,22 @@ let net = generic_stackv4v6 default_network
 (* set ~tls to false to get a plain-http server *)
 let http_srv = cohttp_server @@ conduit_direct ~tls:true net
 
+let dns_key =
+  let doc = Key.Arg.info ~doc:"nsupdate key (name:type:value,...)" ["dns-key"] in
+  Key.(create "dns-key" Arg.(required string doc))
+
+let dns_server =
+  let doc = Key.Arg.info ~doc:"dns server IP" ["dns-server"] in
+  Key.(create "dns-server" Arg.(required ip_address doc))
+
+let dns_port =
+  let doc = Key.Arg.info ~doc:"dns server port" ["dns-port"] in
+  Key.(create "dns-port" Arg.(opt int 53 doc))
+
+let key_seed =
+  let doc = Key.Arg.info ~doc:"certificate key seed" ["key-seed"] in
+  Key.(create "key-seed" Arg.(required string doc))
+
 (* TODO: make it possible to enable and disable schemes without providing a port *)
 let http_port =
   let doc = Key.Arg.info ~doc:"Listening HTTP port." ["http"] ~docv:"PORT" in
@@ -39,7 +55,6 @@ let tls_proxy =
   let doc = Key.Arg.info ~doc ["tls-proxy"] in
   Key.(create "tls-proxy" Arg.(opt bool false doc))
 
-let certs = generic_kv_ro ~key:Key.(value @@ kv_ro ()) "tls"
 let zap = generic_kv_ro ~key:Key.(value @@ kv_ro ()) "caldavzap"
 
 let admin_password =
@@ -133,17 +148,19 @@ let main =
     package "caldav" ;
     package ~min:"0.1.3" "icalendar" ;
     package ~min:"0.8.7" "fmt";
-    package ~min:"0.0.3" "git-kv"
+    package ~min:"0.0.3" "git-kv";
+    package ~min:"5.0.0" ~sublibs:["mirage"] "dns-certify";
   ] in
   let keys =
-    [ Key.v http_port ; Key.v https_port ; Key.v tls_proxy ;
+    [ Key.v dns_key ; Key.v dns_server ; Key.v dns_port ; Key.v key_seed ;
+      Key.v http_port ; Key.v https_port ; Key.v tls_proxy ;
       Key.v admin_password ; Key.v remote ;
       Key.v tofu ; Key.v hostname ;
       Key.v apple_testable ]
   in
   foreign
     ~packages:direct_dependencies ~keys
-    "Unikernel.Main" (random @-> pclock @-> git_client @-> kv_ro @-> http @-> kv_ro @-> job)
+    "Unikernel.Main" (random @-> time @-> pclock @-> stackv4v6 @-> git_client @-> http @-> kv_ro @-> job)
 
 let git_client =
   let dns = generic_dns_client net in
@@ -157,5 +174,5 @@ let () =
   register "caldav" [
     optional_syslog default_posix_clock management_stack ;
     optional_monitoring default_time default_posix_clock management_stack ;
-    main $ default_random $ default_posix_clock $ git_client $ certs $ http_srv $ zap
+    main $ default_random $ default_time $ default_posix_clock $ net $ git_client $ http_srv $ zap
   ]
