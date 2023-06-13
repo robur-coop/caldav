@@ -1190,8 +1190,9 @@ let initialize_fs fs now config =
       Log.err (fun m -> m "couldn't create dir %s: internal server error" dir);
       Lwt.fail_with "internal error on creation"
   in
-  make_dir_if_not_present ~additional_id:"root" fs config now (admin_acl config) (`Dir [config.principals]) >>= log_err config.principals >>= fun () ->
-  make_dir_if_not_present fs config now (calendars_acl config) (`Dir [config.calendars]) >>= log_err config.calendars
+  let additional_id = "/" ^ config.principals ^ "/root/" in
+  make_dir_if_not_present ~additional_id fs config now (admin_acl config) (`Dir [config.principals]) >>= log_err config.principals >>= fun () ->
+  make_dir_if_not_present ~additional_id fs config now (calendars_acl config) (`Dir [config.calendars]) >>= log_err config.calendars
 
 let change_user_password fs config ~name ~password ~salt =
   let principal_dir = `Dir [ config.principals ; name ] in
