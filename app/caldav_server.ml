@@ -54,7 +54,7 @@ let main () =
     Conduit_mirage.with_tls conduit' >>= fun conduit ->
     let resolver = Resolver_lwt_unix.system in
     Store.connect git ~conduit ~author:"caldav" ~resolver ~msg:(fun _ -> "a calendar change") ()
-      "https://github.com/roburio/testcalendar.git" >>= fun fs ->
+      "https://github.com/robur-coop/testcalendar.git" >>= fun fs ->
   (* only for apple test suite *)
   (* initialize_fs_for_apple_testsuite fs now config >>= fun () -> *)
   Dav.initialize_fs fs (now ()) config >>= fun () ->

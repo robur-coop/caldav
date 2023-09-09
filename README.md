@@ -1,6 +1,6 @@
 ## Live test server
 
-A test caldav server is setup at [https://calendar.robur.coop](https://calendar.robur.coop), which is a unikernel pushing to our [calendar git repository](https://git.robur.io/?p=calendar-data.git;a=summary).
+A test caldav server is setup at [https://calendar.robur.coop](https://calendar.robur.coop), which is a unikernel pushing to our [calendar git repository](https://git.robur.coop/robur/calendar.robur.coop-data).
 Please try using "mirage" as user and password either on our test server which serves as well a [CalDavZAP](https://www.inf-it.com/open-source/clients/caldavzap/) user interface or configure our test server in your calendar client (`calendar.robur.coop`).
 You can choose any not-yet-used username and password, an account will be created by caldav (using the "trust on first use" argument described below).
 
@@ -23,7 +23,7 @@ It is recommended to use a custom opam switch:
 
 Now we're ready to compile the CalDAV server. Let's get the code:
 
-    git clone https://github.com/roburio/caldav.git
+    git clone https://github.com/robur-coop/caldav.git
     cd caldav/mirage
     mirage configure // -t xen / -t hvt works as well
     make depend
@@ -193,4 +193,4 @@ Make the calendar `TESTCALENDAR` private, only accessible for the `OWNER`.
 
 ## Vendored ocaml-webmachine
 
-This project contains a vendored [ocaml-webmachine](https://github.com/inhabitedtype/ocaml-webmachine) (developed by Spiros Eliopoulos), using the webdav branch of https://github.com/roburio/ocaml-webmachine in the `ocaml-webmachine` subdirectory (at commit fecaf3dfb9ce10821e86ca07e8bfe09afb1f73d0). The reason is because this version of webmachine has support for PROPFIND, PROPPATCH, REPORT HTTP verbs, as required by wedav. This is installed as `caldav.webmachine` sublibrary.
+This project contains a vendored [ocaml-webmachine](https://github.com/inhabitedtype/ocaml-webmachine) (developed by Spiros Eliopoulos), using the webdav branch of https://github.com/robur-coop/ocaml-webmachine in the `ocaml-webmachine` subdirectory (at commit fecaf3dfb9ce10821e86ca07e8bfe09afb1f73d0). The reason is because this version of webmachine has support for PROPFIND, PROPPATCH, REPORT HTTP verbs, as required by wedav. This is installed as `caldav.webmachine` sublibrary.
