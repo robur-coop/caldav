@@ -28,33 +28,33 @@ let syslog = runtime_arg ~pos:__POS__ "Unikernel.syslog"
 
 let monitoring =
   let connect _ modname = function
-    | [ _; _; stack; _; _ ] ->
+    | [ _; _; stack; name; monitor ] ->
         code ~pos:__POS__
-          "Lwt.return (match %a with| None -> Logs.warn (fun m -> m \"no \
+          "Lwt.return (match %s with| None -> Logs.warn (fun m -> m \"no \
            monitor specified, not outputting statistics\")| Some ip -> \
-           %s.create ip ~hostname:(%a) %s)"
-          Runtime_arg.call monitor modname Runtime_arg.call name stack
+           %s.create ip ~hostname:%s %s)"
+          monitor modname name stack
     | _ -> assert false
   in
   impl
     ~packages:[ package "mirage-monitoring" ]
-    ~runtime_args:[ name; runtime_arg ~pos:__POS__ "Unikernel.monitor" ]
+    ~runtime_args:[ name; monitor ]
     ~connect "Mirage_monitoring.Make"
     (time @-> pclock @-> stackv4v6 @-> job)
 
 let syslog =
   let connect _ modname = function
-    | [ _; stack; _; _ ] ->
+    | [ _; stack; name; syslog ] ->
         code ~pos:__POS__
-          "Lwt.return (match %a with| None -> Logs.warn (fun m -> m \"no \
+          "Lwt.return (match %s with| None -> Logs.warn (fun m -> m \"no \
            syslog specified, dumping on stdout\")| Some ip -> \
-           Logs.set_reporter (%s.create %s ip ~hostname:(%a) ()))"
-          Runtime_arg.call syslog modname stack Runtime_arg.call name
+           Logs.set_reporter (%s.create %s ip ~hostname:%s ()))"
+          syslog modname stack name
     | _ -> assert false
   in
   impl
     ~packages:[ package ~sublibs:[ "mirage" ] ~min:"0.4.0" "logs-syslog" ]
-    ~runtime_args:[ name; runtime_arg ~pos:__POS__ "Unikernel.syslog" ]
+    ~runtime_args:[ name; syslog ]
     ~connect "Logs_syslog_mirage.Udp"
     (pclock @-> stackv4v6 @-> job)
 
