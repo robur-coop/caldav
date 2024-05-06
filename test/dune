@@ -1,4 +1,12 @@
 (test
-  (name test)
-  (libraries alcotest logs.fmt ptime.clock.os caldav lwt.unix mirage-kv-mem mirage-random-test mirage-clock-unix)
-  (package caldav))
+ (name test)
+ (libraries
+  alcotest
+  logs.fmt
+  ptime.clock.os
+  caldav
+  lwt.unix
+  mirage-kv-mem
+  mirage-crypto-rng.unix
+  mirage-clock-unix)
+ (package caldav))

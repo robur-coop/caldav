@@ -130,9 +130,9 @@ module KV_RW = struct
 end
 module Dav_fs = Caldav.Webdav_fs.Make(Pclock)(KV_RW)
 
-module Webdav_server = Caldav.Webdav_server.Make(Mirage_random_test)(Pclock)(Dav_fs)(Http_server)
+module Webdav_server = Caldav.Webdav_server.Make(Mirage_crypto_rng)(Pclock)(Dav_fs)(Http_server)
 
-module Api = Caldav.Webdav_api.Make(Mirage_random_test)(Pclock)(Dav_fs)
+module Api = Caldav.Webdav_api.Make(Mirage_crypto_rng)(Pclock)(Dav_fs)
 
 let header, content, footer =
 {|BEGIN:VCALENDAR
@@ -211,6 +211,7 @@ let ts fs =
 
 let () =
   ignore (Lwt_main.run (
+      Mirage_crypto_rng_lwt.initialize (module Mirage_crypto_rng.Fortuna);
       Logs.set_reporter (Logs_fmt.reporter ~dst:Format.std_formatter ()) ;
       Logs.set_level (Some Logs.Info);
       KV_mem.connect () >>= fun fs ->
