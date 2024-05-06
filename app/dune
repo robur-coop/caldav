@@ -15,5 +15,5 @@
   mirage-clock-unix
   tcpip
   tcpip.stack-socket
-  mirage-random-test
+  mirage-crypto-rng-lwt
   mirage-kv-mem))

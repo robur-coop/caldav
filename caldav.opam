@@ -25,7 +25,6 @@ depends: [
   "dune" {>= "3.12"}
   "alcotest" {with-test & >= "0.8.5"}
   "ounit" {with-test & >= "2.0.0"}
-  "mirage-random-test" {with-test}
   "tcpip" {with-test & >= "3.7.0"}
   "mirage-clock-unix" {with-test & >= "2.0.0"}
   "mirage-kv-mem" {with-test & >= "2.0.0"}
@@ -41,6 +40,7 @@ depends: [
   "cohttp-lwt-unix" {with-test & >= "2.0.0"}
   "mirage-crypto"
   "mirage-crypto-rng"
+  "mirage-crypto-rng-lwt" {with-test & >= "0.11.0"}
   "base64" {>= "3.0.0"}
   "xmlm" {>= "1.3.0"}
   "tyxml" {>= "4.3.0"}

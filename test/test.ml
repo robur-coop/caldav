@@ -6,7 +6,7 @@ module KV_RW = struct
   let batch t f = f t >|= fun r -> Ok r
 end
 module Fs = Caldav.Webdav_fs.Make(Pclock)(KV_RW)
-module Dav = Caldav.Webdav_api.Make(Mirage_random_test)(Pclock)(Fs)
+module Dav = Caldav.Webdav_api.Make(Mirage_crypto_rng)(Pclock)(Fs)
 module Properties = Caldav.Properties
 
 open Caldav.Webdav_config
@@ -2462,4 +2462,5 @@ let tests = [
 let () =
   Logs.set_reporter (Logs_fmt.reporter ());
   Printexc.record_backtrace true;
+  Mirage_crypto_rng_unix.initialize (module Mirage_crypto_rng.Fortuna);
   Alcotest.run "WebDAV tests" tests
