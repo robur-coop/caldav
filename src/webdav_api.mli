@@ -52,4 +52,4 @@ sig
   val connect : state -> config -> string option -> state Lwt.t
 end
 
-module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) : S with type state = Fs.t
+module Make(_ : Mirage_random.S)(_ : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) : S with type state = Fs.t

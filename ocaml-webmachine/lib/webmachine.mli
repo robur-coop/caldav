@@ -398,5 +398,5 @@ module type CLOCK = sig
   val now : unit -> int
 end
 
-module Make(IO:IO)(Clock:CLOCK) : S
+module Make(IO:IO)(_:CLOCK) : S
   with type +'a io = 'a IO.t
