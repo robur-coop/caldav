@@ -20,5 +20,5 @@
   mirage-clock
   mirage-random
   sexplib
-  hex
+  ohex
   metrics))

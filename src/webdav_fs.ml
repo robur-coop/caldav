@@ -223,9 +223,7 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:KV_RW) = struct
     let key = data @@ to_string f_or_d in
     Fs.digest fs key >|= function
     | Error e -> Error e
-    | Ok d ->
-      let `Hex hex = Hex.of_string d in
-      Ok hex
+    | Ok d -> Ok (Ohex.encode d)
 
   (* careful: unsafe_find, unsafe_add *)
   let get_property_map fs f_or_d =
