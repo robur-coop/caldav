@@ -1,3 +1,13 @@
+## v0.2.2 (2024-05-07)
+
+* unikernel: updates to mirage 4.5 (#36 @Julow)
+* unikernel: add tls-proxy parameter
+* unikernel: exit with argument_error on startup errors
+* unikernel: update to logs-syslog 0.4 (no console)
+* initialize_fs: pretend root is around
+* fix unused functor parameters
+* remove mirage-random-test dependency
+
 ## v0.2.1 (2022-12-16)
 
 * Use Mirage-kv 6.0.0 API (#32 @hannesm)
