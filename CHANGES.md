@@ -7,6 +7,7 @@
 * initialize_fs: pretend root is around
 * fix unused functor parameters
 * remove mirage-random-test dependency
+* use ohex instead of hex
 
 ## v0.2.1 (2022-12-16)
 
