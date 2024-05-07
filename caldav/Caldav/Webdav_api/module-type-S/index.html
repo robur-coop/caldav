@@ -1,73 +1,73 @@
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml"><head><title>S (caldav.Caldav.Webdav_api.S)</title><link rel="stylesheet" href="../../../../odoc.css"/><meta charset="utf-8"/><meta name="generator" content="odoc 2.2.0"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><script src="../../../../highlight.pack.js"></script><script>hljs.initHighlightingOnLoad();</script></head><body class="odoc"><nav class="odoc-nav"><a href="../index.html">Up</a> – <a href="../../../index.html">caldav</a> &#x00BB; <a href="../../index.html">Caldav</a> &#x00BB; <a href="../index.html">Webdav_api</a> &#x00BB; S</nav><header class="odoc-preamble"><h1>Module type <code><span>Webdav_api.S</span></code></h1></header><div class="odoc-content"><div class="odoc-spec"><div class="spec type anchored" id="type-state"><a href="#type-state" class="anchor"></a><code><span><span class="keyword">type</span> state</span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-mkcol"><a href="#val-mkcol" class="anchor"></a><code><span><span class="keyword">val</span> mkcol : 
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>S (caldav.Caldav.Webdav_api.S)</title><meta charset="utf-8"/><link rel="stylesheet" href="../../../../odoc.support/odoc.css"/><meta name="generator" content="odoc 2.4.2"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><script src="../../../../odoc.support/highlight.pack.js"></script><script>hljs.initHighlightingOnLoad();</script></head><body class="odoc"><nav class="odoc-nav"><a href="../index.html">Up</a> – <a href="../../../index.html">caldav</a> &#x00BB; <a href="../../index.html">Caldav</a> &#x00BB; <a href="../index.html">Webdav_api</a> &#x00BB; S</nav><header class="odoc-preamble"><h1>Module type <code><span>Webdav_api.S</span></code></h1></header><div class="odoc-content"><div class="odoc-spec"><div class="spec type anchored" id="type-state"><a href="#type-state" class="anchor"></a><code><span><span class="keyword">type</span> state</span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-mkcol"><a href="#val-mkcol" class="anchor"></a><code><span><span class="keyword">val</span> mkcol : 
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
   <span><a href="../../Webdav_config/index.html#type-config">Webdav_config.config</a> <span class="arrow">&#45;&gt;</span></span>
-  <span>path:string <span class="arrow">&#45;&gt;</span></span>
-  <span>user:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">path</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">user</span>:string <span class="arrow">&#45;&gt;</span></span>
   <span><span class="xref-unresolved">Cohttp</span>.Code.meth <span class="arrow">&#45;&gt;</span></span>
   <span><span class="xref-unresolved">Ptime</span>.t <span class="arrow">&#45;&gt;</span></span>
-  <span>data:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">data</span>:string <span class="arrow">&#45;&gt;</span></span>
   <span><span><span>(unit, <span>[ `Bad_request <span>| `Conflict</span> <span><span>| `Forbidden</span> of string</span> ]</span>)</span> <span class="xref-unresolved">Stdlib</span>.result</span>
     <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-propfind"><a href="#val-propfind" class="anchor"></a><code><span><span class="keyword">val</span> propfind : 
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
   <span><a href="../../Webdav_config/index.html#type-config">Webdav_config.config</a> <span class="arrow">&#45;&gt;</span></span>
-  <span>path:string <span class="arrow">&#45;&gt;</span></span>
-  <span>user:string <span class="arrow">&#45;&gt;</span></span>
-  <span>depth:<span>string option</span> <span class="arrow">&#45;&gt;</span></span>
-  <span>data:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">path</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">user</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">depth</span>:<span>string option</span> <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">data</span>:string <span class="arrow">&#45;&gt;</span></span>
   <span><span><span>(string, <span>[&gt; `Bad_request <span><span>| `Forbidden</span> of string</span> <span>| `Property_not_found</span> ]</span>)</span>
     <span class="xref-unresolved">Stdlib</span>.result</span>
     <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-proppatch"><a href="#val-proppatch" class="anchor"></a><code><span><span class="keyword">val</span> proppatch : 
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
   <span><a href="../../Webdav_config/index.html#type-config">Webdav_config.config</a> <span class="arrow">&#45;&gt;</span></span>
-  <span>path:string <span class="arrow">&#45;&gt;</span></span>
-  <span>user:string <span class="arrow">&#45;&gt;</span></span>
-  <span>data:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">path</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">user</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">data</span>:string <span class="arrow">&#45;&gt;</span></span>
   <span><span><span>(string, <span>[&gt; `Bad_request ]</span>)</span> <span class="xref-unresolved">Stdlib</span>.result</span> <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-report"><a href="#val-report" class="anchor"></a><code><span><span class="keyword">val</span> report : 
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
   <span><a href="../../Webdav_config/index.html#type-config">Webdav_config.config</a> <span class="arrow">&#45;&gt;</span></span>
-  <span>path:string <span class="arrow">&#45;&gt;</span></span>
-  <span>user:string <span class="arrow">&#45;&gt;</span></span>
-  <span>data:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">path</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">user</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">data</span>:string <span class="arrow">&#45;&gt;</span></span>
   <span><span><span>(string, <span>[&gt; `Bad_request ]</span>)</span> <span class="xref-unresolved">Stdlib</span>.result</span> <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-write_component"><a href="#val-write_component" class="anchor"></a><code><span><span class="keyword">val</span> write_component : 
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
   <span><a href="../../Webdav_config/index.html#type-config">Webdav_config.config</a> <span class="arrow">&#45;&gt;</span></span>
-  <span>path:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">path</span>:string <span class="arrow">&#45;&gt;</span></span>
   <span><span class="xref-unresolved">Ptime</span>.t <span class="arrow">&#45;&gt;</span></span>
-  <span>content_type:<a href="../index.html#type-content_type">content_type</a> <span class="arrow">&#45;&gt;</span></span>
-  <span>data:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">content_type</span>:<a href="../index.html#type-content_type">content_type</a> <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">data</span>:string <span class="arrow">&#45;&gt;</span></span>
   <span><span><span>(string, <span>[&gt; `Bad_request <span>| `Conflict</span> <span>| `Forbidden</span> <span>| `Internal_server_error</span> ]</span>)</span>
     <span class="xref-unresolved">Stdlib</span>.result</span>
-    <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-delete"><a href="#val-delete" class="anchor"></a><code><span><span class="keyword">val</span> delete : <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span> <span>path:string <span class="arrow">&#45;&gt;</span></span> <span><span class="xref-unresolved">Ptime</span>.t <span class="arrow">&#45;&gt;</span></span> <span>bool <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-read"><a href="#val-read" class="anchor"></a><code><span><span class="keyword">val</span> read : 
+    <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-delete"><a href="#val-delete" class="anchor"></a><code><span><span class="keyword">val</span> delete : <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span> <span><span class="label">path</span>:string <span class="arrow">&#45;&gt;</span></span> <span><span class="xref-unresolved">Ptime</span>.t <span class="arrow">&#45;&gt;</span></span> <span>bool <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-read"><a href="#val-read" class="anchor"></a><code><span><span class="keyword">val</span> read : 
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
-  <span>path:string <span class="arrow">&#45;&gt;</span></span>
-  <span>is_mozilla:bool <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">path</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">is_mozilla</span>:bool <span class="arrow">&#45;&gt;</span></span>
   <span><span><span>(string * <a href="../index.html#type-content_type">content_type</a>, <span>[&gt; `Not_found ]</span>)</span> <span class="xref-unresolved">Stdlib</span>.result</span> <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-access_granted_for_acl"><a href="#val-access_granted_for_acl" class="anchor"></a><code><span><span class="keyword">val</span> access_granted_for_acl : 
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
   <span><a href="../../Webdav_config/index.html#type-config">Webdav_config.config</a> <span class="arrow">&#45;&gt;</span></span>
   <span><span class="xref-unresolved">Cohttp</span>.Code.meth <span class="arrow">&#45;&gt;</span></span>
-  <span>path:string <span class="arrow">&#45;&gt;</span></span>
-  <span>user:string <span class="arrow">&#45;&gt;</span></span>
-  <span>bool <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-last_modified"><a href="#val-last_modified" class="anchor"></a><code><span><span class="keyword">val</span> last_modified : <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span> <span>path:string <span class="arrow">&#45;&gt;</span></span> <span><span>string option</span> <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-compute_etag"><a href="#val-compute_etag" class="anchor"></a><code><span><span class="keyword">val</span> compute_etag : <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span> <span>path:string <span class="arrow">&#45;&gt;</span></span> <span><span>string option</span> <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-verify_auth_header"><a href="#val-verify_auth_header" class="anchor"></a><code><span><span class="keyword">val</span> verify_auth_header : 
+  <span><span class="label">path</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">user</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span>bool <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-last_modified"><a href="#val-last_modified" class="anchor"></a><code><span><span class="keyword">val</span> last_modified : <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span> <span><span class="label">path</span>:string <span class="arrow">&#45;&gt;</span></span> <span><span>string option</span> <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-compute_etag"><a href="#val-compute_etag" class="anchor"></a><code><span><span class="keyword">val</span> compute_etag : <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span> <span><span class="label">path</span>:string <span class="arrow">&#45;&gt;</span></span> <span><span>string option</span> <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-verify_auth_header"><a href="#val-verify_auth_header" class="anchor"></a><code><span><span class="keyword">val</span> verify_auth_header : 
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
   <span><a href="../../Webdav_config/index.html#type-config">Webdav_config.config</a> <span class="arrow">&#45;&gt;</span></span>
   <span>string <span class="arrow">&#45;&gt;</span></span>
   <span><span><span>(string, <span>[&gt; <span>`Msg of string</span> <span><span>| `Unknown_user</span> of string * string</span> ]</span>)</span>
     <span class="xref-unresolved">Stdlib</span>.result</span>
     <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-make_user"><a href="#val-make_user" class="anchor"></a><code><span><span class="keyword">val</span> make_user : 
-  <span>?props:<span><span>(<a href="../../Webdav_xml/index.html#type-fqname">Webdav_xml.fqname</a> * <a href="../../Properties/index.html#type-property">Properties.property</a>)</span> list</span> <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="optlabel">?props</span>:<span><span>(<a href="../../Webdav_xml/index.html#type-fqname">Webdav_xml.fqname</a> * <a href="../../Properties/index.html#type-property">Properties.property</a>)</span> list</span> <span class="arrow">&#45;&gt;</span></span>
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
   <span><span class="xref-unresolved">Ptime</span>.t <span class="arrow">&#45;&gt;</span></span>
   <span><a href="../../Webdav_config/index.html#type-config">Webdav_config.config</a> <span class="arrow">&#45;&gt;</span></span>
-  <span>name:string <span class="arrow">&#45;&gt;</span></span>
-  <span>password:string <span class="arrow">&#45;&gt;</span></span>
-  <span>salt:<span class="xref-unresolved">Cstruct</span>.t <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">name</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">password</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">salt</span>:<span class="xref-unresolved">Cstruct</span>.t <span class="arrow">&#45;&gt;</span></span>
   <span><span><span>(<span class="xref-unresolved">Uri</span>.t, <span>[&gt; `Conflict <span>| `Internal_server_error</span> ]</span>)</span> <span class="xref-unresolved">Stdlib</span>.result</span> <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-change_user_password"><a href="#val-change_user_password" class="anchor"></a><code><span><span class="keyword">val</span> change_user_password : 
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
   <span><a href="../../Webdav_config/index.html#type-config">Webdav_config.config</a> <span class="arrow">&#45;&gt;</span></span>
-  <span>name:string <span class="arrow">&#45;&gt;</span></span>
-  <span>password:string <span class="arrow">&#45;&gt;</span></span>
-  <span>salt:<span class="xref-unresolved">Cstruct</span>.t <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">name</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">password</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">salt</span>:<span class="xref-unresolved">Cstruct</span>.t <span class="arrow">&#45;&gt;</span></span>
   <span><span><span>(unit, <span>[&gt; `Internal_server_error ]</span>)</span> <span class="xref-unresolved">Stdlib</span>.result</span> <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-delete_user"><a href="#val-delete_user" class="anchor"></a><code><span><span class="keyword">val</span> delete_user : 
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
   <span><a href="../../Webdav_config/index.html#type-config">Webdav_config.config</a> <span class="arrow">&#45;&gt;</span></span>
@@ -82,13 +82,13 @@
   <span><span><span>(<span class="xref-unresolved">Uri</span>.t, <span>[&gt; `Conflict <span>| `Internal_server_error</span> ]</span>)</span> <span class="xref-unresolved">Stdlib</span>.result</span> <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-enroll"><a href="#val-enroll" class="anchor"></a><code><span><span class="keyword">val</span> enroll : 
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
   <span><a href="../../Webdav_config/index.html#type-config">Webdav_config.config</a> <span class="arrow">&#45;&gt;</span></span>
-  <span>member:string <span class="arrow">&#45;&gt;</span></span>
-  <span>group:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">member</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">group</span>:string <span class="arrow">&#45;&gt;</span></span>
   <span><span><span>(unit, <span>[&gt; `Conflict <span>| `Internal_server_error</span> ]</span>)</span> <span class="xref-unresolved">Stdlib</span>.result</span> <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-resign"><a href="#val-resign" class="anchor"></a><code><span><span class="keyword">val</span> resign : 
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
   <span><a href="../../Webdav_config/index.html#type-config">Webdav_config.config</a> <span class="arrow">&#45;&gt;</span></span>
-  <span>member:string <span class="arrow">&#45;&gt;</span></span>
-  <span>group:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">member</span>:string <span class="arrow">&#45;&gt;</span></span>
+  <span><span class="label">group</span>:string <span class="arrow">&#45;&gt;</span></span>
   <span><span><span>(unit, <span>[&gt; `Conflict <span>| `Internal_server_error</span> ]</span>)</span> <span class="xref-unresolved">Stdlib</span>.result</span> <span class="xref-unresolved">Lwt</span>.t</span></span></code></div></div><div class="odoc-spec"><div class="spec value anchored" id="val-replace_group_members"><a href="#val-replace_group_members" class="anchor"></a><code><span><span class="keyword">val</span> replace_group_members : 
   <span><a href="#type-state">state</a> <span class="arrow">&#45;&gt;</span></span>
   <span><a href="../../Webdav_config/index.html#type-config">Webdav_config.config</a> <span class="arrow">&#45;&gt;</span></span>
