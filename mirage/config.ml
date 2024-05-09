@@ -11,7 +11,7 @@ let zap = generic_kv_ro ~key:Key.(value @@ kv_ro ()) "caldavzap"
 
 let enable_monitoring =
   let doc = Key.Arg.info
-      ~doc:"Enable monitoring (only available for solo5 targets)"
+      ~doc:"Enable monitoring (syslog, metrics to influx, log level, statmemprof tracing)"
       [ "enable-monitoring" ]
   in
   Key.(create "enable-monitoring" Arg.(flag doc))
@@ -22,18 +22,17 @@ let management_stack =
     (generic_stackv4v6 ~group:"management" (netif ~group:"management" "management"))
     net
 
-let name = runtime_arg ~pos:__POS__ "Unikernel.hostname"
-let monitor = runtime_arg ~pos:__POS__ "Unikernel.monitor"
-let syslog = runtime_arg ~pos:__POS__ "Unikernel.syslog"
+let name = runtime_arg ~pos:__POS__ "Unikernel.K.hostname"
 
 let monitoring =
+  let monitor = Runtime_arg.(v (monitor None)) in
   let connect _ modname = function
-    | [ _; _; stack; name; monitor ] ->
-        code ~pos:__POS__
-          "Lwt.return (match %s with| None -> Logs.warn (fun m -> m \"no \
-           monitor specified, not outputting statistics\")| Some ip -> \
-           %s.create ip ~hostname:%s %s)"
-          monitor modname name stack
+    | [ _ ; _ ; stack ; name ; monitor ] ->
+      code ~pos:__POS__
+        "Lwt.return (match %s with\
+         | None -> Logs.warn (fun m -> m \"no monitor specified, not outputting statistics\")\
+         | Some ip -> %s.create ip ~hostname:%s %s)"
+        monitor modname name stack
     | _ -> assert false
   in
   impl
@@ -43,13 +42,14 @@ let monitoring =
     (time @-> pclock @-> stackv4v6 @-> job)
 
 let syslog =
+  let syslog = Runtime_arg.(v (syslog None)) in
   let connect _ modname = function
-    | [ _; stack; name; syslog ] ->
-        code ~pos:__POS__
-          "Lwt.return (match %s with| None -> Logs.warn (fun m -> m \"no \
-           syslog specified, dumping on stdout\")| Some ip -> \
-           Logs.set_reporter (%s.create %s ip ~hostname:%s ()))"
-          syslog modname stack name
+    | [ _ ; stack ; name ; syslog ] ->
+      code ~pos:__POS__
+        "Lwt.return (match %s with\
+         | None -> Logs.warn (fun m -> m \"no syslog specified, dumping on stdout\")\
+         | Some ip -> Logs.set_reporter (%s.create %s ip ~hostname:%s ()))"
+        syslog modname stack name
     | _ -> assert false
   in
   impl
@@ -79,33 +79,44 @@ let main =
     ]
   in
   let runtime_args =
-    [
-      runtime_arg ~pos:__POS__ "Unikernel.http_port";
-      runtime_arg ~pos:__POS__ "Unikernel.https_port";
-      runtime_arg ~pos:__POS__ "Unikernel.tls_proxy";
-      runtime_arg ~pos:__POS__ "Unikernel.admin_password";
-      runtime_arg ~pos:__POS__ "Unikernel.remote";
-      runtime_arg ~pos:__POS__ "Unikernel.tofu";
-      runtime_arg ~pos:__POS__ "Unikernel.hostname";
-      runtime_arg ~pos:__POS__ "Unikernel.apple_testable";
-    ]
+    [ runtime_arg ~pos:__POS__ "Unikernel.K.setup" ]
   in
   main ~packages:direct_dependencies ~runtime_args "Unikernel.Main"
     (random @-> pclock @-> git_client @-> kv_ro @-> http @-> kv_ro @-> job)
+
+let ssh_key =
+  Runtime_arg.create ~pos:__POS__ ~name:"ssh_key"
+    {|let open Cmdliner in
+      let doc = Arg.info ~doc:"Private ssh key (rsa:<seed> or ed25519:<b64-key>)." ["ssh-key"] in
+      Arg.(value & opt (some string) None doc)|}
+
+let ssh_password =
+  Runtime_arg.create ~pos:__POS__ ~name:"ssh_password"
+    {|let open Cmdliner in
+     let doc = Arg.info ~doc:"The private SSH password." [ "ssh-password" ] in
+      Arg.(value & opt (some string) None doc)|}
+
+let ssh_authenticator =
+  Runtime_arg.create ~pos:__POS__ ~name:"ssh_authenticator"
+    {|let open Cmdliner in
+     let doc = Arg.info ~doc:"SSH authenticator." ["authenticator"] in
+      Arg.(value & opt (some string) None doc)|}
+
+let tls_authenticator =
+  Runtime_arg.create ~pos:__POS__ ~name:"tls_authenticator"
+    {|let open Cmdliner in
+      let doc = "TLS host authenticator. See git_http in lib/mirage/mirage.mli for a description of the format."
+     in
+     let doc = Arg.info ~doc ["tls-authenticator"] in
+     Arg.(value & opt (some string) None doc)|}
 
 let git_client =
   let dns = generic_dns_client net in
   let git = mimic_happy_eyeballs net dns (generic_happy_eyeballs net dns) in
   let tcp = tcpv4v6_of_stackv4v6 net in
-  let key = Runtime_arg.create ~pos:__POS__ "Unikernel.ssh_key"
-  and password = Runtime_arg.create ~pos:__POS__ "Unikernel.ssh_password"
-  and authenticator = Runtime_arg.create ~pos:__POS__ "Unikernel.authenticator"
-  and tls_authenticator =
-    Runtime_arg.create ~pos:__POS__ "Unikernel.tls_authenticator"
-  in
   merge_git_clients (git_tcp tcp git)
     (merge_git_clients
-       (git_ssh ~key ~password ~authenticator tcp git)
+       (git_ssh ~key:ssh_key ~password:ssh_password ~authenticator:ssh_authenticator tcp git)
        (git_http ~authenticator:tls_authenticator tcp git))
 
 let () =
