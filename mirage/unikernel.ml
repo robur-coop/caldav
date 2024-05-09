@@ -6,71 +6,60 @@ module Server_log = (val Logs.src_log server_src : Logs.LOG)
 let access_src = Logs.Src.create "http.access" ~doc:"HTTP server access log"
 module Access_log = (val Logs.src_log access_src : Logs.LOG)
 
-(* Command line arguments *)
 
-open Cmdliner
-open Mirage_runtime_network.Arg
+module K = struct
+  (* Command line arguments *)
+  open Cmdliner
+  open Mirage_runtime_network.Arg
 
-let ssh_key =
-  let doc = Arg.info ~doc:"Private ssh key (rsa:<seed> or ed25519:<b64-key>)." ["ssh-key"] in
-  Arg.(value & (opt (some string) None doc))
+  (* TODO: make it possible to enable and disable schemes without providing a port *)
+  let http_port =
+    let doc = Arg.info ~doc:"Listening HTTP port." ["http"] ~docv:"PORT" in
+    Arg.(value & opt (some int) None doc)
 
-let ssh_password =
-  let doc = Arg.info ~doc:"The private SSH password." [ "ssh-password" ] in
-  Arg.(value & (opt (some string) None doc))
+  let https_port =
+    let doc = Arg.info ~doc:"Listening HTTPS port." ["https"] ~docv:"PORT" in
+    Arg.(value & opt (some int) None doc)
 
-let authenticator =
-  let doc = Arg.info ~doc:"Authenticator for SSH." ["authenticator"] in
-  Arg.(value & (opt (some string) None doc))
+  let tls_proxy =
+    let doc = "TLS proxy in front (use https://<hostname> as base url)." in
+    let doc = Arg.info ~doc ["tls-proxy"] in
+    Arg.(value & flag doc)
 
-let tls_authenticator =
-  (* this will not look the same in the help printout *)
-  let doc = "TLS host authenticator. See git_http in lib/mirage/mirage.mli for a description of the format."
-  in
-  let doc = Arg.info ~doc ["tls-authenticator"] in
-  Arg.(value & (opt (some string) None doc))
+  let admin_password =
+    let doc = Arg.info ~doc:"Password for the administrator." ["admin-password"] ~docv:"STRING" in
+    Arg.(value & opt (some string) None doc)
 
-(* TODO: make it possible to enable and disable schemes without providing a port *)
-let http_port =
-  let doc = Arg.info ~doc:"Listening HTTP port." ["http"] ~docv:"PORT" in
-  Arg.(value & (opt (some int) None doc))
+  let remote =
+    let doc = Arg.info ~doc:"Location of calendar data. Use suffix #foo to specify branch 'foo'." [ "remote" ] ~docv:"REMOTE" in
+    Arg.(required & opt (some string) None doc)
 
-let https_port =
-  let doc = Arg.info ~doc:"Listening HTTPS port." ["https"] ~docv:"PORT" in
-  Arg.(value & (opt (some int) None doc))
+  let tofu =
+    let doc = Arg.info ~doc:"If a user does not exist, create them and give them a new calendar." [ "tofu" ] in
+    Arg.(value & flag doc)
 
-let tls_proxy =
-  let doc = "TLS proxy in front (use https://<hostname> as base url)." in
-  let doc = Arg.info ~doc ["tls-proxy"] in
-  Arg.(value & (opt bool false doc))
+  let hostname =
+    let doc = Arg.info ~doc:"Hostname to use." [ "host"; "name" ] ~docv:"STRING" in
+    Arg.(required & opt (some string) None doc)
 
-let admin_password =
-  let doc = Arg.info ~doc:"Password for the administrator." ["admin-password"] ~docv:"STRING" in
-  Arg.(value & (opt (some string) None doc))
+  type t = {
+      http_port : int option;
+      https_port : int option;
+      tls_proxy : bool;
+      admin_password : string option;
+      remote : string;
+      tofu : bool;
+      hostname : string;
+    }
 
-let remote =
-  let doc = Arg.info ~doc:"Location of calendar data. Use suffix #foo to specify branch 'foo'." [ "remote" ] ~docv:"REMOTE" in
-  Arg.(required & (opt (some string) None doc))
-
-let tofu =
-  let doc = Arg.info ~doc:"If a user does not exist, create them and give them a new calendar." [ "tofu" ] in
-  Arg.(value & (flag doc))
-
-let hostname =
-  let doc = Arg.info ~doc:"Hostname to use." [ "host"; "name" ] ~docv:"STRING" in
-  Arg.(required & (opt (some string) None doc))
-
-let apple_testable =
-  let doc = Arg.info ~doc:"Configure the server to use with Apple CCS CalDAVtester." [ "apple-testable" ] in
-  Arg.(value & (flag doc))
-
-let monitor =
-  let doc = Arg.info ~doc:"monitor host IP" ["monitor"] in
-  Arg.(value & (opt (some ip_address) None doc))
-
-let syslog =
-  let doc = Arg.info ~doc:"syslog host IP" ["syslog"] in
-  Arg.(value & (opt (some ip_address) None doc))
+  let setup =
+    Term.(const(fun http_port https_port tls_proxy admin_password remote
+                 tofu hostname ->
+              { http_port; https_port; tls_proxy; admin_password; remote;
+                tofu; hostname })
+            $ http_port $ https_port $ tls_proxy $ admin_password $ remote $
+            tofu $ hostname)
+end
 
 module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
 
@@ -164,8 +153,7 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
     in
     S.make ~conn_closed ~callback ()
 
-  let start _random _clock ctx keys http zap
-      http_port https_port tls_proxy admin_password remote tofu hostname _apple_testable =
+  let start _random _clock ctx keys http zap arg =
     let dynamic = author, user_agent, http_req in
     let init_http port config store =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
@@ -178,38 +166,38 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
       http tls @@ serve dynamic @@ opt_static_file zap @@ Webdav_server.dispatch config store
     in
     let config host =
-      Caldav.Webdav_config.config ~do_trust_on_first_use:tofu host
+      Caldav.Webdav_config.config ~do_trust_on_first_use:arg.K.tofu host
     in
     let init_store_for_runtime config =
-      Git_kv.connect ctx remote >>= fun store ->
-      Dav.connect store config admin_password
+      Git_kv.connect ctx arg.remote >>= fun store ->
+      Dav.connect store config arg.admin_password
     in
-    match http_port, https_port with
+    match arg.http_port, arg.https_port with
     | None, None ->
       Logs.err (fun m -> m "no port provided for neither HTTP nor HTTPS, exiting") ;
       exit Functoria_runtime.argument_error
     | Some port, None ->
       let scheme, base_port =
-        if tls_proxy then "https", 443 else "http", port
+        if arg.tls_proxy then "https", 443 else "http", port
       in
-      let config = config @@ Caldav.Webdav_config.host ~scheme ~port:base_port ~hostname () in
+      let config = config @@ Caldav.Webdav_config.host ~scheme ~port:base_port ~hostname:arg.hostname () in
       init_store_for_runtime config >>=
       init_http port config
     | None, Some port ->
-      (if tls_proxy then begin
+      (if arg.tls_proxy then begin
           Logs.err (fun m -> m "Both https port and TLS proxy chosen, please choose only one");
           exit Functoria_runtime.argument_error
         end);
-      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port ~hostname () in
+      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port ~hostname:arg.hostname () in
       init_store_for_runtime config >>=
       init_https port config
     | Some http_port, Some https_port ->
-      (if tls_proxy then begin
+      (if arg.tls_proxy then begin
           Logs.err (fun m -> m "Both https port and TLS proxy chosen, please choose only one");
           exit Functoria_runtime.argument_error
         end);
       Server_log.info (fun f -> f "redirecting on %d/HTTP to %d/HTTPS" http_port https_port);
-      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname () in
+      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname:arg.hostname () in
       init_store_for_runtime config >>= fun store ->
       Lwt.pick [
         http (`TCP http_port) @@ serve dynamic @@ redirect https_port ;
