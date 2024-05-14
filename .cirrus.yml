@@ -8,7 +8,6 @@ caldav_unikernel_task:
   configure_script: eval `opam env` && cd mirage && mirage configure -t hvt
   depend_script: eval `opam env` && cd mirage && gmake depend
   copy_script: rm -rf mirage/duniverse/caldav/* && cp -R dune-project caldav.opam src ocaml-webmachine mirage/duniverse/caldav/
-  temp_script: rm -rf mirage/duniverse/ohex && eval `opam env` && cd mirage/duniverse && opam source ohex
   build_script: eval `opam env` && cd mirage && gmake build
   client_artifacts:
     path: mirage/dist/caldav.hvt
