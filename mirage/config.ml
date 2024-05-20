@@ -85,25 +85,25 @@ let main =
     (random @-> pclock @-> git_client @-> kv_ro @-> http @-> kv_ro @-> job)
 
 let ssh_key =
-  Runtime_arg.create ~pos:__POS__ ~name:"ssh_key"
+  Runtime_arg.create ~pos:__POS__
     {|let open Cmdliner in
       let doc = Arg.info ~doc:"Private ssh key (rsa:<seed> or ed25519:<b64-key>)." ["ssh-key"] in
       Arg.(value & opt (some string) None doc)|}
 
 let ssh_password =
-  Runtime_arg.create ~pos:__POS__ ~name:"ssh_password"
+  Runtime_arg.create ~pos:__POS__
     {|let open Cmdliner in
      let doc = Arg.info ~doc:"The private SSH password." [ "ssh-password" ] in
       Arg.(value & opt (some string) None doc)|}
 
 let ssh_authenticator =
-  Runtime_arg.create ~pos:__POS__ ~name:"ssh_authenticator"
+  Runtime_arg.create ~pos:__POS__
     {|let open Cmdliner in
      let doc = Arg.info ~doc:"SSH authenticator." ["authenticator"] in
       Arg.(value & opt (some string) None doc)|}
 
 let tls_authenticator =
-  Runtime_arg.create ~pos:__POS__ ~name:"tls_authenticator"
+  Runtime_arg.create ~pos:__POS__
     {|let open Cmdliner in
       let doc = "TLS host authenticator. See git_http in lib/mirage/mirage.mli for a description of the format."
      in
