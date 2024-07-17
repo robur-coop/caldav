@@ -1,4 +1,4 @@
-(* mirage >= 4.5.0 & < 4.6.0 *)
+(* mirage >= 4.6.0 & < 4.7.0 *)
 open Mirage
 
 let net = generic_stackv4v6 default_network
@@ -110,9 +110,11 @@ let tls_authenticator =
      let doc = Arg.info ~doc ["tls-authenticator"] in
      Arg.(value & opt (some string) None doc)|}
 
+let he = generic_happy_eyeballs net
+let dns = generic_dns_client net he
+
 let git_client =
-  let dns = generic_dns_client net in
-  let git = mimic_happy_eyeballs net dns (generic_happy_eyeballs net dns) in
+  let git = mimic_happy_eyeballs net he dns in
   let tcp = tcpv4v6_of_stackv4v6 net in
   merge_git_clients (git_tcp tcp git)
     (merge_git_clients
