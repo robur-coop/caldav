@@ -61,7 +61,7 @@ module K = struct
             tofu $ hostname)
 end
 
-module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
+module Main (R : Mirage_crypto_rng_mirage.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
 
   let author = Lwt.new_key ()
   and user_agent = Lwt.new_key ()
@@ -88,13 +88,17 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
   let tls_init kv =
     Lwt.catch (fun () ->
         X509.certificate kv `Default >|= fun cert ->
-        Tls.Config.server ~certificates:(`Single cert) ())
+        match Tls.Config.server ~certificates:(`Single cert) () with
+        | Error `Msg msg ->
+          Logs.err (fun m -> m "Failed to construct TLS configuration: %s" msg);
+          exit Mirage_runtime.argument_error
+        | Ok tls -> tls)
       (fun e ->
          (match e with
           | Failure f ->
             Logs.err (fun m -> m "Could not find server.pem and server.key in the <working directory>/tls. %s" f)
           | e -> Logs.err (fun m -> m "Exception %s while reading certificates" (Printexc.to_string e)));
-         exit Functoria_runtime.argument_error)
+         exit Mirage_runtime.argument_error)
 
   (* Redirect to the same address, but in https. *)
   let redirect port request _body =
@@ -175,7 +179,7 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
     match arg.http_port, arg.https_port with
     | None, None ->
       Logs.err (fun m -> m "no port provided for neither HTTP nor HTTPS, exiting") ;
-      exit Functoria_runtime.argument_error
+      exit Mirage_runtime.argument_error
     | Some port, None ->
       let scheme, base_port =
         if arg.tls_proxy then "https", 443 else "http", port
@@ -186,7 +190,7 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
     | None, Some port ->
       (if arg.tls_proxy then begin
           Logs.err (fun m -> m "Both https port and TLS proxy chosen, please choose only one");
-          exit Functoria_runtime.argument_error
+          exit Mirage_runtime.argument_error
         end);
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port ~hostname:arg.hostname () in
       init_store_for_runtime config >>=
@@ -194,7 +198,7 @@ module Main (R : Mirage_random.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KE
     | Some http_port, Some https_port ->
       (if arg.tls_proxy then begin
           Logs.err (fun m -> m "Both https port and TLS proxy chosen, please choose only one");
-          exit Functoria_runtime.argument_error
+          exit Mirage_runtime.argument_error
         end);
       Server_log.info (fun f -> f "redirecting on %d/HTTP to %d/HTTPS" http_port https_port);
       let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname:arg.hostname () in
