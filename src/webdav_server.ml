@@ -108,7 +108,7 @@ module type Server = sig
     (Cohttp.Response.t * Cohttp_lwt.Body.t) Lwt.t
 end
 
-module Make (R : Mirage_random.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.S) (S: Server) = struct
+module Make (R : Mirage_crypto_rng_mirage.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.S) (S: Server) = struct
 
   module WmClock = struct
     let now () =

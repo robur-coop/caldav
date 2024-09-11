@@ -116,7 +116,7 @@ let () =  Lwt_main.run (main ())
 
 
 open Lwt.Infix
-open OUnit
+open OUnit2
 open Cohttp
 open Cohttp_lwt_unix_test
 

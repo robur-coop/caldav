@@ -1232,12 +1232,12 @@ let mkcol_success () =
         Properties.create_dir ~resourcetype acl now "Special Resource"
       in
       let properties = Properties.create_dir allow_all_acl now "home" in
-      Dav.make_user res_fs now config ~name:"testuser" ~password:"abc" ~salt:Cstruct.empty >>= fun _ ->
+      Dav.make_user res_fs now config ~name:"testuser" ~password:"abc" ~salt:"" >>= fun _ ->
       Fs.mkdir res_fs (`Dir ["home"]) properties >>= fun _ ->
       Fs.mkdir res_fs (`Dir [ "home" ; "special" ]) props >>= fun _ ->
       KV_mem.connect () >>= fun fs ->
       Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
-      Dav.make_user fs now config ~name:"testuser" ~password:"abc" ~salt:Cstruct.empty >>= fun _ ->
+      Dav.make_user fs now config ~name:"testuser" ~password:"abc" ~salt:"" >>= fun _ ->
       Dav.mkcol fs config ~path:"home/special/" ~user:"testuser" (`Other "MKCOL") now ~data:body >|= function
       | Error e -> (res_fs, Error e)
       | Ok () -> (res_fs, Ok fs))
@@ -1361,7 +1361,7 @@ let make_user () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok uri ->
       let test_url = Uri.of_string "/principals/test/" in
@@ -1373,10 +1373,10 @@ let make_user_same_name () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
-      Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+      Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
       | Error `Conflict -> Lwt.return_unit
       | Error _ -> invalid_arg "expected a conflict, got a different error"
       | Ok _ -> invalid_arg "expected a conflict, got ok")
@@ -1386,13 +1386,13 @@ let make_user_delete_make () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
       Dav.delete_user fs config "test" >>= function
       | Error _ -> invalid_arg "expected to succeed deleting a freshly created user"
       | Ok () ->
-        Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+        Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
         | Error _ -> invalid_arg "expected creating a user to succeed"
         | Ok uri ->
           let test_url = Uri.of_string "/principals/test/" in
@@ -1465,7 +1465,7 @@ let make_group () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
       Dav.make_group fs now config "testgroup" ["test"] >>= function
@@ -1480,7 +1480,7 @@ let make_group_conflict () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
       Dav.make_group fs now config "test" [] >>= function
@@ -1513,10 +1513,10 @@ let replace_group_members_one () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
-      Dav.make_user fs now config ~name:"test2" ~password:"foo" ~salt:Cstruct.empty >>= function
+      Dav.make_user fs now config ~name:"test2" ~password:"foo" ~salt:"" >>= function
       | Error _ -> invalid_arg "expected make_user to succeed"
       | Ok _ ->
         Dav.make_group fs now config "testgroup" ["test"] >>= function
@@ -1531,7 +1531,7 @@ let replace_group_members_two () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
       Dav.make_group fs now config "testgroup" ["test"] >>= function
@@ -1566,7 +1566,7 @@ let make_group_and_enroll () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
       Dav.make_group fs now config "testgroup" [] >>= function
@@ -1606,7 +1606,7 @@ let make_group_and_resign () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
       Dav.make_group fs now config "testgroup" ["test"] >>= function
@@ -1623,7 +1623,7 @@ let make_group_and_resign_not_member () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
       Dav.make_group fs now config "testgroup" [] >>= function
@@ -1640,7 +1640,7 @@ let make_group_and_resign_not_existing_group () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
       Dav.resign fs config ~member:"test" ~group:"testgroup" >>= function
@@ -1672,7 +1672,7 @@ let make_group_and_resign_not_a_group () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
       Dav.resign fs config ~member:"test" ~group:"test" >>= function
@@ -1684,7 +1684,7 @@ let delete_group_fine () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
       Dav.make_group fs now config "testgroup" ["test"] >>= function
@@ -1708,7 +1708,7 @@ let delete_group_is_a_user () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
       Dav.delete_group fs config "test" >>= function
@@ -1720,7 +1720,7 @@ let write_calendar_event () =
     let open Lwt.Infix in
     KV_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
-    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
     | Ok _ ->
       let data = {|BEGIN:VCALENDAR
@@ -2271,7 +2271,7 @@ let default_group () =
     let initial_props = [ ((Xml.robur_ns, "default_groups"), robur_principal) ] in
     let dir_props = Properties.create_dir ~initial_props [] creation_time "Special Resource" in
     Fs.write_property_map fs (`Dir [config.principals]) dir_props >>= fun _ ->
-    Dav.make_user fs creation_time config ~name:"user1" ~password:"foo" ~salt:Cstruct.empty >>= function
+    Dav.make_user fs creation_time config ~name:"user1" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "user already exists"
     | Ok resource ->
       (* check that resource is user1*)
@@ -2317,7 +2317,7 @@ let proppatch_acl_existing () =
     KV_mem.connect () >>= fun fs ->
     let properties = Properties.create_dir allow_all_acl now "home" in
     Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
-    Dav.make_user fs now config ~name:"testuser" ~password:"abc" ~salt:Cstruct.empty >>= fun _ ->
+    Dav.make_user fs now config ~name:"testuser" ~password:"abc" ~salt:"" >>= fun _ ->
     Dav.proppatch fs config ~path:"home" ~user:"testuser" ~data:body >|= function
     | Error _ -> invalid_arg "expected proppatch to succeed (acl existing principal)"
     | Ok _ -> ())

@@ -34,9 +34,9 @@ sig
 
   val verify_auth_header : state -> Webdav_config.config -> string -> (string, [> `Msg of string | `Unknown_user of string * string ]) result Lwt.t
 
-  val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:Cstruct.t ->
+  val make_user : ?props:(Webdav_xml.fqname * Properties.property) list -> state -> Ptime.t -> config -> name:string -> password:string -> salt:string ->
     (Uri.t, [> `Conflict | `Internal_server_error ]) result Lwt.t
-  val change_user_password : state -> config -> name:string -> password:string -> salt:Cstruct.t -> (unit, [> `Internal_server_error ]) result Lwt.t
+  val change_user_password : state -> config -> name:string -> password:string -> salt:string -> (unit, [> `Internal_server_error ]) result Lwt.t
   val delete_user : state -> config -> string -> (unit, [> `Internal_server_error | `Not_found | `Conflict ]) result Lwt.t
 
   val make_group : state -> Ptime.t -> config -> string -> string list -> (Uri.t, [> `Conflict | `Internal_server_error ]) result Lwt.t
@@ -48,7 +48,7 @@ sig
   val initialize_fs : state -> Ptime.t -> config -> unit Lwt.t
   val initialize_fs_for_apple_testsuite : state -> Ptime.t -> config -> unit Lwt.t
 
-  val generate_salt : unit -> Cstruct.t
+  val generate_salt : unit -> string
 
   val connect : state -> config -> string option -> state Lwt.t
 
@@ -57,7 +57,7 @@ end
 let src = Logs.Src.create "webdav.robur.io" ~doc:"webdav api logs"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) = struct
+module Make(R : Mirage_crypto_rng_mirage.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) = struct
   open Lwt.Infix
 
   type state = Fs.t
@@ -1053,10 +1053,10 @@ module Make(R : Mirage_random.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) =
 
   (* moved from Caldav_server *)
 
-let base64_encode data = Base64.encode_string @@ Cstruct.to_string data
+let base64_encode data = Base64.encode_string data
 
 let hash_password password salt =
-  base64_encode @@ Mirage_crypto.Hash.SHA256.digest @@ Cstruct.of_string (salt ^ "-" ^ password)
+  base64_encode @@ Digestif.SHA256.(to_raw_string (digestv_string [ salt ; "-" ; password ]))
 
 let verify_auth_header fs config v =
   let basic = "Basic " in
