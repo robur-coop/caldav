@@ -1,3 +1,9 @@
+## v0.2.3 (2025-10-12)
+
+* update to mirage-crypto 1.0 changes, remove mirage-random dependency
+  (#40 @hannesm)
+* unikernel: update to mirage 4.7 (#37 @dinosaure, #40 @hannesm)
+
 ## v0.2.2 (2024-05-07)
 
 * unikernel: updates to mirage 4.5 (#36 @Julow)
