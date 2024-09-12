@@ -12,13 +12,13 @@
   xmlm
   tyxml
   icalendar
-  mirage-crypto
+  digestif
   mirage-crypto-rng
+  mirage-crypto-rng-mirage
   base64
   caldav.webmachine
   cohttp-lwt
   mirage-clock
-  mirage-random
   sexplib
   ohex
   metrics))
