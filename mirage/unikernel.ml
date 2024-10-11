@@ -15,50 +15,32 @@ module K = struct
   (* TODO: make it possible to enable and disable schemes without providing a port *)
   let http_port =
     let doc = Arg.info ~doc:"Listening HTTP port." ["http"] ~docv:"PORT" in
-    Arg.(value & opt (some int) None doc)
+    Mirage_runtime.register_arg Arg.(value & opt (some int) None doc)
 
   let https_port =
     let doc = Arg.info ~doc:"Listening HTTPS port." ["https"] ~docv:"PORT" in
-    Arg.(value & opt (some int) None doc)
+    Mirage_runtime.register_arg Arg.(value & opt (some int) None doc)
 
   let tls_proxy =
     let doc = "TLS proxy in front (use https://<hostname> as base url)." in
     let doc = Arg.info ~doc ["tls-proxy"] in
-    Arg.(value & flag doc)
+    Mirage_runtime.register_arg Arg.(value & flag doc)
 
   let admin_password =
     let doc = Arg.info ~doc:"Password for the administrator." ["admin-password"] ~docv:"STRING" in
-    Arg.(value & opt (some string) None doc)
+    Mirage_runtime.register_arg Arg.(value & opt (some string) None doc)
 
   let remote =
     let doc = Arg.info ~doc:"Location of calendar data. Use suffix #foo to specify branch 'foo'." [ "remote" ] ~docv:"REMOTE" in
-    Arg.(required & opt (some string) None doc)
+    Mirage_runtime.register_arg Arg.(required & opt (some string) None doc)
 
   let tofu =
     let doc = Arg.info ~doc:"If a user does not exist, create them and give them a new calendar." [ "tofu" ] in
-    Arg.(value & flag doc)
+    Mirage_runtime.register_arg Arg.(value & flag doc)
 
   let hostname =
     let doc = Arg.info ~doc:"Hostname to use." [ "host"; "name" ] ~docv:"STRING" in
-    Arg.(required & opt (some string) None doc)
-
-  type t = {
-      http_port : int option;
-      https_port : int option;
-      tls_proxy : bool;
-      admin_password : string option;
-      remote : string;
-      tofu : bool;
-      hostname : string;
-    }
-
-  let setup =
-    Term.(const(fun http_port https_port tls_proxy admin_password remote
-                 tofu hostname ->
-              { http_port; https_port; tls_proxy; admin_password; remote;
-                tofu; hostname })
-            $ http_port $ https_port $ tls_proxy $ admin_password $ remote $
-            tofu $ hostname)
+    Mirage_runtime.register_arg Arg.(required & opt (some string) None doc)
 end
 
 module Main (R : Mirage_crypto_rng_mirage.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
@@ -157,7 +139,7 @@ module Main (R : Mirage_crypto_rng_mirage.S) (Clock: Mirage_clock.PCLOCK) (_ : s
     in
     S.make ~conn_closed ~callback ()
 
-  let start _random _clock ctx keys http zap arg =
+  let start _random _clock ctx keys http zap =
     let dynamic = author, user_agent, http_req in
     let init_http port config store =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);
@@ -170,38 +152,38 @@ module Main (R : Mirage_crypto_rng_mirage.S) (Clock: Mirage_clock.PCLOCK) (_ : s
       http tls @@ serve dynamic @@ opt_static_file zap @@ Webdav_server.dispatch config store
     in
     let config host =
-      Caldav.Webdav_config.config ~do_trust_on_first_use:arg.K.tofu host
+      Caldav.Webdav_config.config ~do_trust_on_first_use:(K.tofu ()) host
     in
     let init_store_for_runtime config =
-      Git_kv.connect ctx arg.remote >>= fun store ->
-      Dav.connect store config arg.admin_password
+      Git_kv.connect ctx (K.remote ()) >>= fun store ->
+      Dav.connect store config (K.admin_password ())
     in
-    match arg.http_port, arg.https_port with
+    match K.http_port (), K.https_port () with
     | None, None ->
       Logs.err (fun m -> m "no port provided for neither HTTP nor HTTPS, exiting") ;
       exit Mirage_runtime.argument_error
     | Some port, None ->
       let scheme, base_port =
-        if arg.tls_proxy then "https", 443 else "http", port
+        if K.tls_proxy () then "https", 443 else "http", port
       in
-      let config = config @@ Caldav.Webdav_config.host ~scheme ~port:base_port ~hostname:arg.hostname () in
+      let config = config @@ Caldav.Webdav_config.host ~scheme ~port:base_port ~hostname:(K.hostname ()) () in
       init_store_for_runtime config >>=
       init_http port config
     | None, Some port ->
-      (if arg.tls_proxy then begin
+      (if K.tls_proxy () then begin
           Logs.err (fun m -> m "Both https port and TLS proxy chosen, please choose only one");
           exit Mirage_runtime.argument_error
         end);
-      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port ~hostname:arg.hostname () in
+      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port ~hostname:(K.hostname ()) () in
       init_store_for_runtime config >>=
       init_https port config
     | Some http_port, Some https_port ->
-      (if arg.tls_proxy then begin
+      (if K.tls_proxy () then begin
           Logs.err (fun m -> m "Both https port and TLS proxy chosen, please choose only one");
           exit Mirage_runtime.argument_error
         end);
       Server_log.info (fun f -> f "redirecting on %d/HTTP to %d/HTTPS" http_port https_port);
-      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname:arg.hostname () in
+      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname:(K.hostname ()) () in
       init_store_for_runtime config >>= fun store ->
       Lwt.pick [
         http (`TCP http_port) @@ serve dynamic @@ redirect https_port ;
