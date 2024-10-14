@@ -40,7 +40,9 @@ module K = struct
 
   let hostname =
     let doc = Arg.info ~doc:"Hostname to use." [ "host"; "name" ] ~docv:"STRING" in
-    Mirage_runtime.register_arg Arg.(required & opt (some string) None doc)
+    Arg.(required & opt (some string) None doc)
+
+  let host = Mirage_runtime.register_arg hostname
 end
 
 module Main (R : Mirage_crypto_rng_mirage.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
@@ -166,7 +168,7 @@ module Main (R : Mirage_crypto_rng_mirage.S) (Clock: Mirage_clock.PCLOCK) (_ : s
       let scheme, base_port =
         if K.tls_proxy () then "https", 443 else "http", port
       in
-      let config = config @@ Caldav.Webdav_config.host ~scheme ~port:base_port ~hostname:(K.hostname ()) () in
+      let config = config @@ Caldav.Webdav_config.host ~scheme ~port:base_port ~hostname:(K.host ()) () in
       init_store_for_runtime config >>=
       init_http port config
     | None, Some port ->
@@ -174,7 +176,7 @@ module Main (R : Mirage_crypto_rng_mirage.S) (Clock: Mirage_clock.PCLOCK) (_ : s
           Logs.err (fun m -> m "Both https port and TLS proxy chosen, please choose only one");
           exit Mirage_runtime.argument_error
         end);
-      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port ~hostname:(K.hostname ()) () in
+      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port ~hostname:(K.host ()) () in
       init_store_for_runtime config >>=
       init_https port config
     | Some http_port, Some https_port ->
@@ -183,7 +185,7 @@ module Main (R : Mirage_crypto_rng_mirage.S) (Clock: Mirage_clock.PCLOCK) (_ : s
           exit Mirage_runtime.argument_error
         end);
       Server_log.info (fun f -> f "redirecting on %d/HTTP to %d/HTTPS" http_port https_port);
-      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname:(K.hostname ()) () in
+      let config = config @@ Caldav.Webdav_config.host ~scheme:"https" ~port:https_port ~hostname:(K.host ()) () in
       init_store_for_runtime config >>= fun store ->
       Lwt.pick [
         http (`TCP http_port) @@ serve dynamic @@ redirect https_port ;
