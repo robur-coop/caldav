@@ -43,6 +43,11 @@ module K = struct
     Arg.(required & opt (some string) None doc)
 
   let host = Mirage_runtime.register_arg hostname
+
+  let language =
+    let doc = Arg.info ~doc:"Default interface language for CalDAVZAP. Will be added to the configuration as 'globalInterfaceLanguage=\"VAL\"'" [ "language" ] ~docv:"LANGUAGE" in
+    Mirage_runtime.register_arg Arg.(value & opt (some string) None doc)
+
 end
 
 module Main (R : Mirage_crypto_rng_mirage.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
@@ -103,6 +108,12 @@ module Main (R : Mirage_crypto_rng_mirage.S) (Clock: Mirage_clock.PCLOCK) (_ : s
     in
     Zap.get zap_data (Mirage_kv.Key.v path) >>= function
     | Ok data ->
+      let data =
+        if String.equal path "config.js" && K.language () <> None then
+          let lang = Option.get (K.language ()) in
+          data ^ "globalInterfaceLanguage=\"" ^ lang ^ "\";"
+        else data
+      in
       let mime_type = Magic_mime.lookup path in
       let headers = Cohttp.Header.init_with "content-type" mime_type in
       S.respond ~headers ~status:`OK ~body:(`String data) ()
