@@ -75,7 +75,7 @@ let main =
       package "caldav";
       package ~min:"0.1.3" "icalendar";
       package ~min:"0.8.7" "fmt";
-      package ~min:"0.0.3" "git-kv";
+      package ~min:"0.1.0" "git-kv";
     ]
   in
   main ~packages:direct_dependencies "Unikernel.Main"
