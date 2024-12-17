@@ -61,3 +61,4 @@ description: """
 A CalDAV server (RFC 4791). Supports everything from the robur-coop/icalendar
 library. Also includes a partial WebDAV implementation.
 """
+x-maintenance-intent: [ "(latest)" ]
