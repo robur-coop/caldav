@@ -57,7 +57,7 @@ end
 let src = Logs.Src.create "webdav.robur.io" ~doc:"webdav api logs"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module Make(R : Mirage_crypto_rng_mirage.S)(Clock : Mirage_clock.PCLOCK)(Fs: Webdav_fs.S) = struct
+module Make(Fs: Webdav_fs.S) = struct
   open Lwt.Infix
 
   type state = Fs.t
@@ -1479,10 +1479,10 @@ let make_group fs now config name members =
       Log.err (fun m -> m "error in make_group batch: %s" msg);
       Error `Internal_server_error
 
-  let generate_salt () = R.generate 15
+  let generate_salt () = Mirage_crypto_rng.generate 15
 
   let connect fs config admin_pass =
-    let now = Ptime.v (Clock.now_d_ps ()) in
+    let now = Mirage_ptime.now () in
     Fs.valid fs config >>= fun fs_is_valid ->
     match fs_is_valid, admin_pass with
     | Error (`Msg msg), None ->

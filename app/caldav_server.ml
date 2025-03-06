@@ -123,16 +123,15 @@ open Cohttp_lwt_unix_test
 module Http_server = Cohttp_lwt_unix.Server
 module Body = Cohttp_lwt.Body
 
-module KV_mem = Mirage_kv_mem.Make(Pclock)
 module KV_RW = struct
-  include KV_mem
+  include Mirage_kv_mem
   let batch t f = f t >|= fun r -> Ok r
 end
-module Dav_fs = Caldav.Webdav_fs.Make(Pclock)(KV_RW)
+module Dav_fs = Caldav.Webdav_fs.Make(KV_RW)
 
-module Webdav_server = Caldav.Webdav_server.Make(Mirage_crypto_rng)(Pclock)(Dav_fs)(Http_server)
+module Webdav_server = Caldav.Webdav_server.Make(Dav_fs)(Http_server)
 
-module Api = Caldav.Webdav_api.Make(Mirage_crypto_rng)(Pclock)(Dav_fs)
+module Api = Caldav.Webdav_api.Make(Dav_fs)
 
 let header, content, footer =
 {|BEGIN:VCALENDAR
@@ -211,10 +210,10 @@ let ts fs =
 
 let () =
   ignore (Lwt_main.run (
-      Mirage_crypto_rng_lwt.initialize (module Mirage_crypto_rng.Fortuna);
+      Mirage_crypto_rng_unix.use_default ();
       Logs.set_reporter (Logs_fmt.reporter ~dst:Format.std_formatter ()) ;
       Logs.set_level (Some Logs.Info);
-      KV_mem.connect () >>= fun fs ->
+      Mirage_kv_mem.connect () >>= fun fs ->
       let now = Ptime.epoch in
       Api.connect fs config (Some "foo") >>= fun _fs ->
       let rec go = function

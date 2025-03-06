@@ -1,12 +1,11 @@
 module Xml = Caldav.Webdav_xml
-module KV_mem = Mirage_kv_mem.Make(Pclock)
 module KV_RW = struct
   open Lwt.Infix
-  include KV_mem
+  include Mirage_kv_mem
   let batch t f = f t >|= fun r -> Ok r
 end
-module Fs = Caldav.Webdav_fs.Make(Pclock)(KV_RW)
-module Dav = Caldav.Webdav_api.Make(Mirage_crypto_rng)(Pclock)(Fs)
+module Fs = Caldav.Webdav_fs.Make(KV_RW)
+module Dav = Caldav.Webdav_api.Make(Fs)
 module Properties = Caldav.Properties
 
 open Caldav.Webdav_config
@@ -550,7 +549,7 @@ let appendix_b_data acl =
   let open Lwt.Infix in
   Lwt_main.run (
     let now = Ptime.v (1, 0L) in
-    KV_mem.connect () >>= fun res_fs ->
+    Mirage_kv_mem.connect () >>= fun res_fs ->
     let props name = Properties.create_dir acl now name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
@@ -568,7 +567,7 @@ let appendix_b_1_data acl =
   let open Lwt.Infix in
   Lwt_main.run (
     let now = Ptime.v (1, 0L) in
-    KV_mem.connect () >>= fun res_fs ->
+    Mirage_kv_mem.connect () >>= fun res_fs ->
     let props name = Properties.create_dir acl now name in
     Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
     Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
@@ -1185,8 +1184,8 @@ let parse_propupdate_xml_tests = [
 let state_testable =
   let module M = struct
     type t = Fs.t
-    let pp = KV_mem.pp
-    let equal = KV_mem.equal
+    let pp = Mirage_kv_mem.pp
+    let equal = Mirage_kv_mem.equal
   end in
   (module M : Alcotest.TESTABLE with type t = M.t)
 
@@ -1225,7 +1224,7 @@ let mkcol_success () =
   let res_fs, r =
     Lwt_main.run (
       let now = Ptime.v (1, 0L) in
-      KV_mem.connect () >>= fun res_fs ->
+      Mirage_kv_mem.connect () >>= fun res_fs ->
       let props =
         let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
         let acl = [ (`Href (Uri.of_string "/principals/testuser/"), `Grant [`All])] in
@@ -1235,7 +1234,7 @@ let mkcol_success () =
       Dav.make_user res_fs now config ~name:"testuser" ~password:"abc" ~salt:"" >>= fun _ ->
       Fs.mkdir res_fs (`Dir ["home"]) properties >>= fun _ ->
       Fs.mkdir res_fs (`Dir [ "home" ; "special" ]) props >>= fun _ ->
-      KV_mem.connect () >>= fun fs ->
+      Mirage_kv_mem.connect () >>= fun fs ->
       Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
       Dav.make_user fs now config ~name:"testuser" ~password:"abc" ~salt:"" >>= fun _ ->
       Dav.mkcol fs config ~path:"home/special/" ~user:"testuser" (`Other "MKCOL") now ~data:body >|= function
@@ -1249,13 +1248,13 @@ let delete_test () =
   let res_fs, r =
     Lwt_main.run (
       let open Lwt.Infix in
-      KV_mem.connect () >>= fun res_fs ->
+      Mirage_kv_mem.connect () >>= fun res_fs ->
       let creation_time = Ptime.v (1, 0L) in
       let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
       let dir_props = Properties.create_dir ~resourcetype [] creation_time "Special Resource" in
       Fs.write_property_map res_fs (`Dir []) dir_props >>= fun _ -> 
       Fs.mkdir res_fs (`Dir ["parent"]) dir_props >>= fun _ ->
-      KV_mem.connect () >>= fun fs ->
+      Mirage_kv_mem.connect () >>= fun fs ->
       let updated_time = Ptime.v (10, 0L) in
       let dir_props' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Pcdata (Ptime.to_rfc3339 updated_time) ]) dir_props in
       let dir_props'' = Properties.unsafe_add (Xml.dav_ns, "getetag") ([], [ Pcdata "01dd76faf69851ed6896ae419391363c" ]) dir_props' in
@@ -1269,7 +1268,7 @@ let delete_and_update_parent_mtime_and_etag () =
   let res_fs, r =
     Lwt_main.run (
       let open Lwt.Infix in
-      KV_mem.connect () >>= fun res_fs ->
+      Mirage_kv_mem.connect () >>= fun res_fs ->
       let creation_time = Ptime.v (1, 0L) in
       let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ] in
       let initial_props = [ ((Xml.dav_ns, "getetag"), ([], [Xml.Pcdata "myetag"]))] in
@@ -1278,7 +1277,7 @@ let delete_and_update_parent_mtime_and_etag () =
       Fs.write_property_map res_fs (`Dir []) dir_props >>= fun _ -> 
       Fs.mkdir res_fs (`Dir ["parent"]) dir_props >>= fun _ ->
       Fs.write res_fs (`File ["parent" ; "child"]) "" file_props >>= fun _ ->
-      KV_mem.connect () >>= fun fs ->
+      Mirage_kv_mem.connect () >>= fun fs ->
       let updated_time = Ptime.v (10, 0L) in
       let dir_props' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Pcdata (Ptime.to_rfc3339 updated_time) ]) dir_props in
       let dir_props'' = Properties.unsafe_add (Xml.dav_ns, "getetag") ([], [ Pcdata "01dd76faf69851ed6896ae419391363c" ]) dir_props' in
@@ -1293,7 +1292,7 @@ let write_and_update_parent_mtime () =
   let res_fs, r =
     Lwt_main.run (
       let open Lwt.Infix in
-      KV_mem.connect () >>= fun res_fs ->
+      Mirage_kv_mem.connect () >>= fun res_fs ->
       let creation_time = Ptime.v (1, 0L) in
       let resourcetype = [ Xml.node ~ns:"http://example.com/ns/" "special-resource" [] ; Xml.node ~ns:Xml.caldav_ns "calendar" [] ] in
       let dir_props = Properties.create_dir ~resourcetype allow_all_acl creation_time "Special Resource" in
@@ -1301,7 +1300,7 @@ let write_and_update_parent_mtime () =
       Fs.mkdir res_fs (`Dir ["principals"]) dir_props >>= fun _ ->
       Fs.mkdir res_fs (`Dir ["principals" ; "karl"]) dir_props >>= fun _ ->
       Fs.mkdir res_fs (`Dir ["parent"]) dir_props >>= fun _ ->
-      KV_mem.connect () >>= fun fs ->
+      Mirage_kv_mem.connect () >>= fun fs ->
       let updated_time = Ptime.v (20, 0L) in
       let dir_props' = Properties.unsafe_add (Xml.dav_ns, "getlastmodified") ([], [ Xml.Pcdata (Ptime.to_rfc3339 updated_time) ]) dir_props in
       let dir_props'' = Properties.unsafe_add (Xml.dav_ns, "getetag") ([], [ Xml.Pcdata "7f3af2eea3e815059f400874ebbad45c" ]) dir_props' in
@@ -1343,11 +1342,11 @@ let proppatch_success () =
   let res_fs, r =
     Lwt_main.run (
       let now = Ptime.v (1, 0L) in
-      KV_mem.connect () >>= fun res_fs ->
+      Mirage_kv_mem.connect () >>= fun res_fs ->
       let properties = Properties.create_dir allow_all_acl now "home" in
       let props = Properties.unsafe_add (Xml.dav_ns, "displayname") ([], [ Xml.Pcdata "Special Resource"]) properties in
       Fs.mkdir res_fs (`Dir ["home"]) props >>= fun _ ->
-      KV_mem.connect () >>= fun fs ->
+      Mirage_kv_mem.connect () >>= fun fs ->
       Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
       Dav.proppatch fs config ~path:"home" ~user:"testuser" ~data:body >|= function
       | Error e -> (res_fs, Error e)
@@ -1359,7 +1358,7 @@ let proppatch_success () =
 let make_user () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1371,7 +1370,7 @@ let make_user () =
 let make_user_same_name () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1384,7 +1383,7 @@ let make_user_same_name () =
 let make_user_delete_make () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1402,7 +1401,7 @@ let make_user_delete_make () =
 let delete_non_existing_user () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     Dav.delete_user fs config "test" >>= function
     | Ok () -> invalid_arg "expected to fail deleting a non-existing user"
     | Error _ -> Lwt.return_unit)
@@ -1410,7 +1409,7 @@ let delete_non_existing_user () =
 let delete_user_is_a_group () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_group fs now config "testgroup" [] >>= function
     | Error _ -> invalid_arg "expected make group to succeed"
@@ -1463,7 +1462,7 @@ let check_group_no_user fs group =
 let make_group () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1478,7 +1477,7 @@ let make_group () =
 let make_group_conflict () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1490,7 +1489,7 @@ let make_group_conflict () =
 let make_group_user_not_exists () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_group fs now config "test" ["a"; "b"; "c"] >>= function
     | Ok _ -> invalid_arg "expected making a group with non-existing users to fail"
@@ -1499,7 +1498,7 @@ let make_group_user_not_exists () =
 let make_group_nested () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_group fs now config "test" [] >>= function
     | Error _ -> invalid_arg "expected making a group to succeed"
@@ -1511,7 +1510,7 @@ let make_group_nested () =
 let replace_group_members_one () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1529,7 +1528,7 @@ let replace_group_members_one () =
 let replace_group_members_two () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1544,7 +1543,7 @@ let replace_group_members_two () =
 let replace_group_members_three () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     Dav.replace_group_members fs config "test" [] >>= function
     | Error _ -> Lwt.return_unit
     | Ok _ -> invalid_arg "expected replace_group_members to fail")
@@ -1552,7 +1551,7 @@ let replace_group_members_three () =
 let replace_group_members_four () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_group fs now config "testgroup" [] >>= function
     | Error _ -> invalid_arg "expected make_group to succeed"
@@ -1564,7 +1563,7 @@ let replace_group_members_four () =
 let make_group_and_enroll () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1580,7 +1579,7 @@ let make_group_and_enroll () =
 let make_group_and_enroll_no_user () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_group fs now config "testgroup" [] >>= function
     | Error _ -> invalid_arg "expected making a group to succeed"
@@ -1592,7 +1591,7 @@ let make_group_and_enroll_no_user () =
 let make_group_and_enroll_group () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_group fs now config "testgroup" [] >>= function
     | Error _ -> invalid_arg "expected making a group to succeed"
@@ -1604,7 +1603,7 @@ let make_group_and_enroll_group () =
 let make_group_and_resign () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1621,7 +1620,7 @@ let make_group_and_resign () =
 let make_group_and_resign_not_member () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1638,7 +1637,7 @@ let make_group_and_resign_not_member () =
 let make_group_and_resign_not_existing_group () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1650,7 +1649,7 @@ let make_group_and_resign_not_existing_group () =
 let make_group_and_resign_not_existing_user () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
       Dav.make_group fs now config "testgroup" [] >>= function
       | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1662,7 +1661,7 @@ let make_group_and_resign_not_existing_user () =
 let make_group_and_resign_no () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     Dav.resign fs config ~member:"test" ~group:"testgroup" >>= function
     | Ok _ -> invalid_arg "expected resign to fail (group and user do not exist)"
     | Error _ -> Lwt.return_unit)
@@ -1670,7 +1669,7 @@ let make_group_and_resign_no () =
 let make_group_and_resign_not_a_group () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1682,7 +1681,7 @@ let make_group_and_resign_not_a_group () =
 let delete_group_fine () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1698,7 +1697,7 @@ let delete_group_fine () =
 let delete_group_no_group () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     Dav.delete_group fs config "testgroup" >>= function
     | Error _ -> Lwt.return_unit
     | Ok _ -> invalid_arg "expected delete group to fail")
@@ -1706,7 +1705,7 @@ let delete_group_no_group () =
 let delete_group_is_a_user () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1718,7 +1717,7 @@ let delete_group_is_a_user () =
 let write_calendar_event () =
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let now = Ptime.v (1, 0L) in
     Dav.make_user fs now config ~name:"test" ~password:"foo" ~salt:"" >>= function
     | Error _ -> invalid_arg "expected make_user to succeed"
@@ -1793,7 +1792,7 @@ let principal_url principal = Uri.with_path config.host (Fs.to_string (`Dir [ co
 
 let test_fs_with_acl path acl user user_props = Lwt_main.run (
   let open Lwt.Infix in
-  KV_mem.connect () >>= fun fs ->
+  Mirage_kv_mem.connect () >>= fun fs ->
   let props = Properties.create_dir acl (Ptime_clock.now ()) path in
   Fs.mkdir fs (`Dir [path]) props >>= fun _ ->
   Fs.mkdir fs (`Dir [config.principals ; user] ) user_props >|= fun _ ->
@@ -2263,7 +2262,7 @@ let default_group () =
      created, it should have joined the default_groups groups *)
   Lwt_main.run (
     let open Lwt.Infix in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let creation_time = Ptime.v (1, 0L) in
     let robur_principal =
       [], [Xml.dav_node "href" [ Xml.Pcdata (Uri.to_string @@ principal_url "robur") ]]
@@ -2314,7 +2313,7 @@ let proppatch_acl_existing () =
   Lwt_main.run (
     let open Lwt.Infix in
     let now = Ptime.v (1, 0L) in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let properties = Properties.create_dir allow_all_acl now "home" in
     Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
     Dav.make_user fs now config ~name:"testuser" ~password:"abc" ~salt:"" >>= fun _ ->
@@ -2345,7 +2344,7 @@ let proppatch_acl_non_existing () =
   Lwt_main.run (
     let open Lwt.Infix in
     let now = Ptime.v (1, 0L) in
-    KV_mem.connect () >>= fun fs ->
+    Mirage_kv_mem.connect () >>= fun fs ->
     let properties = Properties.create_dir allow_all_acl now "home" in
     Fs.mkdir fs (`Dir ["home"]) properties >>= fun _ ->
     Dav.proppatch fs config ~path:"home" ~user:"testuser" ~data:body >|= function
@@ -2425,7 +2424,7 @@ END:VCALENDAR
     let open Lwt.Infix in
     Lwt_main.run (
       let now = Ptime.v (1, 0L) in
-      KV_mem.connect () >>= fun res_fs ->
+      Mirage_kv_mem.connect () >>= fun res_fs ->
       let props name = Properties.create_dir allow_all_acl now name in
       Fs.mkdir res_fs (`Dir [ "bernard" ]) (props "bernard") >>= fun _ ->
       Fs.mkdir res_fs (`Dir [ "bernard" ; "work" ]) (props "bernard/work") >>= fun _ ->
@@ -2462,5 +2461,5 @@ let tests = [
 let () =
   Logs.set_reporter (Logs_fmt.reporter ());
   Printexc.record_backtrace true;
-  Mirage_crypto_rng_unix.initialize (module Mirage_crypto_rng.Fortuna);
+  Mirage_crypto_rng_unix.use_default ();
   Alcotest.run "WebDAV tests" tests

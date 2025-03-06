@@ -74,7 +74,7 @@ module type KV_RW = sig
   val batch : t -> (t -> 'a Lwt.t) -> ('a, [> `Msg of string ]) result Lwt.t
 end
 
-module Make (Pclock : Mirage_clock.PCLOCK) (Fs:KV_RW) = struct
+module Make (Fs:KV_RW) = struct
 
   open Lwt.Infix
 
@@ -217,7 +217,7 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:KV_RW) = struct
       Log.err (fun m -> m "error while getting properties for %s %a" (to_string f_or_d) pp_error e) ;
       None
     | Ok str ->
-      Some (Properties.of_sexp (Ptime.v (Pclock.now_d_ps ())) (Sexplib.Sexp.of_string str))
+      Some (Properties.of_sexp (Mirage_ptime.now ()) (Sexplib.Sexp.of_string str))
 
   let etag fs f_or_d =
     let key = data @@ to_string f_or_d in
@@ -250,11 +250,11 @@ module Make (Pclock : Mirage_clock.PCLOCK) (Fs:KV_RW) = struct
           | Error (`RFC3339 (_, err)) ->
             Log.err (fun m -> m "error %a parsing %s as RFC3339 time, using current time"
                         Ptime.pp_rfc3339_error err ts);
-            Ptime.v (Pclock.now_d_ps ())
+            Mirage_ptime.now ()
         end
       | _ ->
         Log.err (fun m -> m "error while retrieving getlastmodified, not present or wrong XML data, using current time");
-        Ptime.v (Pclock.now_d_ps ())
+        Mirage_ptime.now ()
     in
     Ok ts
 

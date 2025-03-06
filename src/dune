@@ -14,11 +14,10 @@
   icalendar
   digestif
   mirage-crypto-rng
-  mirage-crypto-rng-mirage
+  mirage-ptime
   base64
   caldav.webmachine
   cohttp-lwt
-  mirage-clock
   sexplib
   ohex
   metrics))
