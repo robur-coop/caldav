@@ -1,4 +1,10 @@
-## v0.2.3 (2025-10-12)
+## v0.2.4 (2025-03-17)
+
+* Defunctorise, adapt to cohttp 6 API (#47 @hannesm)
+* unikernel: update to mirage 4.9, add a boot argument for the language
+  of CalDAVzap (#45 @hannesm, #43 @reynir)
+
+## v0.2.3 (2024-10-12)
 
 * update to mirage-crypto 1.0 changes, remove mirage-random dependency
   (#40 @hannesm)
