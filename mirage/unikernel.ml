@@ -50,15 +50,15 @@ module K = struct
 
 end
 
-module Main (R : Mirage_crypto_rng_mirage.S) (Clock: Mirage_clock.PCLOCK) (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
+module Main (_ : sig end) (KEYS: Mirage_kv.RO) (S: Cohttp_mirage.Server.S) (Zap : Mirage_kv.RO) = struct
 
   let author = Lwt.new_key ()
   and user_agent = Lwt.new_key ()
   and http_req = Lwt.new_key ()
 
-  module X509 = Tls_mirage.X509(KEYS)(Clock)
+  module X509 = Tls_mirage.X509(KEYS)
   module Store = struct
-    include Git_kv.Make(Clock)
+    include Git_kv
     let batch t f =
       let author =
         Fmt.str "%a (via caldav unikernel)"
@@ -70,9 +70,9 @@ module Main (R : Mirage_crypto_rng_mirage.S) (Clock: Mirage_clock.PCLOCK) (_ : s
       in
       change_and_push t ~author ~message f
   end
-  module Dav_fs = Caldav.Webdav_fs.Make(Clock)(Store)
-  module Dav = Caldav.Webdav_api.Make(R)(Clock)(Dav_fs)
-  module Webdav_server = Caldav.Webdav_server.Make(R)(Clock)(Dav_fs)(S)
+  module Dav_fs = Caldav.Webdav_fs.Make(Store)
+  module Dav = Caldav.Webdav_api.Make(Dav_fs)
+  module Webdav_server = Caldav.Webdav_server.Make(Dav_fs)(S)
 
   let tls_init kv =
     Lwt.catch (fun () ->
@@ -152,7 +152,7 @@ module Main (R : Mirage_crypto_rng_mirage.S) (Clock: Mirage_clock.PCLOCK) (_ : s
     in
     S.make ~conn_closed ~callback ()
 
-  let start _random _clock ctx keys http zap =
+  let start ctx keys http zap =
     let dynamic = author, user_agent, http_req in
     let init_http port config store =
       Server_log.info (fun f -> f "listening on %d/HTTP" port);

@@ -12,8 +12,7 @@
   cohttp-lwt-unix
   mirage-kv
   ounit2
-  mirage-clock-unix
   tcpip
   tcpip.stack-socket
-  mirage-crypto-rng-lwt
+  mirage-crypto-rng.unix
   mirage-kv-mem))

@@ -7,6 +7,5 @@
   caldav
   lwt.unix
   mirage-kv-mem
-  mirage-crypto-rng.unix
-  mirage-clock-unix)
+  mirage-crypto-rng.unix)
  (package caldav))

@@ -72,4 +72,4 @@ module type KV_RW = sig
   val batch : t -> (t -> 'a Lwt.t) -> ('a, [> `Msg of string ]) result Lwt.t
 end
 
-module Make (_ : Mirage_clock.PCLOCK) (Fs: KV_RW) : S with type t = Fs.t
+module Make (Fs: KV_RW) : S with type t = Fs.t

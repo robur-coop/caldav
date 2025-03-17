@@ -101,19 +101,18 @@ let to_status x = Cohttp.Code.code_of_status (x :> Cohttp.Code.status_code)
 module type Server = sig
   val respond :
     ?headers:Cohttp.Header.t ->
-    ?flush:bool ->
     status:Cohttp.Code.status_code ->
     body:Cohttp_lwt.Body.t ->
     unit ->
     (Cohttp.Response.t * Cohttp_lwt.Body.t) Lwt.t
 end
 
-module Make (R : Mirage_crypto_rng_mirage.S) (Clock : Mirage_clock.PCLOCK) (Fs : Webdav_fs.S) (S: Server) = struct
+module Make (Fs : Webdav_fs.S) (S: Server) = struct
 
   module WmClock = struct
     let now () =
-      let ts = Clock.now_d_ps () in
-      let span = Ptime.Span.v ts in
+      let ts = Mirage_ptime.now () in
+      let span = Ptime.to_span ts in
       match Ptime.Span.to_int_s span with
       | None -> 0
       | Some seconds -> seconds
@@ -121,7 +120,7 @@ module Make (R : Mirage_crypto_rng_mirage.S) (Clock : Mirage_clock.PCLOCK) (Fs :
 
   module Wm = Webmachine.Make(Lwt)(WmClock)
 
-  module Dav = Webdav_api.Make(R)(Clock)(Fs)
+  module Dav = Webdav_api.Make(Fs)
 
   class handler config fs now generate_salt = object(self)
     inherit [Cohttp_lwt.Body.t] Wm.resource
@@ -583,7 +582,7 @@ module Make (R : Mirage_crypto_rng_mirage.S) (Clock : Mirage_clock.PCLOCK) (Fs :
     (* Perform route dispatch. If [None] is returned, then the URI path did not
      * match any of the route patterns. In this case the server should return a
      * 404 [`Not_found]. *)
-    let now () = Ptime.v (Clock.now_d_ps ()) in
+    let now () = Mirage_ptime.now () in
     let start = now () in
     Access_log.debug (fun m -> m "request %s %s"
                         (Cohttp.Code.string_of_method (Cohttp.Request.meth request))
