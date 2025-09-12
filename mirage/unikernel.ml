@@ -38,11 +38,9 @@ module K = struct
     let doc = Arg.info ~doc:"If a user does not exist, create them and give them a new calendar." [ "tofu" ] in
     Mirage_runtime.register_arg Arg.(value & flag doc)
 
-  let hostname =
-    let doc = Arg.info ~doc:"Hostname to use." [ "host"; "name" ] ~docv:"STRING" in
-    Arg.(required & opt (some string) None doc)
-
-  let host = Mirage_runtime.register_arg hostname
+  let host =
+    let doc = Arg.info ~doc:"Hostname to use." [ "host" ] ~docv:"STRING" in
+    Mirage_runtime.register_arg Arg.(required & opt (some string) None doc)
 
   let language =
     let doc = Arg.info ~doc:"Default interface language for CalDAVZAP. Will be added to the configuration as 'globalInterfaceLanguage=\"VAL\"'" [ "language" ] ~docv:"LANGUAGE" in
