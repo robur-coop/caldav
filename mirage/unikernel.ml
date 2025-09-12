@@ -39,7 +39,7 @@ module K = struct
     Mirage_runtime.register_arg Arg.(value & flag doc)
 
   let host =
-    let doc = Arg.info ~doc:"Hostname to use." [ "host"; "name" ] ~docv:"STRING" in
+    let doc = Arg.info ~doc:"Hostname to use." [ "host" ] ~docv:"STRING" in
     Mirage_runtime.register_arg Arg.(required & opt (some string) None doc)
 
   let language =
