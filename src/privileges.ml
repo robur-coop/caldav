@@ -56,7 +56,7 @@ let can_read_prop fqname privileges =
   | ns, "password" when ns = Xml.robur_ns -> false
   | _ -> true
 
-let required verb ~target_exists = match verb with
+let required verb ~is_calendar ~target_exists = match verb with
   | `GET -> `Read, `Target
   | `HEAD -> `Read, `Target
   | `OPTIONS -> `Read, `Target
@@ -65,6 +65,7 @@ let required verb ~target_exists = match verb with
   | `Other "PROPPATCH" -> `Write_properties, `Target
   | `Other "ACL" -> `Write_acl, `Target
   | `Other "PROPFIND" -> `Read, `Target (* plus <D:read-acl> and <D:read-current-user-privilege-set> as needed, see check in Properties.find_many *)
+  | `DELETE when is_calendar -> `Unbind, `Target
   | `DELETE -> `Unbind, `Parent
   | `Other "MKCOL" -> `Bind, `Parent
   | `Other "MKCALENDAR" -> `Bind, `Parent

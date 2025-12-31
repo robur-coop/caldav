@@ -8,4 +8,4 @@ val is_met : requirement:Xml.privilege -> Xml.privilege list -> bool
 
 val can_read_prop : Xml.fqname -> Xml.privilege list -> bool
 
-val required : Cohttp.Code.meth -> target_exists:bool -> Xml.privilege * [ `Parent | `Target ]
+val required : Cohttp.Code.meth -> is_calendar:bool -> target_exists:bool -> Xml.privilege * [ `Parent | `Target ]
