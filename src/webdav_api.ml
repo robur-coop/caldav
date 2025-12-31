@@ -1045,7 +1045,11 @@ module Make(Fs: Webdav_fs.S) = struct
   let access_granted_for_acl fs config http_verb ~path ~user =
     properties_for_current_user fs config user >>= fun auth_user_props ->
     Fs.exists fs path >>= fun target_exists ->
-    let requirement, target_or_parent = Privileges.required http_verb ~target_exists in
+    let is_calendar = match String.split_on_char '/' path with
+      | "" :: "calendars" :: _ :: "" :: [] -> true
+      | _ -> false
+    in
+    let requirement, target_or_parent = Privileges.required http_verb ~is_calendar ~target_exists in
     read_target_or_parent_properties fs path target_or_parent >>= fun resource_props ->
     privilege_met fs requirement ~auth_user_props resource_props >|= function
     | `Forbidden -> false
