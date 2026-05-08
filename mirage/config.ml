@@ -1,4 +1,4 @@
-(* mirage >= 4.10.0 & < 4.11.0 *)
+(* mirage >= 4.10.0 & < 4.12.0 *)
 open Mirage
 
 let net = generic_stackv4v6 default_network
